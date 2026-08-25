@@ -372,6 +372,6 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 merged (PR #1). The generator, pydantic contract, `tiny` fixture (frozen, 13
 files, manifest) and `medium` profile exist; `make seed PROFILE=tiny` twice
 reports `manifest match`; the gate refuses fixture drift. Review round 1
-next; then Phase 2 (staging on DuckDB). Open BACKLOG rows: **5**.
+next; then Phase 2 (staging on DuckDB). Open BACKLOG rows: **6**.
 
 (Update this section at the end of every working day.)
