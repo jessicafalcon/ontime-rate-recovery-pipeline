@@ -94,7 +94,7 @@ make review-gate SPEC=specs/phase-1-event-contract.md && make seed PROFILE=tiny 
 | 2 | `tests/test_knobs.py::test_users_knob`, `::test_days_knob`, `::test_tz_mix_knob`, `::test_upload_fault_rate_knob`, `::test_delivery_fault_rate_knob`, `::test_reachable_width_knob`, `::test_duplicate_injector_knob`, `::test_late_arrival_injector_knob`, `::test_clock_skew_injector_knob` |
 | 3 | `tests/test_truth_isolation.py::test_pipeline_dirs_never_mention_truth`, `::test_generator_truth_writer_is_confined`, `::test_generator_confinement_is_not_vacuous` |
 | 4 | `tests/test_models.py::test_envelope_columns_are_exactly_the_contract`, `::test_invalid_event_is_never_written`, `::test_event_type_and_properties_agree`, `::test_truth_cause_is_one_of_five` |
-| 5 | `tests/test_fixture.py::test_committed_tiny_matches_manifest`, `tests/test_review_tools.py::test_gate_fails_on_manifest_change_without_freeze_declaration`, `::test_gate_fails_on_fixture_change_without_manifest_change`, `tests/test_makefile.py::test_freeze_requires_confirm_from_the_command_line` |
+| 5 | `tests/test_fixture.py::test_committed_tiny_matches_manifest`, `tests/test_review_tools.py::test_gate_fails_on_manifest_change_without_freeze_declaration`, `::test_gate_fails_on_fixture_change_without_manifest_change`, `tests/test_makefile.py::test_freeze_requires_confirm_from_the_command_line`, `tests/test_generator.py::test_seed_reports_drift_and_exits_1`, `::test_freeze_copies_out_to_fixtures_and_writes_manifest` |
 | 6 | `tests/test_profiles.py::test_every_profile_validates`, `::test_medium_generates_and_is_not_committed` |
 
 ## Invariants (REQUIRED)
@@ -122,6 +122,8 @@ generator/manifest.py::compute                  constant-return:{}
 generator/manifest.py::matches                  constant-return:True
 generator/writer.py::write_jsonl                invert-guard
 generator/profiles.py::load                     invert-guard
+generator/cli.py::seed                          constant-return:0
+generator/cli.py::freeze                        constant-return:0
 scripts/review_gate.py::check_fixtures          constant-return:True
 scripts/review_gate.py::freeze_declarations     constant-return:set()
 ```

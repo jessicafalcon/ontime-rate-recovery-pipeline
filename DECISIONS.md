@@ -131,6 +131,22 @@ annotated **Superseded by …** in place and never deleted.
 - **Organic opens are drawn around the latent centre** (`organic_opens_per_day`
   knob, Gaussian with σ = width/2). Phase 5's signal has to exist in the
   fixture; the knob is named here because PHASES did not list it.
+- **Single-tz fallback emits one row, and the fix keeps the RNG stream (review
+  round 1, 2026-08-25).** `build_dims` used `others = [...] or tzs`, so a
+  one-entry `tz_mix` with `tz_change_rate > 0` produced two contiguous rows with
+  the *same* tz — a no-op SCD2 "change" that falsifies invariant 8. The `rng.random()`
+  draw still fires whenever `days > 1` (only `rng.choice`/`rng.randint` are now
+  skipped when there is no other tz), so multi-tz profiles consume the stream
+  identically and `tiny`/`medium` re-freeze byte-for-byte (`seed OK … manifest
+  match`). Rejected: short-circuiting before the `rng.random()` draw (would shift
+  every later user's tz and drift the fixtures).
+- **`cli.py::seed`/`freeze` mutations are `constant-return:0`, not `delete-call`
+  (review round 1).** `delete-call` removes statement-level calls *to* the named
+  function, and `freeze` is only ever `return freeze(...)` in `main` (a value, not
+  a statement), so `freeze delete-call` finds no hit and errors. `constant-return:0`
+  keeps each function's normal success return while skipping every side effect —
+  the exact "the drift-exit / write path never ran" mutation — killed by the two
+  new `test_generator.py` tests.
 
 ### Phase 0
 

@@ -14,7 +14,9 @@ def circular_distance_hours(a: float, b: float) -> float:
     return min(d, 24.0 - d)
 
 
-def open_probability(local_send_hour: float, user: LatentUser, window_minutes: int):
+def open_probability(
+    local_send_hour: float, user: LatentUser, window_minutes: int
+) -> float:
     """P(open within the window): 0.9 inside the reachable window, decaying
     with the distance outside it; a shorter window lowers it proportionally."""
     d = circular_distance_hours(local_send_hour, user.reachable_center_local_hour)

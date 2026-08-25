@@ -97,7 +97,9 @@ def local_hour_of(ts: datetime, tz: str) -> float:
     return lt.hour + lt.minute / 60.0 + lt.second / 3600.0
 
 
-def assign_cause(profile: Profile, user: LatentUser, local_hour: float, rng: Random):
+def assign_cause(
+    profile: Profile, user: LatentUser, local_hour: float, rng: Random
+) -> Cause:
     if rng.random() < profile.delivery_fault_rate:
         return Cause.delivery_fault
     if rng.random() < profile.clock_skew_rate:
@@ -124,7 +126,9 @@ def _send_time(
     return send, tz
 
 
-def _prompt(ctx: _Ctx, uid: str, cohort: str, pid: str, send: datetime, cause: Cause):
+def _prompt(
+    ctx: _Ctx, uid: str, cohort: str, pid: str, send: datetime, cause: Cause
+) -> None:
     p = ctx.profile
     rng = ctx.rng
     window = timedelta(minutes=p.window_minutes)
@@ -277,7 +281,7 @@ def inject_duplicates(events: list[Event], profile: Profile, rng: Random) -> Non
 
 def inject_late_arrival(
     events: list[Event], late: set[str], profile: Profile, rng: Random
-):
+) -> None:
     """A late export batch: every event of a late prompt lands hours later.
     Received times are untouched, so the cause is untouched."""
     for i, ev in enumerate(events):
@@ -293,7 +297,7 @@ def inject_late_arrival(
 
 def inject_clock_skew(
     events: list[Event], skewed: set[str], profile: Profile, rng: Random
-):
+) -> None:
     """Forward client-clock skew beyond SKEW_MAX_MIN on the client-side events of
     an `unattributed` prompt: received − client goes negative past the bound."""
     for i, ev in enumerate(events):

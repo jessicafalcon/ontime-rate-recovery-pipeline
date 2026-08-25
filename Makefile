@@ -54,6 +54,8 @@ seed:
 # fixtures/<PROFILE>/ and writes the manifest. Overwrites a committed golden, so
 # CONFIRM=yes must come from the COMMAND LINE ($(origin CONFIRM)); Python refuses
 # any other origin or value. A re-freeze needs a DECISIONS entry + a `Freeze:`
-# line in the phase spec (the review gate checks the diff).
+# line in the phase spec (the review gate checks the diff). $(origin CONFIRM)
+# needs no _Q: make's origin words are a closed, quote-free set (command line /
+# environment / file / …), so user input can never reach that argument.
 freeze:
 	uv run python -m generator.cli freeze $(call _Q,$(value PROFILE)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'

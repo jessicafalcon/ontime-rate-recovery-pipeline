@@ -1,5 +1,6 @@
 """Invariant 1 (byte-identical, arrival order), 4 (events consistent with the
-assigned cause), 7 (seed never writes under fixtures/)."""
+assigned cause), 6 (seed reports drift and exits 1; freeze writes the fixture),
+7 (seed never writes under fixtures/)."""
 
 from __future__ import annotations
 
@@ -125,3 +126,31 @@ def test_seed_never_writes_under_fixtures(tmp_path: Path, monkeypatch) -> None:
     assert cli.seed("tiny") == 0
     assert manifest.compute(frozen) == before
     assert (tmp_path / "out" / "tiny" / "raw").is_dir()
+
+
+def test_seed_reports_drift_and_exits_1(tmp_path: Path, monkeypatch, capsys) -> None:
+    """seed against a manifest that disagrees with regenerated output exits 1 (the
+    no-silent-drift guarantee) — the failure path the matching case can't reach."""
+    monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
+    monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
+    monkeypatch.setattr(cli, "ROOT", tmp_path)  # only for the print's relative_to
+    frozen = tmp_path / "fix" / "tiny" / manifest.NAME
+    frozen.parent.mkdir(parents=True)
+    frozen.write_text(manifest.render({"raw/events_2026-01-05.jsonl": "0" * 64}))
+    assert cli.seed("tiny") == 1
+    assert "seed DRIFT" in capsys.readouterr().out
+
+
+def test_freeze_copies_out_to_fixtures_and_writes_manifest(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """freeze's success path copies data/out/<p>/ over fixtures/<p>/ and writes a
+    manifest the fixture then matches — the write path no refusal test reaches."""
+    monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
+    monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
+    monkeypatch.setattr(cli, "ROOT", tmp_path)  # only for the print's relative_to
+    assert cli.seed("tiny") == 0  # no frozen manifest yet → nothing to drift against
+    assert cli.freeze("tiny", "yes", "command line") == 0
+    dst = tmp_path / "fix" / "tiny"
+    assert (dst / manifest.NAME).exists()
+    assert manifest.matches(dst, dst / manifest.NAME)

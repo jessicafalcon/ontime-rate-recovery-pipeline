@@ -28,6 +28,16 @@ def test_dim_user_is_valid_scd2() -> None:
         assert len({r.cohort_id for r in rows}) == 1
 
 
+def test_single_tz_mix_never_changes_tz() -> None:
+    """A one-entry tz_mix has no other tz to change to, so every user stays one
+    row even at tz_change_rate=1 — no spurious same-tz SCD2 'change' (invariant 8)."""
+    rows = _rows_of(gen(tz_mix={"UTC": 1.0}, tz_change_rate=1.0))
+    assert rows  # the profile still produced users
+    for uid, user_rows in rows.items():
+        assert len(user_rows) == 1, uid
+        assert user_rows[0].valid_to is None
+
+
 def test_tz_change_users_have_two_rows_and_events_use_the_right_one() -> None:
     out = gen(tz_change_rate=1.0)
     rows = _rows_of(out)

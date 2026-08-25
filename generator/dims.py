@@ -24,8 +24,9 @@ def build_dims(
         tz = rng.choices(tzs, weights)[0]
         signup = (sim_start - timedelta(days=rng.randint(1, 90))).date()
         first_from = datetime.combine(signup, datetime.min.time(), sim_start.tzinfo)
-        if profile.days > 1 and rng.random() < profile.tz_change_rate:
-            others = [t for t in tzs if t != tz] or tzs
+        change_wanted = profile.days > 1 and rng.random() < profile.tz_change_rate
+        others = [t for t in tzs if t != tz]
+        if change_wanted and others:
             new_tz = rng.choice(others)
             change = sim_start + timedelta(days=rng.randint(1, profile.days - 1))
             rows.append(_row(uid, tz, cohort_of[uid], signup, first_from, change))
