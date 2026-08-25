@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The offline review gate (ported from the predecessor project; DECISIONS "Process").
+"""The offline review gate (DECISIONS "Process").
 
 One process, one line per check, exit 1 on any FAIL, never a traceback. Run via
 `make review-gate [SPEC=specs/<file>.md] [BASE=main] [DELETED=a,b]` — the first
@@ -65,7 +65,7 @@ def check_make(target: str, root: Path) -> bool:
 def check_lint(root: Path) -> bool:
     """Read-only lint. NOT `make lint`: pre-commit's ruff-format hook rewrites
     files in place — in exactly the failing case — and a gate must not share a
-    medium with the tree it judges (predecessor PR #35 coherence audit r1-B7)."""
+    medium with the tree it judges."""
     ok = True
     for name, cmd in (
         ("ruff check", ["uv", "run", "ruff", "check", "."]),
@@ -104,7 +104,7 @@ def _collect(root: Path) -> tuple[int, str, set[str]]:
     `-q` reaches pytest. Two `-q` (pyproject's + ours) is quiet level 2, and under
     pytest 9 `--collect-only -qq` prints a terse `path: count` summary with no
     `::` node ids — so the parser below collected NOTHING and every Evidence id
-    looked missing (predecessor fix/review-gate-pytest9). One `-q` prints ids on 8+9.
+    looked missing. One `-q` prints node ids on pytest 8 and 9.
     Safe to clear: repo addopts carries only `-q`; testpaths / pythonpath are
     separate ini keys, and this call already passes `-p no:cacheprovider` itself
     (that clearing addopts changes only verbosity is pinned by count parity in
@@ -257,7 +257,7 @@ def check_records(spec_text: str, root: Path, base: str) -> bool:
 def _historical(hit: str) -> bool:
     """The two sanctioned history forms (check_docs._living) exempt a hit ONLY in
     a markdown file: `~~` is a prose convention, never a reason to skip a line of
-    Python (`~~x` is legal) — predecessor security review, PR #35 round 2."""
+    Python (`~~x` is legal)."""
     path = hit.split(":", 1)[0]
     return path.endswith(".md") and ("~~" in hit or "<!-- historical -->" in hit)
 

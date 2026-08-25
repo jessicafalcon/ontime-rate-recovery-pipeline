@@ -61,7 +61,7 @@ def suite_env(tree: Path, otr_int: str = "0") -> dict[str, str]:
     "0" by default (the sweep EXECUTES tests — integration stays skipped by the
     marker AND by `--ignore=tests/integration`, two independent pinned guards);
     the gate passes "1" so --collect-only can list integration ids (collects,
-    never executes). Never credentials (predecessor security review, PR #35)."""
+    never executes). Never credentials."""
     return {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", str(Path.home())),
@@ -83,7 +83,7 @@ def die(msg: str, code: int = 2) -> None:
 def exec_under_suite_env(tree: Path, cmd: list[str]) -> int:
     """Run `cmd` with cwd=tree under `suite_env(tree)`; forward its exit code.
     argv list, never a shell — `env -i $(…)` word-split a HOME with a space into
-    a different command (predecessor security review, PR #35)."""
+    a different command."""
     code, out = run(cmd, tree, env=suite_env(tree))
     sys.stdout.write(out)
     return code

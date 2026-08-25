@@ -42,20 +42,17 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Process
 
-- **Workflow machinery ported from `ctv-attribution-pipeline` (2026-08-24).**
-  Three things carried, verbatim in shape: a frozen spec layer (`specs/TEMPLATE.md`
+- **Workflow machinery established before any pipeline code (2026-08-24).**
+  Three load-bearing mechanisms: a frozen spec layer (`specs/TEMPLATE.md`
   with Invariants / Evidence / Record updates / Threat model and one DONE
   command); phase = branch = PR = review gate (`/review-round`, STOP-on-findings,
   the two-round cap, the developer merges); determinism + golden fixtures so
   "did it work" is a command. The offline gates (`review_gate.py`, `mutate.py`,
-  `check_docs.py`, `round_tag.py`, `review_common.py`) are ported with their
-  hardening intact (unexpanded `$(value)` + `_Q` quoting, `unexport`, spec path
-  validation, literal-only `constant-return`, worktree-registry check). Not
-  carried: generated-block checks and the trace list in `check_docs.py` (empty
-  `TRACES` until a phase names a guard), and every ClickHouse/Redpanda-specific
-  rule. Why not write fresh: the rules encode failures already paid for (PR #35's
-  five rounds; the vacuous-green collect bug); re-deriving them costs the same
-  bugs again.
+  `check_docs.py`, `round_tag.py`, `review_common.py`) carry their hardening from
+  day one (unexpanded `$(value)` + `_Q` quoting, `unexport`, spec path
+  validation, literal-only `constant-return`, worktree-registry check) rather
+  than earning it incident by incident. `check_docs.py` starts with an empty
+  `TRACES` list, filled as phases name guards.
 - **Phases re-cut by verifiable capability, not by layer.** The brief's Phase 1
   ("ingestion & staging") mixed contract, generator, loader and dbt; it is now
   Phases 1–2 with the frozen fixture landing first, so every later phase is a
@@ -80,7 +77,7 @@ annotated **Superseded by …** in place and never deleted.
 - **No runtime dependency in Phase 0.** `pyproject.toml` carries only the dev
   group; every runtime package lands in the phase that needs it (allowlist in
   CLAUDE.md) so `uv.lock` diffs stay attributable.
-- **`OTR_INT` is the integration marker env** (was `CTV_INT`): the reduced child
+- **`OTR_INT` is the integration marker env**: the reduced child
   env passes it, `conftest.py` skips `tests/integration/` unless it is `1`. No
   integration suite exists yet; the plumbing is kept so Phase 8 (Airflow) and
   Phase 9 (BigQuery) add tests without touching the gate.

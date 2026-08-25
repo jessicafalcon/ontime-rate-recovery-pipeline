@@ -6,8 +6,8 @@
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — unexpanded and single-quoted — and are unexported, so a value like
-# `SPEC='$(shell …)'` from the environment runs no shell (predecessor
-# fix/make-quote-profile; threat model in specs/TEMPLATE.md). PROFILE / TARGET /
+# `SPEC='$(shell …)'` from the environment runs no shell (threat
+# model in specs/TEMPLATE.md). PROFILE / TARGET /
 # CONFIRM are reserved here so a later phase cannot add them un-guarded.
 unexport SPEC BASE DELETED CONFIRM PROFILE TARGET
 _Q = '$(subst ','\'',$(1))'

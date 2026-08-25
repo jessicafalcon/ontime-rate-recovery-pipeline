@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The round boundary: `review-round-N` annotated tags, written and read by CODE.
 
-Predecessor DECISIONS "Process" (2026-08-23): model text never reaches an oracle;
+DECISIONS "Process": model-written text never reaches an oracle;
 the tag carries a round number and nothing else. The tag is a RANGE BOUNDARY —
 round N+1 reviews `review-round-N..HEAD` — so the only things that matter are
 that it names the right round and that it is on this branch's history.

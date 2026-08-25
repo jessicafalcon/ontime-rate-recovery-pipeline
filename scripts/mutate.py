@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The mutation sweep (predecessor retrospective: the strongest gate findings came
-from "delete this call — does the suite notice?"). Run via `make mutate SPEC=…`.
+"""The mutation sweep (the strongest gate findings come from "delete this call —
+does the suite notice?"). Run via `make mutate SPEC=…`.
 
 Reads the spec's Invariants section for ONE fenced block:
 

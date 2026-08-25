@@ -9,11 +9,10 @@ dependencies", or the package and why; any pinned-version feature the phase
 relies on is a STOP-and-ask if it turns out unsupported.>
 
 Four sections marked REQUIRED are mandatory; a spec without them is not
-approvable (CLAUDE.md → Workflow rules). Origin: in the predecessor project ~60 %
-of review-gate findings were record files lagging code, ~15 % were spec clauses
-written before the predecessor landed, and three review rounds once found bugs
-in the previous round's fixes because the spec pinned a mechanism instead of the
-property it had to keep. A spec carries at most ~6 pinned decisions / Done-when
+approvable (CLAUDE.md → Workflow rules). They exist because the common review
+failures are record files lagging code, spec clauses written before the prior
+phase landed, and review rounds finding bugs in the previous round's fixes
+because the spec pinned a mechanism instead of the property it had to keep. A spec carries at most ~6 pinned decisions / Done-when
 items — split larger scope into sub-phases (7a/7b), each from this template.
 
 ## Why
@@ -164,7 +163,7 @@ For each such target, the behaviour — and the test pinning it — for:
   only from the command line;
 - for a cloud target: what it costs if it runs twice, and what it destroys.
 
-The settled shape from the predecessor project: one Python process validates
+The settled shape: one Python process validates
 the value (`[a-z0-9_]+`), derives every path from it (no path argument exists to
 escape with), prompts on a tty, then acts; every recipe is one line; every user
 variable reaches Python unexpanded and single-quoted (`$(call _Q,$(value VAR))`)

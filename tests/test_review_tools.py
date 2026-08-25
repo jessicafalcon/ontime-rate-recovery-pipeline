@@ -84,7 +84,7 @@ def repo(tmp_path: Path, monkeypatch) -> Path:
     (root / "pkg" / "mod.py").write_text(MOD)
     # Mirror the real repo's pytest config: `addopts = "-q"`. The gate adds its own
     # `-q`, so this is what makes `--collect-only` doubly quiet — the exact
-    # condition that hid the pytest-9 `path: count` bug (predecessor gate fix).
+    # condition that hid the pytest-9 `path: count` bug.
     # Without it the fixture never reproduced the real repo and the evidence tests
     # were vacuous.
     (root / "pyproject.toml").write_text('[tool.pytest.ini_options]\naddopts = "-q"\n')

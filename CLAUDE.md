@@ -319,8 +319,8 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 0 in progress (`phase-0-skeleton`).** The workflow machinery is ported
-from `ctv-attribution-pipeline` and retargeted; the three load-bearing docs
+**Phase 0 in progress (`phase-0-skeleton`).** The workflow machinery (spec
+layer, review gate, mutation sweep, agents) and the three load-bearing docs
 exist; no pipeline code. Next: approve the docs, run `/review-round 1` on
 this branch, merge, then Phase 1 (event contract + generator + frozen tiny
 fixture) — its spec is the first commit on `phase-1-event-contract`.

@@ -3,8 +3,8 @@
 Structural guard: no pipeline directory may even mention truth or the truth
 path. Only the generator (which writes it), `eval/` (which scores against it),
 and tests may. Every new top-level package on the pipeline path is added to
-PIPELINE_DIRS in the phase that creates it — the predecessor project shipped
-two packages without the guard and caught it only at a review gate.
+PIPELINE_DIRS in the phase that creates it — a guard added after the package it
+guards is added late.
 """
 
 from pathlib import Path

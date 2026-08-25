@@ -85,16 +85,16 @@ scripts/check_docs.py::token_present          constant-return:True
 
 ## Pinned decisions (do not re-litigate)
 
-- **Port, don't rewrite.** The gate scripts keep their hardening verbatim
+- **Hardened from day one.** The gate scripts carry their full hardening
   (unexpanded `$(value)` + `_Q`, `unexport`, literal-only `constant-return`,
-  registry check) — satisfies invariants 1–3. Rejected: a lighter gate; the
-  rules encode paid-for failures.
+  registry check) — satisfies invariants 1–3. Rejected: a lighter gate that earns
+  each rule by incident.
 - **`check_docs.py` keeps four checks with an empty-ish TRACES list** —
   satisfies invariant 4. Rejected: dropping traces until needed; the token
   matcher is the part that catches renames and costs nothing empty.
 - **Truth isolation greps directories that may not exist** — satisfies
-  invariant 5. Rejected: adding the test in Phase 2; the predecessor shipped
-  packages without it.
+  invariant 5. Rejected: adding the test in Phase 2; a guard added after the
+  package it guards is added late.
 - **Hook wiring local-only; `.claude/settings.json` committed as `{}`.**
   Rejected: committing the hook wiring (auto-executes an inbound branch).
 - **Python 3.12 pinned** (DECISIONS Phase 0).
@@ -141,7 +141,7 @@ cannot see; threat model is "mistakes, not a user who controls the environment".
 ## Review & stack risk
 
 - **code-reviewer** (mandatory): the ported scripts against this CLAUDE.md
-  (no ClickHouse/lake assumptions left; `OTR_INT` marker consistent).
+  (`OTR_INT` marker consistent; no stale assumptions).
 - **security-reviewer**: triggered — CI workflow added. Checks SHA pins,
   `--locked`, no credentials, `.gitignore` coverage.
 - **functionality-tester**: DONE command; runs `make mutate

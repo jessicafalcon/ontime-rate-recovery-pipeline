@@ -106,9 +106,8 @@ Cap is the architect's call: compare this table to round N−1's.
 ```
 
 The two-round rule (CLAUDE.md Workflow rules, "Review cap") is applied by a
-human reading two tables, not by this command — rounds 3–5 of the predecessor's
-PR #35 were spent hardening a cap parser the design did not need; it was
-deleted (DECISIONS "Process").
+human reading two tables, not by this command — a parser that decided the cap
+would itself become the thing under review (DECISIONS "Process").
 
 Close with the one line the developer decides on per finding: **fix
 (wording/test-only)**, **fix amendment (design change → spec paragraph first,
