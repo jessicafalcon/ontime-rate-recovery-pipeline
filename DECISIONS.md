@@ -94,6 +94,30 @@ annotated **Superseded by …** in place and never deleted.
   make-target, trace (three tooling rows) and BACKLOG-count checks all run;
   TRACES grows as phases name guards. Why not drop it: the BACKLOG-count sentence is
   the one two branches always rewrite.
+- **`unexport` is hygiene, not a guard (review round 1).** All three review
+  agents falsified the threat-model cell "env value never reaches the recipe":
+  make imports environment variables into its table regardless. The real
+  guard is `$(call _Q,$(value VAR))` (unexpanded, single-quoted — no shell, no
+  make function, from either origin) plus Python validation; the only way to
+  tell command line from environment is `$(origin VAR)`, which every future
+  `CONFIRM` knob must test inside its one-line recipe. Pinned by
+  `tests/test_makefile.py` running `make -n` under both origins.
+- **The sweep runs a baseline first.** A red HEAD used to print `KILLED` for
+  every mutation and `mutate OK`; now the unmutated suite must be green in the
+  worktree or the sweep refuses. Rejected: trusting `make test` from the gate —
+  `make mutate` is also run standalone.
+- **`PIPELINE_DIRS` is derived from the tree.** Every top-level package not in
+  an explicit exemption set (`tests`, `scripts`, `eval`, `generator`, docs,
+  specs, fixtures, infra, dotdirs) is a pipeline directory; a new package is
+  guarded the day it appears, and a positive-control test proves the grep
+  finds a planted reference. Rejected: a hand-maintained list (vacuous on day
+  one, forgotten later).
+- **Every docs-guard check has a negative pin.** Round 1 showed all four could
+  be disabled without a red test; each now has a tmp-tree test and a mutation
+  line. The `make <target>` regex requires backticks, like the gate's.
+- **CI hardening.** `permissions: contents: read`, `persist-credentials:
+  false`, pre-commit `rev` pinned to the tag's commit SHA, a concurrency group.
+  The run-tests hook runs pytest under the same reduced env as the sweep.
 - **Plans are link-checked only.** `check_docs.py` scans CLAUDE.md, README and
   the living docs for `make <target>` existence, but ARCHITECTURE.md, PHASES.md
   and PROJECT_BRIEF.md name targets not built yet by design. First thing the
