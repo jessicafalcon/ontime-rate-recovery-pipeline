@@ -208,7 +208,7 @@ make review-gate SPEC=specs/phase-2-staging.md && make dbt-build PROFILE=tiny
 
 ```mutations
 loader/load.py::event_files                     constant-return:[]
-loader/load.py::load_dims                       delete-call
+loader/load.py::load_dims                       constant-return:0
 loader/load.py::create_raw_tables               delete-call
 loader/cli.py::validate_name                    invert-guard
 loader/cli.py::drop_db                          constant-return:0
