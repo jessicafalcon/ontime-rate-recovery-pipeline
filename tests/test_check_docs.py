@@ -81,3 +81,93 @@ def test_backlog_count_matches_today() -> None:
     errors: list[str] = []
     check_docs.check_backlog_count(errors)
     assert errors == []
+
+
+# ---- negative pins (review round 1: every check could be disabled unnoticed)
+
+
+def _tree(tmp_path: Path, monkeypatch, files: dict[str, str]) -> None:
+    for rel, text in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "DOCS", tmp_path / "docs")
+    monkeypatch.setattr(check_docs, "README", tmp_path / "README.md")
+    monkeypatch.setattr(check_docs, "CLAUDE", tmp_path / "CLAUDE.md")
+    monkeypatch.setattr(check_docs, "BACKLOG", tmp_path / "BACKLOG.md")
+    monkeypatch.setattr(check_docs, "_PLANS", [])
+    monkeypatch.setattr(check_docs, "_LINK_ONLY", [])
+
+
+def test_check_links_reports_a_broken_link_and_anchor(tmp_path, monkeypatch) -> None:
+    _tree(
+        tmp_path,
+        monkeypatch,
+        {
+            "CLAUDE.md": (
+                "[a](docs/X.md) [b](docs/gone.md) [c](docs/X.md#nope) [d](#zzz)\n"
+            ),
+            "docs/X.md": "## Real\n",
+        },
+    )
+    errors: list[str] = []
+    check_docs.check_links(errors)
+    assert any("broken link" in e and "gone.md" in e for e in errors)
+    assert any("broken anchor" in e and "#nope" in e for e in errors)
+    assert any("broken anchor #zzz" in e for e in errors)
+    assert len(errors) == 3
+
+
+def test_check_make_targets_reports_an_unknown_target(tmp_path, monkeypatch) -> None:
+    _tree(
+        tmp_path,
+        monkeypatch,
+        {
+            "CLAUDE.md": "run `make real` then `make nope`; make sure it works\n"
+            "```\nmake fenced-gone\n```\n",
+            "Makefile": "real:\n\techo\n",
+        },
+    )
+    errors: list[str] = []
+    check_docs.check_make_targets(errors)
+    assert sorted(errors) == sorted(
+        [
+            "CLAUDE.md: names `make nope` but the Makefile has no such target",
+            "CLAUDE.md: names `make fenced-gone` but the Makefile has no such target",
+        ]
+    )  # prose "make sure" is not a target
+
+
+def test_check_traces_reports_a_renamed_token(tmp_path, monkeypatch) -> None:
+    _tree(tmp_path, monkeypatch, {"x.py": "def label_accuracy_v2():\n    pass\n"})
+    monkeypatch.setattr(
+        check_docs, "TRACES", [("x.py", "label_accuracy"), ("missing.py", "f")]
+    )
+    errors: list[str] = []
+    check_docs.check_traces(errors)
+    assert len(errors) == 2
+    assert "no longer contains the token 'label_accuracy'" in errors[0]
+    assert "does not exist" in errors[1]
+
+
+def test_check_backlog_count_reports_a_mismatch(tmp_path, monkeypatch) -> None:
+    _tree(
+        tmp_path,
+        monkeypatch,
+        {
+            "CLAUDE.md": "Open BACKLOG rows: **3**.\n",
+            "BACKLOG.md": "| **one** | s | t |\n| ~~**done**~~ | s | t |\n",
+        },
+    )
+    errors: list[str] = []
+    check_docs.check_backlog_count(errors)
+    assert errors == [
+        "CLAUDE.md says Open BACKLOG rows: **3** but BACKLOG.md has 1 un-struck rows"
+    ]
+
+
+def test_absolute_link_inside_the_repo_is_still_rejected() -> None:
+    root = check_docs.ROOT
+    inside = root / "CLAUDE.md"
+    assert not check_docs._inside_root(str(inside), inside)

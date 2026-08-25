@@ -22,8 +22,11 @@ Exactly four operators:
                       key in the function; else the column list after the first
                       `order by` in a string constant
 
-Each mutation: `git worktree add --detach <tmp>/mutate-*/mut-N HEAD` (the system
-temp dir; the working tree is never touched; the mutation is applied to HEAD), the
+First the BASELINE: the unmutated suite runs in its own worktree and must be green,
+or the sweep refuses (a red HEAD would otherwise print KILLED for every line).
+Each mutation: `git worktree add --detach <tmp>/mutate-*/mut-N HEAD` (a temp dir
+from `tempfile.mkdtemp`, which honours TMPDIR; the working tree is never touched;
+the mutation is applied to HEAD), the
 offline suite runs there with THIS interpreter and a REDUCED environment
 (`review_common.suite_env`: PATH, HOME, PYTHONPATH, OTR_INT — never credentials),
 the worktree is removed in a `finally` that also compares `git worktree list`
@@ -93,8 +96,12 @@ def parse_mutations(spec_text: str) -> list[Mutation]:
     for ln in m.group(1).splitlines():
         if not ln.strip() or ln.lstrip().startswith("#"):
             continue
-        parts = ln.split()
-        if len(parts) != 2 or "::" not in parts[0]:
+        parts = ln.split(
+            None, 1
+        )  # `path::func` then the operator (a literal may hold spaces)
+        if len(parts) == 2:
+            parts[1] = parts[1].strip()
+        if len(parts) != 2 or "::" not in parts[0] or " " in parts[0]:
             raise Refused(
                 f"refusing: bad mutations line (want `path.py::func op`): {ln!r}"
             )
@@ -214,8 +221,10 @@ def apply(m: Mutation, tree: Path) -> str:
     if m.op == "delete-call":
         pred = _calls(m.func)
         hits: list[str] = []
-        _, files = run(["git", "ls-files", "--", "*.py"], tree)
-        for rel in files.split():
+        _, files = run(["git", "ls-files", "-z", "--", "*.py"], tree)
+        for rel in files.split("\0"):
+            if not rel:
+                continue
             if rel.startswith("tests/"):
                 continue
             src = Source(tree / rel, tree)
@@ -291,6 +300,29 @@ def _swap_sort_key(src: Source, fn: ast.AST, m: Mutation) -> int:
 # -------------------------------------------------------------- worktree
 
 
+def _registry_changed(before: str, after: str) -> bool:
+    """`git status` cannot see .git/worktrees; this can (invariant: registry
+    restored)."""
+    return after != before
+
+
+def _baseline_is_green(root: Path, scratch: Path, suite: list[str]) -> bool:
+    """Run the UNMUTATED suite in its own worktree (invariant: sweep baseline).
+    Red here means every later KILLED would be meaningless."""
+    tree = scratch / "baseline"
+    try:
+        code, out = run(
+            ["git", "worktree", "add", "--detach", "-q", str(tree), "HEAD"], root
+        )
+        if code != 0:
+            return False
+        code, _ = run(suite, tree, env=suite_env(tree))
+        return code == 0
+    finally:
+        run(["git", "worktree", "remove", "--force", str(tree)], root)
+        run(["git", "worktree", "prune"], root)
+
+
 def sweep(
     mutations: list[Mutation], root: Path, scratch: Path, suite: list[str]
 ) -> int:
@@ -300,6 +332,11 @@ def sweep(
     registry_changed = False  # latched: its own outcome, never a mutation verdict
     run(["git", "worktree", "prune"], root)  # a SIGKILLed earlier sweep leaves one
     _, before = run(["git", "worktree", "list"], root)
+    if not _baseline_is_green(root, scratch, suite):
+        raise Refused(
+            "refusing: the unmutated suite is red at HEAD — fix the suite before "
+            "judging mutations (a red baseline would print KILLED for every line)"
+        )
     for i, m in enumerate(mutations, 1):
         tree = scratch / f"mut-{i}"
         try:
@@ -327,7 +364,7 @@ def sweep(
             run(["git", "worktree", "remove", "--force", str(tree)], root)
             run(["git", "worktree", "prune"], root)
             _, after = run(["git", "worktree", "list"], root)
-            if after != before and not registry_changed:
+            if _registry_changed(before, after) and not registry_changed:
                 # `git status` cannot see .git/worktrees; this can. Reported once.
                 print(f"REGISTRY worktree registry changed after {m}:\n{after}")
                 registry_changed = True
@@ -355,9 +392,11 @@ def main(argv: list[str] | None = None) -> int:
         mutations = parse_mutations(spec.read_text())
     except Refused as e:
         die(str(e))
-    scratch = Path(tempfile.mkdtemp(prefix="mutate-"))  # system temp; no env knob
+    scratch = Path(tempfile.mkdtemp(prefix="mutate-"))  # honours TMPDIR
     try:
         return sweep(mutations, ROOT, scratch, SUITE)
+    except Refused as e:
+        die(str(e))
     finally:
         try:
             scratch.rmdir()  # empty once every worktree was removed

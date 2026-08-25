@@ -25,6 +25,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from review_common import make_targets  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 README = ROOT / "README.md"
@@ -32,7 +35,10 @@ CLAUDE = ROOT / "CLAUDE.md"
 BACKLOG = ROOT / "BACKLOG.md"
 
 _LINK = re.compile(r"\[[^\]]*\]\((?!https?://)(?!#)([^)]+)\)")
-_MAKE = re.compile(r"\bmake ([a-z][a-z0-9-]*)")
+# A target is NAMED only inside backticks or on a fenced-block command line —
+# prose "make sure" is not a target (review round 1: the bare `\bmake` form).
+_MAKE_TICK = re.compile(r"`make ([a-z][a-z0-9-]*)[^`]*`")
+_MAKE_FENCE_LINE = re.compile(r"^\s*make ([a-z][a-z0-9-]*)", re.M)
 _FENCE = re.compile(r"```.*?```", re.S)
 _TICK = re.compile(r"`([^`\n]*)`")
 
@@ -133,26 +139,21 @@ def _living(text: str) -> str:
     )
 
 
-def make_targets() -> set[str]:
-    """Target names declared in the Makefile (column-0 rule lines; `a b:` declares
-    two; `name :=` is an assignment)."""
-    targets: set[str] = set()
-    mk = ROOT / "Makefile"
-    if not mk.exists():
-        return targets
-    for line in mk.read_text().splitlines():
-        m = re.match(r"^([A-Za-z0-9_.%/ -]+?)\s*:(?!=)", line)
-        if m and not line.startswith((" ", "\t", "#", ".PHONY")):
-            targets.update(n for n in m.group(1).split() if not n.startswith("."))
-    return targets
+def named_targets(text: str) -> set[str]:
+    """`make <target>` named as a command in `text`: backticked, or a command line
+    inside a fenced block. Prose is never a target."""
+    found: set[str] = set(_MAKE_TICK.findall(_FENCE.sub("", text)))
+    for block in _FENCE.findall(text):
+        found.update(_MAKE_FENCE_LINE.findall(block))
+    return found
 
 
 def check_make_targets(errors: list[str]) -> int:
     n = 0
-    known = make_targets()
+    known = make_targets(ROOT)
     for md in _docs():
         text = _living(md.read_text())
-        for t in sorted(set(_MAKE.findall(text))):
+        for t in sorted(named_targets(text)):
             n += 1
             if t not in known:
                 errors.append(

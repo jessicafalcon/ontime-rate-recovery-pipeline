@@ -34,12 +34,24 @@ from review_common import (  # noqa: E402
     ROOT,
     Refused,
     die,
+    make_targets,
     resolve_spec,
     run,
     section,
     suite_env,
     tail,
 )
+
+_BASE = re.compile(r"^[\w./-]+$")
+
+
+def resolve_base(arg: str) -> str:
+    """`--base` is a git rev used as an argv token: a safe charset and never a
+    leading `-` (git would read it as an option). Refused, never a traceback."""
+    if not arg or not _BASE.match(arg) or arg.startswith("-"):
+        raise Refused(f"refusing: BASE must be a plain git rev, got {arg!r}")
+    return arg
+
 
 _TEST_ID = re.compile(r"(tests/[\w./-]+\.py)?::(test_\w+)")
 _MAKE = re.compile(r"`make ([a-z][a-z0-9-]*)[^`]*`")  # backticked form ONLY
@@ -136,25 +148,6 @@ def _collect(root: Path) -> tuple[int, str, set[str]]:
 def collected_ids(root: Path) -> set[str]:
     """Just the id set — the direct-use / test entry point."""
     return _collect(root)[2]
-
-
-def make_targets(root: Path) -> set[str]:
-    """Target names declared in the Makefile: every whitespace-separated name left
-    of the first `:` on a column-0 rule line (`a b:` declares two; `name:=v` and
-    `name :=` are assignments, not rules). A set lookup, never `make -n <name>`:
-    `-n` still recurses through `$(MAKE)` lines (the test-int-* recipes run
-    `$(MAKE) …` / a `CONFIRM=yes` teardown), so existence-checking a name
-    scraped from spec text must not invoke make. The derivation is pinned
-    against the `.PHONY` line (tests/test_review_tools.py), not trusted."""
-    targets: set[str] = set()
-    mk = root / "Makefile"
-    if not mk.exists():
-        return targets
-    for line in mk.read_text().splitlines():
-        m = re.match(r"^([A-Za-z0-9_.%/ -]+?)\s*:(?!=)", line)
-        if m and not line.startswith((" ", "\t", "#", ".PHONY")):
-            targets.update(n for n in m.group(1).split() if not n.startswith("."))
-    return targets
 
 
 def check_evidence(spec_text: str, root: Path) -> bool:
@@ -304,24 +297,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--deleted", default="", help="comma list of removed symbols (check e)"
     )
-    ap.add_argument(
-        "--skip-make", action="store_true", help=argparse.SUPPRESS
-    )  # tests only
     a = ap.parse_args(argv)
     try:
         spec = resolve_spec(a.spec) if a.spec else None
+        base = resolve_base(a.base)
     except Refused as e:
         die(str(e))
-    results: list[bool] = []
-    if not a.skip_make:
-        results += [
-            check_make("test", ROOT),
-            check_lint(ROOT),
-            check_make("check-docs", ROOT),
-        ]
+    results: list[bool] = [
+        check_make("test", ROOT),
+        check_lint(ROOT),
+        check_make("check-docs", ROOT),
+    ]
     if spec:
         text = spec.read_text()
-        results += [check_evidence(text, ROOT), check_records(text, ROOT, a.base)]
+        results += [check_evidence(text, ROOT), check_records(text, ROOT, base)]
     else:
         print("SKIP evidence, records: no --spec given")
     symbols = [s.strip() for s in a.deleted.split(",") if s.strip()]

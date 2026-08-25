@@ -6,7 +6,8 @@
    live target. Without the
    marker every `tests/integration` test is SKIPPED, loudly. The directory does
    not exist yet; the guard is here so adding it cannot forget the rule.
-2. CONFIRM / MAKEFLAGS are scrubbed so Makefile guard tests see a clean env.
+2. CONFIRM / MAKEFLAGS / PROFILE / TARGET are scrubbed so the Makefile-invoking
+   tests (tests/test_makefile.py) see a clean env.
 """
 
 import os
@@ -16,7 +17,9 @@ import pytest
 INTEGRATION_MARKER = "OTR_INT"
 
 
-def pytest_collection_modifyitems(config, items):
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
     if os.environ.get(INTEGRATION_MARKER) == "1":
         return
     skip = pytest.mark.skip(
@@ -28,7 +31,7 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True)
-def _scrub_env(monkeypatch):
+def _scrub_env(monkeypatch: pytest.MonkeyPatch):
     for var in ("CONFIRM", "MAKEFLAGS", "PROFILE", "TARGET"):
         monkeypatch.delenv(var, raising=False)
     yield

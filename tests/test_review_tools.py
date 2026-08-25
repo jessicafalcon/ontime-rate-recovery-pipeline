@@ -1,6 +1,6 @@
 """Offline pins for the review tooling (scripts/review_gate.py, scripts/mutate.py)
 on throwaway repos built in tmp_path with `git init`. No services, no network;
-the whole module runs in a few seconds (three short pytest subprocesses)."""
+the whole module runs in ~10 s (a handful of short pytest subprocesses)."""
 
 from __future__ import annotations
 
@@ -28,6 +28,11 @@ def guarded(xs):
 
 def plain(xs):
     return sorted(xs)
+
+
+def caller(xs):
+    plain(xs)
+    return guarded(xs)
 """
 TEST = """
 from pkg.mod import guarded
@@ -534,3 +539,108 @@ def test_exec_under_suite_env_uses_no_shell(tmp_path: Path, capsys, monkeypatch)
     seen = set(eval(out.strip()))  # the interpreter adds LC_CTYPE etc. on macOS
     assert {"OTR_INT", "HOME", "PATH", "PYTHONPATH"} <= seen
     assert "ANTHROPIC_API_KEY" not in seen
+
+
+# ------------------------------------------- review round 1: operator pins
+
+
+def test_delete_call_removes_statement_level_calls_only(repo: Path) -> None:
+    where = mutate.apply(mutate.Mutation("pkg/mod.py", "plain", "delete-call"), repo)
+    text = (repo / "pkg" / "mod.py").read_text()
+    assert where == "pkg/mod.py:13"
+    assert "    pass  # MUTATED\n    return guarded(xs)" in text
+    assert "def plain(xs):\n    return sorted(xs)" in text  # the definition stays
+    with pytest.raises(common.Refused, match="no statement-level call"):
+        mutate.apply(mutate.Mutation("pkg/mod.py", "guarded", "delete-call"), repo)
+
+
+def test_swap_sort_key_reverses_the_tuple_key(repo: Path) -> None:
+    where = mutate.apply(
+        mutate.Mutation("pkg/mod.py", "guarded", "swap-sort-key"), repo
+    )
+    assert where == "pkg/mod.py:5"
+    assert "key=lambda x: (x[1], x[0])" in (repo / "pkg" / "mod.py").read_text()
+    with pytest.raises(common.Refused, match="no multi-key"):
+        mutate.apply(mutate.Mutation("pkg/mod.py", "plain", "swap-sort-key"), repo)
+
+
+def test_sweep_refuses_on_a_red_baseline(repo: Path, tmp_path: Path, capsys) -> None:
+    (repo / "tests" / "test_mod.py").write_text("def test_red():\n    assert 0\n")
+    _git(repo, "commit", "-qam", "red")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    with pytest.raises(common.Refused, match="unmutated suite is red"):
+        mutate.sweep(mutate.parse_mutations(SPEC), repo, scratch, SUITE)
+    assert "KILLED" not in capsys.readouterr().out
+    assert list(scratch.iterdir()) == []
+    assert "baseline" not in _git(repo, "worktree", "list")
+
+
+def test_constant_return_literal_may_contain_spaces() -> None:
+    text = "## Invariants\n```mutations\npkg/mod.py::f   constant-return:(1, 2)\n```\n"
+    assert mutate.parse_mutations(text)[0].arg == "(1, 2)"
+    with pytest.raises(common.Refused, match="bad mutations line"):
+        mutate.parse_mutations(
+            "## Invariants\n```mutations\npkg/mod.py :: f   invert-guard\n```\n"
+        )
+
+
+@pytest.mark.parametrize("path", ["TESTS/x.py", "Tests/oracle.py", "tests/x.py"])
+def test_tests_guard_is_case_insensitive(path: str) -> None:
+    with pytest.raises(common.Refused, match="under tests/"):
+        mutate._repo_path(path)
+
+
+def test_symlink_out_of_specs_is_refused(repo: Path) -> None:
+    (repo / "outside.md").write_text("x")
+    (repo / "specs" / "link.md").symlink_to(repo / "outside.md")
+    with pytest.raises(common.Refused, match="under specs/"):
+        common.resolve_spec("specs/link.md", repo)
+
+
+def test_bare_test_id_inherits_the_row_file() -> None:
+    text = (
+        "## Evidence\n| 1 | `tests/a.py::test_x`, `::test_y`; `make foo` |\n"
+        "| 2 | `::test_orphan` |\n"
+    )
+    tests, targets = gate.evidence_ids(text)
+    assert tests == ["tests/a.py::test_x", "tests/a.py::test_y"]  # orphan dropped
+    assert targets == ["foo"]
+
+
+def test_record_entry_matches_a_directory_and_a_glob() -> None:
+    changed = ["docs/PHASES.md", ".claude/agents/x.md", "Makefile"]
+    assert gate._matches("docs/", changed)
+    assert gate._matches("docs", changed)
+    assert gate._matches(".claude/agents/*.md", changed)
+    assert not gate._matches(".claude/commands/*.md", changed)
+    assert not gate._matches("docs/X.md", changed)
+    assert gate.record_list("## Record updates\n- [ ] `Makefile` — comment\n") == [
+        "Makefile"
+    ]
+
+
+@pytest.mark.parametrize("bad", ["", "-Ofile", "main; id", "a b"])
+def test_base_is_validated(bad: str) -> None:
+    with pytest.raises(common.Refused, match="BASE must be a plain git rev"):
+        gate.resolve_base(bad)
+    assert gate.resolve_base("origin/main") == "origin/main"
+
+
+def test_cli_refusals_are_one_line_exit_2() -> None:
+    """Done-when 2 at the CLI: refused SPEC/BASE → exit 2, one line, no traceback."""
+    root = Path(__file__).parent.parent
+    for script, args in (
+        ("review_gate.py", ["--spec", "../x"]),
+        ("review_gate.py", ["--base=-Ofile"]),
+        ("mutate.py", ["--spec", ""]),
+    ):
+        res = subprocess.run(
+            [sys.executable, str(root / "scripts" / script), *args],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 2, (script, args, res.stdout, res.stderr)
+        assert res.stdout.count("\n") == 1 and res.stdout.startswith("refusing")
+        assert "Traceback" not in res.stderr

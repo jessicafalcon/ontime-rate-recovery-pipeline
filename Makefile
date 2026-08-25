@@ -5,10 +5,14 @@
 .PHONY: setup test lint check-docs review-gate mutate
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
-# — unexpanded and single-quoted — and are unexported, so a value like
-# `SPEC='$(shell …)'` from the environment runs no shell (threat
-# model in specs/TEMPLATE.md). PROFILE / TARGET /
-# CONFIRM are reserved here so a later phase cannot add them un-guarded.
+# — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
+# `"; rm x; "` from EITHER origin reaches Python as one literal argument and
+# no shell or make function runs on it; Python validates. `unexport` is hygiene
+# only (keeps the value out of the child's environment) — an environment-set
+# variable still reaches the recipe. The ONLY way to tell command line from
+# environment is `$(origin VAR)`; every future CONFIRM knob tests
+# `$(origin CONFIRM)` = `command line` inside its recipe (spec threat model,
+# corrected in review round 1; pinned by tests/test_makefile.py).
 unexport SPEC BASE DELETED CONFIRM PROFILE TARGET
 _Q = '$(subst ','\'',$(1))'
 

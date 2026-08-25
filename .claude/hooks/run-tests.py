@@ -55,9 +55,21 @@ def main() -> None:
             )
             sys.exit(0)
 
+    # Same reduced environment as every other spawned suite in this repo
+    # (scripts/review_common.suite_env): PATH, HOME, PYTHONPATH, OTR_INT — never
+    # the shell's credentials, since an inbound branch's conftest.py runs here.
+    # Fail OPEN if the helper is missing (visibility aid, not a security control).
+    env = None
+    try:
+        sys.path.insert(0, os.path.join(root, "scripts"))
+        from review_common import suite_env
+
+        env = suite_env(__import__("pathlib").Path(root))
+    except Exception:
+        env = None
     try:
         res = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120, check=False
+            cmd, capture_output=True, text=True, timeout=120, check=False, env=env
         )
     except subprocess.TimeoutExpired:
         print(

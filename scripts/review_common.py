@@ -70,6 +70,25 @@ def suite_env(tree: Path, otr_int: str = "0") -> dict[str, str]:
     }
 
 
+def make_targets(root: Path) -> set[str]:
+    """Target names declared in the Makefile: every whitespace-separated name left
+    of the first `:` on a column-0 rule line (`a b:` declares two; `name:=v` and
+    `name :=` are assignments, not rules). A set lookup, never `make -n <name>`:
+    `-n` still recurses through `$(MAKE)` lines, so existence-checking a name
+    scraped from spec or doc text must not invoke make. ONE implementation for
+    the gate and the docs guard (review round 1: two verbatim copies, one pinned).
+    Pinned against the `.PHONY` line in tests/test_review_tools.py."""
+    targets: set[str] = set()
+    mk = root / "Makefile"
+    if not mk.exists():
+        return targets
+    for line in mk.read_text().splitlines():
+        m = re.match(r"^([A-Za-z0-9_.%/ -]+?)\s*:(?!=)", line)
+        if m and not line.startswith((" ", "\t", "#", ".PHONY")):
+            targets.update(n for n in m.group(1).split() if not n.startswith("."))
+    return targets
+
+
 def tail(out: str, n: int = 20) -> str:
     lines = out.rstrip().splitlines()
     return "\n".join("    " + ln for ln in lines[-n:])

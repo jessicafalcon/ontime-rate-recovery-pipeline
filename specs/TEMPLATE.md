@@ -89,8 +89,10 @@ Rules:
 - **Every invariant's upholding Python gets a mutation line.** `make mutate
   SPEC=…` reads ONE fenced block here, `path.py::function  operator`, one
   mutation per line; operators exactly `delete-call`, `constant-return:<v>`,
-  `invert-guard`, `swap-sort-key`. Each is applied to HEAD in a throwaway
-  worktree and the offline suite must go red; a `SURVIVED` line is a
+  `invert-guard`, `swap-sort-key` (a `constant-return` literal may contain
+  spaces: `constant-return:(1, 2)`; the path::func token may not). The
+  unmutated suite runs first and must be green. Each mutation is applied to
+  HEAD in a throwaway worktree and the offline suite must go red; a `SURVIVED` line is a
   correctness finding. A spec with no block is GATE RED under `/review-round`.
   dbt SQL has no operator yet (BACKLOG) — an invariant upheld only in SQL names
   the dbt unit test / data test that pins it instead, in the table.

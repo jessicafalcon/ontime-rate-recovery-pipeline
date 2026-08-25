@@ -1,6 +1,8 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.3 # keep in lockstep with pyproject dev group
+    # Commit SHA of tag v0.16.3 — a tag is mutable, a SHA is not. Keep the ruff
+    # version in lockstep with pyproject's dev group.
+    rev: 65dbdb59d2f2d9c3bdc343c566821ad3319ddaa3 # v0.16.3
     hooks:
       - id: ruff
       - id: ruff-format

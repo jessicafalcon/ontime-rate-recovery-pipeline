@@ -53,8 +53,8 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   behind `enable_*` toggles.
 - `fixtures/tiny/` *(Phase 1)* — golden raw events + dims + truth +
   `expected/` + `MANIFEST.sha256`. **READ-ONLY after Phase 1.**
-- `tests/` — pytest, no services, no network. `tests/pins.py` holds every
-  pinned number.
+- `tests/` — pytest, no services, no network. `tests/pins.py` *(Phase 2)*
+  will hold every pinned number.
 - `scripts/` — the offline guards, none a pytest file: `review_gate.py`
   (`make review-gate`), `mutate.py` (`make mutate`), `check_docs.py`
   (`make check-docs`), `round_tag.py` (review-round boundary tags),
@@ -82,10 +82,11 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   offline review gate: `make test` + `ruff check` + `ruff format --check`
   (read-only) + `make check-docs`; with SPEC, every Evidence test id / make
   target exists and every Record-updates file is in `git diff BASE...HEAD`;
-  DELETED greps the tracked tree for each removed symbol. One line per check,
-  exit 1 on any FAIL, 2 on a refused SPEC. `/review-round N` runs it first
-- `make mutate SPEC=specs/<f>.md` — the mutation sweep: each line of the
-  spec's Invariants ```mutations block (`path.py::func op`; ops exactly
+  DELETED greps the tracked tree for each removed symbol; BASE must be a plain
+  git rev. One line per check, exit 1 on any FAIL, 2 on a refused SPEC/BASE. `/review-round N` runs it first
+- `make mutate SPEC=specs/<f>.md` — the mutation sweep: the unmutated suite
+  runs first in its own worktree and must be green (a red HEAD is a refusal),
+  then each line of the spec's Invariants ```mutations block (`path.py::func op`; ops exactly
   `delete-call`, `constant-return:<v>`, `invert-guard`, `swap-sort-key`) is
   applied to HEAD in a throwaway `git worktree`, the offline suite runs there
   under a reduced env, verdict `KILLED | SURVIVED | ERROR` per line; exit 1 on
@@ -225,7 +226,8 @@ simple, standard way over the clever way.
 - Do not add features outside ARCHITECTURE.md without asking.
 - Destructive commands (dropping a DuckDB file, `terraform destroy`, Spanner
   deletes, truncating a serving table): only via a sanctioned `make` target
-  that prompts unless `CONFIRM=yes` is given on the command line.
+  that prompts unless `CONFIRM=yes` is given on the command line — tested
+  with `$(origin CONFIRM)`; `unexport` does not distinguish origins.
 - Cloud-cost commands (`terraform apply`, anything against BigQuery/Spanner/
   Composer): ask first, every time.
 - Fix amendments: a fix that changes a data structure, a write path, or
@@ -256,8 +258,9 @@ simple, standard way over the clever way.
 4. For every new write path or model: can it give a different answer on
    re-run, on a non-UTC machine, with equal sort keys, or with a different
    `run_date`? Name the test pinning each.
-5. For every new top-level package: in `PIPELINE_DIRS` of
-   `test_truth_isolation.py`? In the Repo map?
+5. For every new top-level package: is it pipeline code (guarded
+   automatically by `test_truth_isolation.py`) or does it belong in that
+   test's `EXEMPT` set? In the Repo map?
 6. List every record file touched and every one the change implies you
    should have touched.
 7. For each decision the spec didn't cover: the two alternatives not taken
@@ -354,6 +357,6 @@ layer, review gate, mutation sweep, agents) and the three load-bearing docs
 exist; no pipeline code. Next: approve the docs, run `/review-round 1` on
 this branch, merge, then Phase 1 (event contract + generator + frozen tiny
 fixture) — its spec is the first commit on `phase-1-event-contract`.
-Open BACKLOG rows: **5**.
+Open BACKLOG rows: **6**.
 
 (Update this section at the end of every working day.)
