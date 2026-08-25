@@ -73,7 +73,7 @@ one staged row.
 planned, plus `sources.yml` + raw DDL generated from `generator/models.py`
 (`make gen-sources`, equality-tested), `dim_user` loaded as a source (not a
 dbt seed), a fifth dispatch macro `to_local_time`, `drop-db` (the only
-deleter, `CONFIRM=yes` command-line origin), four dbt unit tests + three
+deleter, `CONFIRM=yes` command-line origin), five dbt unit tests + three
 singular tests. tiny: 970 raw → 926 staged (44 duplicates), 140 prompts, 22
 dim rows. `stg_prompts` = one row per `prompt_id` with the first delivery
 receipt. dbt SQL mutation operator re-deferred to Phase 3.
@@ -164,7 +164,8 @@ one run over the union.
 **Goal.** `infra/`: BigQuery datasets, GCS bucket, service account + least-
 privilege IAM, budget alerts ($50/$150), GCS state backend (bootstrap documented),
 `terraform.tfvars` gitignored; `make tf-plan | tf-apply | tf-destroy`. dbt
-`bigquery` target; the four macros proven on BigQuery; `make test-int-bigquery`.
+`bigquery` target; the five macros proven on BigQuery (the fifth,
+`to_local_time`, added in Phase 2); `make test-int-bigquery`.
 
 **Done when.** `terraform plan` clean from a fresh clone with only
 `project_id`; `make dbt-build TARGET=bigquery PROFILE=tiny` green with the same

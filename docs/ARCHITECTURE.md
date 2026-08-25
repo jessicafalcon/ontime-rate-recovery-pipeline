@@ -183,6 +183,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | component | reads | writes | may NOT |
 |---|---|---|---|
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
+| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked) | `raw.events`, `raw.dim_user` | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
 | eval | dbt outputs, truth | `docs/RESULTS.md` blocks, console | write any table the pipeline reads |
 | write-back | `scores_send_time` | `send_schedule` | read truth; read raw |

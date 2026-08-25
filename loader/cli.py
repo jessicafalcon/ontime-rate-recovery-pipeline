@@ -45,8 +45,9 @@ def load(profile: str) -> int:
     except FileNotFoundError as e:
         die(f"load: refused — {e}")
     except loader.ConflictingDuplicates as e:
+        ids = str(e).split(", ")
         print(
-            "load CONFLICT: insert_ids with one clock triple, "
+            f"load CONFLICT: {len(ids)} insert_ids with one clock triple, "
             f"more than one payload: {e}"
         )
         return 1
