@@ -62,7 +62,8 @@ annotated **Superseded by …** in place and never deleted.
   opens recover the latent window) is proven in Phases 1–5 before any cloud.
 - **Mutation sweep covers Python only.** dbt SQL has no operator; an invariant
   upheld only in SQL names its dbt unit test in the Invariants table. BACKLOG
-  row with trigger "Phase 2 (staging dedupe is the first SQL-only invariant)".
+  row, re-deferred at Phase 2 to "Phase 3 (attribution precedence is the first
+  multi-branch SQL)" — see Phase 2 appendix.
 - **Review agents are selected by diff surface, not run wholesale.** A
   docs-only range gets the coherence-auditor (scoped) and the gate; code gets
   code-reviewer + functionality-tester; sensitive paths add security-reviewer.
@@ -75,6 +76,68 @@ annotated **Superseded by …** in place and never deleted.
   anyone opening the repo in Claude Code.
 
 ## Appendix — by phase
+
+### Phase 2
+
+*Staging on DuckDB (`phase-2-staging`).*
+
+- **`dim_user` is loaded as a source, not a dbt seed (reconciliation,
+  2026-08-25).** A dbt seed has one fixed path under `dbt/seeds/`; the file
+  lives at `fixtures/<profile>/dims/dim_user.csv` and follows `PROFILE`.
+  `make load` lands events and dims through one path into a `raw` schema; both
+  are declared in the generated `sources.yml`; Phase 10's Spanner swap is a
+  source-config change only. Rejected: a seed with env-driven `seed-paths`
+  (second loader, and `dbt seed` type inference would make an empty `valid_to`
+  a varchar).
+- **The raw DDL and `sources.yml` are rendered from the pydantic contract by
+  `scripts/gen_dbt_sources.py`, committed, and equality-tested.** The script is
+  tooling (it imports `generator.models`, whose side-file record types the
+  pipeline may not name; its output names only `Event` and `DimUserRow`). The
+  loader reads column types back from the DDL-created tables, so the contract
+  has one consumer path. No `unique` test on `raw.events.insert_id` — the
+  export carries duplicates by contract; uniqueness is a staging test.
+  Rejected: rendering at load time (the committed file is what reviewers and
+  dbt read); reading the DDL off the live catalog (proves the loader, not the
+  contract).
+- **Dedupe keeps the earliest `(server_upload_time, server_received_time)`
+  copy per `insert_id`** via `qualify row_number()` — a content-derived key.
+  Rejected: `distinct` over all columns (the late-arrival injector's copies
+  differ in `server_upload_time` and would both survive).
+- **A fifth dispatch macro, `to_local_time(ts_utc, tz)` (amendment approved
+  2026-08-25).** UTC → local conversion is dialect-divergent and no plan listed
+  it; it is the load-bearing expression of "local time uses the tz valid at
+  `client_event_time`", so it sits behind the seam with the same shape (DuckDB
+  body, BigQuery stub that raises, no `default__`). CLAUDE.md and ARCHITECTURE
+  §3.2 now say five. Rejected: the DuckDB form inline in `stg_events` (Phase 9
+  would port a dialect by editing a staging model); folding it into
+  `timestamp_diff`.
+- **`bigquery__` bodies raise; there is no `default__`.** A dispatch fallback
+  lets an unported adapter build and be silently wrong; a stub that names
+  Phase 9 fails at compile. Pinned by `tests/test_dbt_conventions.py`.
+- **One Python entry point (`loader/cli.py`) behind `load`, `dbt-build`,
+  `drop-db`.** It validates `PROFILE` and `TARGET` (`[a-z0-9_]+`) before any
+  path exists, derives `data/<profile>.duckdb`, sets `OTR_DUCKDB_PATH` (the one
+  env var `dbt/profiles.yml` reads) and invokes dbt in-process via
+  `dbtRunner`. `dbt-build` loads first so CI is one target. Rejected: `dbt`
+  invoked from the Makefile with `--vars` (an unvalidated name would reach a
+  path).
+- **`stg_prompts` is one row per `prompt_id`**: `prompt_sent` left-joined to
+  the first `prompt_delivered` (by `client_event_time`, then `insert_id`);
+  `delivered_at` NULL when no receipt exists — the grain Phase 3 attributes
+  on. `prompt_cohort_id` (from the event) is kept next to `cohort_id` (from
+  `dim_user`) rather than reconciled here. Rejected: prompt×user (identical
+  today; the name would mislead).
+- **Composite-key uniqueness is a singular test.** dbt's built-in `unique` is
+  single-column and `dbt-utils` is off the allowlist, so `dim_user (user_id,
+  valid_from)` is `dbt/tests/assert_dim_user_key_unique.sql`.
+- **The dbt SQL mutation operator is re-deferred to Phase 3.** Staging's one
+  SQL invariant is pinned three ways (unit test, `unique`, Python pin) and both
+  of its clauses were shown by hand to turn a unit test red; the five-arm
+  attribution `case` is where a survivor could first hide. BACKLOG trigger
+  updated.
+- **Pins are split where dedupe changes them.** `RAW_UPLOAD_ERROR_CODE_NULLS`
+  (190) vs `STG_UPLOAD_ERROR_CODE_NULLS` (180): ten of the JSON-null copies
+  were duplicates; one number for both would have been wrong in one table.
 
 ### Phase 1
 

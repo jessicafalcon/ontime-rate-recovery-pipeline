@@ -45,9 +45,13 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   refuses `fixtures/`), `manifest.py`, `truth.py` (the ONLY truth writer),
   `cli.py` (`seed`, `freeze`). Truth goes to `<out>/truth/`, never read by the
   pipeline.
-- `dbt/` *(Phase 2+)* — the dbt project: `models/{staging,attribution,marts,
-  features,scores}`, `macros/` (the four dispatch macros), `tests/`,
-  `profiles.yml` (`duckdb`, `bigquery` targets).
+- `dbt/` — the dbt project: `models/staging` (Phase 2; later `attribution,
+  marts, features, scores`), `macros/` (the five dispatch macros), `tests/`
+  (singular data tests), `profiles.yml` (`duckdb`, `bigquery` targets).
+  `models/staging/sources.yml` is GENERATED (`make gen-sources`), never edited.
+- `loader/` *(Phase 2)* — raw landing: `load.py` (fixtures → DuckDB `raw`
+  schema, types from the generated `ddl.sql`), `cli.py` (`load`, `dbt-build`,
+  `drop-db`). Pipeline code — guarded by `test_truth_isolation.py`.
 - `eval/` *(Phase 3+)* — the ONLY code that reads truth: label scoring,
   reachable-center MAE, `simulate.py`.
 - `serving/` *(Phase 8; Spanner target Phase 10)* — write-back to
@@ -59,13 +63,14 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   `truth/` + `MANIFEST.sha256` (`expected/` from Phase 3). **READ-ONLY**: the
   review gate FAILs any change without a `Freeze:` line in the phase spec;
   `make freeze` is the only writer.
-- `tests/` — pytest, no services, no network. `tests/pins.py` *(Phase 2)*
-  will hold every pinned number.
+- `tests/` — pytest, no services, no network (DuckDB in-process counts as
+  none). `tests/pins.py` holds every pinned number.
 - `scripts/` — the offline guards, none a pytest file: `review_gate.py`
   (`make review-gate`), `mutate.py` (`make mutate`), `check_docs.py`
   (`make check-docs`), `round_tag.py` (review-round boundary tags;
   `make round-reset` clears them at phase start), `review_common.py` (shared
-  SPEC validator / section parser / reduced env).
+  SPEC validator / section parser / reduced env), `gen_dbt_sources.py`
+  (`make gen-sources`: raw DDL + `sources.yml` from `generator/models.py`).
 - `docs/` — ARCHITECTURE.md (spec), PHASES.md (plan); later METRICS.md,
   AB_DESIGN.md, RESULTS.md, DEPLOYMENT.md (all under `docs/`).
 - `DECISIONS.md` — why-not-X log. One entry per non-obvious choice.
@@ -110,10 +115,24 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   copies `data/out/<p>/` over it and writes the manifest. `CONFIRM=yes` must
   have command-line origin (`$(origin CONFIRM)`); a re-freeze also needs a
   DECISIONS entry and a `Freeze: fixtures/<p>/MANIFEST.sha256` line in the spec
-- Later phases add: `load`, `dbt-build` (2), `attribution-golden`
-  (3), `report` (4), `simulate` (6), `writeback`, `pipeline`, `test-int-airflow`
-  (8), `tf-plan | tf-apply | tf-destroy`, `test-int-bigquery` (9). Each lands
-  with its phase and is listed here in the same PR.
+- `make load PROFILE=<p>` — validates `[a-z0-9_]+`, loads
+  `fixtures/<p>/{raw/events_*.jsonl,dims/dim_user.csv}` (falls back to
+  `data/out/<p>/` for an unfrozen profile) into `data/<p>.duckdb` schema `raw`;
+  types come from the generated `loader/ddl.sql`, never inferred. Idempotent:
+  tables are recreated
+- `make dbt-build PROFILE=<p> [TARGET=duckdb]` — `load`, then `dbt build`
+  (source tests → `stg_events`, `stg_prompts` → data, unit and singular tests)
+  against `data/<p>.duckdb`; prints `dbt-build OK: <p>/<target>`, exit 1 on any
+  failure. `TARGET=bigquery` is Phase 9's manual path
+- `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` (the only
+  file); `CONFIRM=yes` must have command-line origin
+- `make gen-sources` — re-renders `loader/ddl.sql` and
+  `dbt/models/staging/sources.yml` from `generator/models.py`;
+  `tests/test_dbt_sources.py` fails on a hand edit
+- Later phases add: `attribution-golden` (3), `report` (4), `simulate` (6),
+  `writeback`, `pipeline`, `test-int-airflow` (8), `tf-plan | tf-apply |
+  tf-destroy`, `test-int-bigquery` (9). Each lands with its phase and is
+  listed here in the same PR.
 
 ## Event model facts (from ARCHITECTURE.md §2; update if reality differs)
 
@@ -128,7 +147,11 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
 - Labels: exactly one of five per prompt×user; precedence in ARCHITECTURE
   §2.5; `provisional` until `LOOKBACK_DAYS` closes, then `final` forever.
 - On-time denominator is `prompts_delivered`. Never user-days.
-- `dim_user.tz` is SCD2; local time is computed once, in staging.
+- `dim_user.tz` is SCD2 (`valid_to` empty = open row); local time is computed
+  once, in staging (`stg_events.client_event_time_local`), via `to_local_time`.
+- `insert_id` is NOT unique in raw (the export carries duplicates; 44 in
+  tiny); it is unique in `stg_events`. `error_code` is JSON `null` on
+  `upload_started`/`upload_completed`, SQL NULL once staged.
 
 ## Determinism policy (core design principle)
 
@@ -169,9 +192,11 @@ DECISIONS.md or fix it.
   never computes a score the pipeline serves.
 - Write-back contract: replace only on strictly greater
   `(model_version, computed_as_of)`; key `user_id`.
-- Dialect contract: exactly four dispatch macros (JSON extract,
-  `timestamp_diff`, `safe_divide`, partition overwrite). A fifth needs a
-  DECISIONS entry.
+- Dialect contract: exactly five dispatch macros (JSON extract,
+  `timestamp_diff`, `safe_divide`, `to_local_time`, partition overwrite; the
+  fifth was added in Phase 2 with a DECISIONS entry). Each has a DuckDB body
+  and a BigQuery body that raises until Phase 9 — never a `default__`. A
+  sixth needs a DECISIONS entry.
 - Airflow contains no logic: a task is a `make` target or a dbt command.
 - Minimal but scalable: simplest standard solution now; the scaling path is a
   DECISIONS note, not speculative code. Do not claim scale we don't run.
@@ -376,11 +401,12 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 1 implemented and reviewed, ready to open the PR
-(`phase-1-event-contract`).** Phase 0 merged (PR #1). The generator, pydantic
-contract, `tiny` fixture (frozen, 13 files, manifest) and `medium` profile
-exist; `make seed PROFILE=tiny` twice reports `manifest match`; the gate refuses
-fixture drift. Review rounds 1–2 and the phase-exit coherence audit are clean.
-Next: Phase 2 (staging on DuckDB). Open BACKLOG rows: **5**.
+**Phase 2 implemented, in review (`phase-2-staging`).** Phases 0–1 merged
+(PRs #1, #2), round-tag fix merged (PR #3). dbt on DuckDB: `make dbt-build
+PROFILE=tiny` is green (2 models, 33 data tests, 4 unit tests); `tests/pins.py`
+pins 970 raw → 926 staged (44 duplicates), 140 prompts, 22 dim rows; the raw
+DDL and `sources.yml` are generated from the pydantic contract; five dispatch
+macros with BigQuery stubs. Next: review rounds, then Phase 3 (attribution).
+Open BACKLOG rows: **4**.
 
 (Update this section at the end of every working day.)
