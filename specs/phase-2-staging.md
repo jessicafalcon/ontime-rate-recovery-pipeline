@@ -233,6 +233,46 @@ five. Rejected: the DuckDB form inline in `stg_events` (Phase 9 would edit a
 staging model to port a dialect — the thing the seam exists to prevent);
 folding it into `timestamp_diff` (unrelated semantics under one name).
 
+**Amendment 2 (review round 1, 2026-08-25 — PROPOSED, awaiting approval):
+five design changes.** Each names the invariant it restores.
+
+1. **dbt telemetry off** (`flags: send_anonymous_usage_stats: false` in
+   `dbt_project.yml`; `DO_NOT_TRACK=1` set by `loader/cli.py::dbt_build` and
+   `tests/test_staging.py::build` before dbt loads) — restores "no services,
+   no network" (CLAUDE.md `make test`, this spec's DONE command). Pinned by a
+   convention test that the flag is present. Rejected: leaving it (CI and every
+   `make test` POST to a vendor endpoint and mint `dbt/.user.yml`).
+2. **`TARGET` other than `duckdb` requires `CONFIRM=yes` with command-line
+   origin** — restores "cloud-cost commands: ask first, every time" (CLAUDE.md
+   Workflow rules); today only the raising stubs stop `TARGET=bigquery`, and
+   Phase 9 removes them. Same `$(origin CONFIRM)` shape as `drop-db`; the
+   threat-model row is corrected to state the real residual (ADC may exist on a
+   developer machine). Rejected: refusing every non-`duckdb` target until
+   Phase 9 (Phase 9 would re-open the recipe instead of adding a body).
+3. **`drop-db` also removes `data/<p>.duckdb.wal`** — restores invariant 8
+   ("deletes only `data/<profile>.duckdb`" was incomplete: DuckDB replays a
+   surviving write-ahead log into the next file at that path). Both paths
+   derive from the validated name; the test plants a `.wal` and asserts both
+   go and `other.duckdb*` stays.
+4. **The loader names its input and checks the manifest** — restores
+   invariant 5 (pins are measured against the frozen fixture). `fixture_dir`
+   keeps the `data/out/<p>/` fallback (an unfrozen profile has nowhere else)
+   but prints `load: source=fixtures/<p>` or `load: source=data/out/<p>
+   (unfrozen)`; when `fixtures/<p>/MANIFEST.sha256` exists the loader verifies
+   it with `generator/manifest.py` before loading and refuses on drift (exit
+   1). Rejected: dropping the fallback (`medium` could not build without a
+   freeze); silent fallback (a build from edited output is indistinguishable
+   from the golden). Note: `loader/` importing `generator.manifest` is a
+   pipeline dir importing generator tooling — `manifest.py` does not name the
+   side-file, so the isolation grep stays green; DECISIONS records it.
+5. **Dedupe order key becomes a total order** — restores invariant 1's
+   "the surviving row is …" for the tie case (the duplicate injector's offset
+   can be 0 s, so `(server_upload_time, server_received_time)` can tie; tiny
+   has no such tie today, `0` rows). Third key: `client_event_time`, then the
+   row's full content via `md5(event_properties::varchar)` — content-derived,
+   never load order. The unit test adds an exact-tie pair differing only in
+   `event_properties` and asserts the lower hash wins.
+
 ## Pinned decisions (do not re-litigate)
 
 - **Dedupe by content-derived tie-break.** `stg_events` keeps, per
