@@ -38,9 +38,13 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
 
 - `specs/` — one spec per phase, from `specs/TEMPLATE.md`. ONE DONE command
   each. `docs/PHASES.md` is the list; specs are the executable contracts.
-- `generator/` *(Phase 1)* — pydantic models (schema source of truth),
-  seeded generator, `profiles/`. Truth written to `fixtures/<p>/truth/` or
-  `data/truth/`, never read by the pipeline.
+- `generator/` — `models.py` (pydantic, schema source of truth), `profiles.py`
+  + `profiles/*.json` (every knob a required field), `generate.py` (cause-first,
+  one `Random`, `SIM_START` fixed), `response.py` (the one response function,
+  reused by Phase 6), `dims.py` (SCD2 seed), `writer.py` (canonical JSON/CSV;
+  refuses `fixtures/`), `manifest.py`, `truth.py` (the ONLY truth writer),
+  `cli.py` (`seed`, `freeze`). Truth goes to `<out>/truth/`, never read by the
+  pipeline.
 - `dbt/` *(Phase 2+)* — the dbt project: `models/{staging,attribution,marts,
   features,scores}`, `macros/` (the four dispatch macros), `tests/`,
   `profiles.yml` (`duckdb`, `bigquery` targets).
@@ -51,8 +55,10 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
 - `orchestration/` *(Phase 8)* — the Airflow DAG. No logic, only ordering.
 - `infra/` *(Phase 9+)* — Terraform; `modules/composer`, `modules/spanner`
   behind `enable_*` toggles.
-- `fixtures/tiny/` *(Phase 1)* — golden raw events + dims + truth +
-  `expected/` + `MANIFEST.sha256`. **READ-ONLY after Phase 1.**
+- `fixtures/tiny/` — golden `raw/events_<upload-date>.jsonl` + `dims/` +
+  `truth/` + `MANIFEST.sha256` (`expected/` from Phase 3). **READ-ONLY**: the
+  review gate FAILs any change without a `Freeze:` line in the phase spec;
+  `make freeze` is the only writer.
 - `tests/` — pytest, no services, no network. `tests/pins.py` *(Phase 2)*
   will hold every pinned number.
 - `scripts/` — the offline guards, none a pytest file: `review_gate.py`
@@ -91,7 +97,15 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   applied to HEAD in a throwaway `git worktree`, the offline suite runs there
   under a reduced env, verdict `KILLED | SURVIVED | ERROR` per line; exit 1 on
   any survivor. Python only — dbt SQL mutation is a BACKLOG row
-- Later phases add: `seed` (1), `load`, `dbt-build` (2), `attribution-golden`
+- `make seed PROFILE=<p>` — the generator: validates `[a-z0-9_]+`, writes
+  `data/out/<p>/` only, hashes its output and compares to
+  `fixtures/<p>/MANIFEST.sha256` when one exists (`seed OK … manifest match`;
+  exit 1 on drift). Never writes under `fixtures/`
+- `make freeze PROFILE=<p> CONFIRM=yes` — the ONLY writer of `fixtures/<p>/`:
+  copies `data/out/<p>/` over it and writes the manifest. `CONFIRM=yes` must
+  have command-line origin (`$(origin CONFIRM)`); a re-freeze also needs a
+  DECISIONS entry and a `Freeze: fixtures/<p>/MANIFEST.sha256` line in the spec
+- Later phases add: `load`, `dbt-build` (2), `attribution-golden`
   (3), `report` (4), `simulate` (6), `writeback`, `pipeline`, `test-int-airflow`
   (8), `tf-plan | tf-apply | tf-destroy`, `test-int-bigquery` (9). Each lands
   with its phase and is listed here in the same PR.
@@ -128,7 +142,9 @@ DECISIONS.md or fix it.
 - Truth isolation: `truth/` is never a dbt source, never an input to
   `features`/`scores`. `tests/test_truth_isolation.py` greps every pipeline
   directory (`dbt/`, `serving/`, `orchestration/`) for the word; in
-  `generator/` only `truth.py` (the writer) and `models.py` may name it.
+  `generator/` only `truth.py` (the writer), `models.py` (record types) and
+  `cli.py` (the entry point that calls the writer) may name it — generation
+  logic never does.
 - Model scoring and simulation are seeded; RESULTS blocks regenerate
   byte-identically.
 - Non-deterministic by nature and carved out: dbt run ids and timings,
@@ -352,13 +368,10 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 0 under review (`phase-0-skeleton`, PR #1 open).** The workflow
-machinery (spec layer, review gate, mutation sweep, agents) and the three
-load-bearing docs exist; no pipeline code. Review rounds 1 and 2 done
-(round 2 converged: 3 wording/record findings, all fixed), phase-exit
-coherence audit passed, CI `lint-test` green on PR #1. Next: developer
-squash-merges, then Phase 1 (event contract + generator + frozen tiny
-fixture) — its spec is the first commit on `phase-1-event-contract`.
-Open BACKLOG rows: **5**.
+**Phase 1 implemented, under review (`phase-1-event-contract`).** Phase 0
+merged (PR #1). The generator, pydantic contract, `tiny` fixture (frozen, 13
+files, manifest) and `medium` profile exist; `make seed PROFILE=tiny` twice
+reports `manifest match`; the gate refuses fixture drift. Review round 1
+next; then Phase 2 (staging on DuckDB). Open BACKLOG rows: **5**.
 
 (Update this section at the end of every working day.)

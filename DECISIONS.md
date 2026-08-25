@@ -93,6 +93,44 @@ annotated **Superseded by …** in place and never deleted.
   how much of the timing-gap share it can move; it never feeds the label.
   Rejected: keeping the clause and computing a Phase 3 reachability stub
   (two definitions of reachability, one of them unversioned).
+- **Cause-first generation.** The generator draws each prompt's cause, then
+  emits the events that cause implies; injectors (duplicate, late arrival,
+  skew) run after and never change it. Truth is exact by construction. Rejected:
+  a behavioural model labelled afterwards — a second attribution to keep in sync.
+- **One response function, shared with Phase 6.** `generator/response.py::
+  responds` is pure and caller-seeded; `eval/simulate.py` imports it. Rejected:
+  inlining the draw (Phase 6 would re-implement it).
+- **`seed` writes `data/out/<p>/` only and self-checks against the manifest;
+  `freeze` is the only writer of `fixtures/`.** A `seed` that wrote into
+  `fixtures/` could repair its own golden and the DONE command would prove
+  nothing. `freeze` takes `CONFIRM=yes` with command-line origin — the first
+  live use of the Phase 0 `$(origin)` rule.
+- **The freeze guard is a review-gate check, not a TRACES row.** `check_docs`
+  tests token presence; read-only-ness is a diff property: any `fixtures/**`
+  path in `git diff BASE...HEAD` FAILs unless the spec declares
+  `Freeze: fixtures/<p>/MANIFEST.sha256`, and a fixture file changed without its
+  manifest FAILs regardless.
+- **Profiles are JSON, every knob required.** A missing knob is a validation
+  error, never a silent default; `tiny` and `medium` are data, not code.
+  Rejected: Python-module profiles (executable config), YAML (a package).
+- **Layout.** `raw/events_<upload-date>.jsonl` (one file per UTC
+  `server_upload_time` date — Phase 7's landing unit), `dims/dim_user.csv`,
+  `truth/{users,prompts}.jsonl`; canonical JSON (`sort_keys`, no spaces),
+  Amplitude timestamp strings, whole seconds, counter ids, `SIM_START` =
+  2026-01-05 (January: no DST transition in any profile tz). Rejected: one
+  `events.jsonl` (Phase 7 would split it).
+- **`cli.py` joins `truth.py`/`models.py` as a file that may name truth.** The
+  rule's property is "generation logic never names the side-file"; something
+  has to call the writer, and the entry point is the least-logic place. The
+  record types are `LatentUser` / `PromptCause` so `generate.py` and
+  `response.py` stay clean. Rejected: exempting all of `generator/` (vacates
+  the guard).
+- **Skew injector is forward-only** (client ahead). Backward skew is
+  observationally an upload delay (§8 Gotchas); the generator only produces
+  what attribution can in principle detect, so truth stays scoreable.
+- **Organic opens are drawn around the latent centre** (`organic_opens_per_day`
+  knob, Gaussian with σ = width/2). Phase 5's signal has to exist in the
+  fixture; the knob is named here because PHASES did not list it.
 
 ### Phase 0
 

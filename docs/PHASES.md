@@ -45,6 +45,14 @@ phase**. `medium` profile defined, not committed.
 `fixtures/tiny/MANIFEST.sha256`; unit tests cover each knob; truth isolation
 test green.
 
+**Delivered** (`phase-1-event-contract`, spec
+`specs/phase-1-event-contract.md`): as planned, plus `make freeze` (the only
+writer of `fixtures/`, `CONFIRM=yes` from the command line) and the review
+gate's fixture check (`Freeze:` declaration required for any fixture change).
+`timing_gap` redefined as delivery + no-action evidence alone (ARCHITECTURE
+§2.5, DECISIONS Phase 1). Truth is two files (`users`, `prompts`). tiny = 20
+users × 7 days = 140 prompts, 970 events (incl. duplicates), 13 files.
+
 ---
 
 ## Phase 2 — Staging on DuckDB

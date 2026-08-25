@@ -70,12 +70,16 @@ happens once, in staging, against the tz valid at `client_event_time`.
 
 ### 2.4 Ground truth (generator side-file, never a source)
 
-`truth/users.jsonl`: per user the latent `reachable_center_local_hour` and
-`reachable_width_hours`; per prompt the generator's assigned cause. Lives under
-`fixtures/<profile>/truth/` and `data/truth/`; **no dbt source may reference
-it** (`tests/test_truth_isolation.py`). Only `eval/` reads it; inside
-`generator/` only `truth.py` (the writer) and `models.py` (the record type)
-may name it.
+Two files. `truth/users.jsonl`: per user the latent
+`reachable_center_local_hour` and `reachable_width_hours` (+ `cohort_id`).
+`truth/prompts.jsonl`: per prompt the generator's assigned cause (one of the
+five labels) and `local_send_hour`. Lives under `fixtures/<profile>/truth/`
+and `data/out/<profile>/truth/`; **no dbt source may reference it**
+(`tests/test_truth_isolation.py`). Only `eval/` reads it; inside `generator/`
+only `truth.py` (the writer), `models.py` (the record types) and `cli.py` (the
+entry point that calls the writer) may name it — generation logic never does.
+The generator is cause-first: the cause is drawn, then the events it implies
+are emitted, so truth is exact by construction (DECISIONS Phase 1).
 
 ### 2.5 Attribution label set (exhaustive, exclusive) *(Phase 3)*
 
@@ -193,7 +197,7 @@ DuckDB per PR; BigQuery runs are manual (`make dbt-build TARGET=bigquery`).
 
 | stub | replaces | swap |
 |---|---|---|
-| generator → `fixtures/<profile>/raw/` | Amplitude → BigQuery export | dbt `source` config |
+| generator → `fixtures/<profile>/raw/events_<upload-date>.jsonl` (one file per UTC `server_upload_time` date — the landing unit Phase 7 replays) | Amplitude → BigQuery export | dbt `source` config |
 | `dim_user` seed | Spanner change streams / federation | `EXTERNAL_QUERY` source (demo), Dataflow template (prod) |
 | DuckDB `send_schedule` table | Spanner serving table | write-back target flag |
 
@@ -236,5 +240,13 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
 
 ## 8. Gotchas (stack surprises found live)
 
-*(empty — add every DuckDB/dbt/BigQuery/Airflow/Terraform/Spanner surprise here
-as it is found, with the phase.)*
+- **make: `unexport VAR` counts as a file definition** (Phase 1). With
+  `unexport CONFIRM` in the Makefile, an unset `CONFIRM` has
+  `$(origin CONFIRM)` = `file`, not `undefined`. Harmless — only `command line`
+  is accepted — but a test expecting `undefined` was wrong; pinned in
+  `tests/test_makefile.py::test_freeze_requires_confirm_from_the_command_line`.
+- **Clock skew is only observable in one direction** (Phase 1). A client clock
+  *behind* the server looks exactly like a slow upload (`received − client`
+  large and positive); only a clock *ahead* (negative delay past
+  `SKEW_MAX_MIN`) is distinguishable. The generator's skew injector is
+  forward-only; Phase 3 pins the rule on the negative side.
