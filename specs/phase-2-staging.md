@@ -274,6 +274,29 @@ folding it into `timestamp_diff` (unrelated semantics under one name).
    never load order. The unit test adds an exact-tie pair differing only in
    `event_properties` and asserts the lower hash wins.
 
+**Amendment 3 (review round 2, 2026-08-25 — APPROVED): two changes to
+amendment 2.**
+
+1. **The dedupe order key is the three clocks, and a conflicting duplicate is
+   refused at landing** — restores invariant 1 AND invariant 4. Amendment 2.5's
+   `md5(cast(event_properties as varchar))` was dialect-divergent SQL inline in
+   a model (BigQuery has no `varchar` and `MD5` returns bytes) — exactly what
+   the seam forbids. Now: `order by server_upload_time, server_received_time,
+   client_event_time` (plain columns, both dialects); two raw rows that share
+   `insert_id` and all three clocks but differ in `event_properties` are a
+   data conflict, not a dedupe choice — the loader refuses the load (`load
+   CONFLICT: <n> insert_ids`, exit 1) before dbt runs. The generator cannot
+   produce one (duplicates are copies), so tiny has zero. Rejected: a sixth
+   dispatch macro to fingerprint JSON (a seam for a case the pipeline should
+   reject, not order).
+2. **`manifest_drift` hashes only `raw/` and `dims/`** — restores the
+   truth-isolation property at the byte level: `manifest.compute` over the
+   fixture root read `truth/*.jsonl`, so a pipeline directory read truth
+   bytes and a change confined to `truth/` refused an otherwise valid load.
+   Now the loader hashes the two subtrees it stages and compares those entries
+   of the manifest only. Pinned: an edited truth line loads; an edited raw line
+   refuses.
+
 ## Pinned decisions (do not re-litigate)
 
 - **Dedupe by content-derived tie-break.** `stg_events` keeps, per
