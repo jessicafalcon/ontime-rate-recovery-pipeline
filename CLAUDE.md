@@ -406,7 +406,7 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 **Phase 2 implemented, in review (`phase-2-staging`).** Phases 0–1 merged
 (PRs #1, #2), round-tag fix merged (PR #3). dbt on DuckDB: `make dbt-build
-PROFILE=tiny` is green (2 models, 33 data tests, 4 unit tests); `tests/pins.py`
+PROFILE=tiny` is green (2 models, 33 data tests, 5 unit tests); `tests/pins.py`
 pins 970 raw → 926 staged (44 duplicates), 140 prompts, 22 dim rows; the raw
 DDL and `sources.yml` are generated from the pydantic contract; five dispatch
 macros with BigQuery stubs. Next: review rounds, then Phase 3 (attribution).

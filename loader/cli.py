@@ -45,7 +45,10 @@ def load(profile: str) -> int:
     except FileNotFoundError as e:
         die(f"load: refused — {e}")
     except loader.ConflictingDuplicates as e:
-        print(f"load CONFLICT: one clock triple, more than one payload: {e}")
+        print(
+            "load CONFLICT: insert_ids with one clock triple, "
+            f"more than one payload: {e}"
+        )
         return 1
     tag = "" if source.parent.name == "fixtures" else " (unfrozen)"
     print(f"load: source={source.relative_to(loader.ROOT)}{tag}")
