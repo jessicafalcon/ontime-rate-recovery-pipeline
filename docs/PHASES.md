@@ -7,10 +7,10 @@ phase — split otherwise (7a/7b). Phases 3, 6 and 8 are checkpoints: stopping a
 any of them yields a coherent project.
 
 Spec: `ARCHITECTURE.md`. Rules, commands, git workflow: `../CLAUDE.md`. The
-brief's original 0–9 plan is in `../PROJECT_BRIEF.md` §6; this list is the
-re-cut by verifiable capability (DECISIONS Phase 0).
+`../PROJECT_BRIEF.md` §6 carries the same plan in track view; this list is
+authoritative (DECISIONS Phase 0).
 
-**Core risk, proven first (Phases 1–3):** the three-clock / delivery-receipt
+**Core risk, proven first (Phases 1–5):** the three-clock / delivery-receipt
 attribution must recover the generator's assigned causes, and the organic-open
 signal must recover the latent reachable window. If either fails, nothing
 downstream matters.
@@ -50,9 +50,10 @@ test green.
 ## Phase 2 — Staging on DuckDB
 
 **Goal.** dbt project with `duckdb` target; loader `fixtures/<profile>/raw` →
-raw tables; `stg_events` (dedupe on `insert_id`, typed, tz → local via
-`dim_user` valid-at-time), `stg_prompts`; dbt source freshness, uniqueness,
-not-null, accepted-values tests; the four dispatch macros stubbed for both
+raw tables (`make load PROFILE=<p>`); `stg_events` (dedupe on `insert_id`,
+typed, tz → local via `dim_user` valid-at-time), `stg_prompts`; source tests
+(uniqueness, not-null, accepted values — no freshness test: it reads the wall
+clock); the four dispatch macros stubbed for both
 dialects; CI runs `dbt build`.
 
 **Done when.** `make dbt-build PROFILE=tiny` green; staging row counts and the
@@ -91,7 +92,7 @@ value; a delivery-fault-only day shows on-time rate 0, not null.
 
 **Goal.** `features_user_hour` (organic `app_opened` only), `scores_send_time`
 (cohort window + bounded per-user shift, shrinkage, circular hours, explicit
-tie-break). `eval` reports reachable-center MAE (hours) and coverage vs truth on
+tie-break); vars `FEATURE_WINDOW_DAYS`, `MAX_USER_SHIFT_MIN`. `eval` reports reachable-center MAE (hours) and coverage vs truth on
 tiny and medium.
 
 **Done when.** MAE ≤ pin on medium; a user with zero organic opens gets the
@@ -128,9 +129,11 @@ second landing twice is a no-op; a `final` label never changes.
 
 ## Phase 8 — Local orchestration ⭐ checkpoint
 
-**Goal.** Airflow DAG (Docker, local) chaining load → `dbt build` → eval →
-write-back (DuckDB stand-in) with data-interval-aware runs and `catchup`;
-`make pipeline PROFILE=<p>` runs the same chain without Airflow.
+**Goal.** `serving/writeback.py` + `make writeback` against the DuckDB
+stand-in `send_schedule` (replace only on strictly greater `(model_version,
+computed_as_of)`); Airflow DAG (Docker, local) chaining load → `dbt build` →
+eval → write-back with data-interval-aware runs and `catchup`; `make pipeline
+PROFILE=<p>` runs the same chain without Airflow; `make test-int-airflow`.
 
 **Done when.** `make pipeline` and a triggered DAG run produce byte-identical
 `scores_send_time` and `send_schedule`; a backfill over three intervals equals
@@ -142,8 +145,8 @@ one run over the union.
 
 **Goal.** `infra/`: BigQuery datasets, GCS bucket, service account + least-
 privilege IAM, budget alerts ($50/$150), GCS state backend (bootstrap documented),
-`terraform.tfvars` gitignored. dbt `bigquery` target; the four macros proven on
-BigQuery.
+`terraform.tfvars` gitignored; `make tf-plan | tf-apply | tf-destroy`. dbt
+`bigquery` target; the four macros proven on BigQuery; `make test-int-bigquery`.
 
 **Done when.** `terraform plan` clean from a fresh clone with only
 `project_id`; `make dbt-build TARGET=bigquery PROFILE=tiny` green with the same
@@ -154,20 +157,20 @@ pins as DuckDB; `terraform destroy` leaves nothing billable.
 ## Phase 10 — Spanner: dims and write-back
 
 **Goal.** `enable_spanner` module; `dim_user` via BigQuery federation
-(`EXTERNAL_QUERY`); `send_schedule` schema; `serving/writeback.py` idempotent
-upsert (replace only on strictly greater `(model_version, computed_as_of)`).
-Threat model for every variable-taking / destructive `make` target.
+(`EXTERNAL_QUERY`); Spanner `send_schedule` schema; the Phase 8 write-back
+gains a Spanner target (`make writeback TARGET=spanner`). Threat model for every variable-taking / destructive `make` target.
 
 **Done when.** Two write-back runs over the same scores leave `send_schedule`
 unchanged (row hash); an older `model_version` never overwrites a newer one;
-`make spanner-destroy` prompts unless `CONFIRM=yes` from the command line.
+`make tf-destroy MODULE=spanner` prompts unless `CONFIRM=yes` from the command
+line.
 
 ---
 
 ## Phase 11 — Composer module (written, not applied)
 
 **Goal.** Isolated Terraform module behind `enable_composer`; DAG upload on
-apply; `DEPLOYMENT.md` bring-up / run / teardown / cost table.
+apply; `docs/DEPLOYMENT.md` bring-up / run / teardown / cost table.
 
 **Done when.** `terraform plan` with `enable_composer=false` shows zero Composer
 resources; with `true` shows exactly the module's; nothing applied.

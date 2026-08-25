@@ -1,6 +1,6 @@
 # On-Time Rate Recovery Pipeline — Phase 0: tooling only. Pipeline targets
-# (seed, load, dbt-build, attribution-golden, report, simulate, pipeline,
-# writeback, tf-*) land with their phases (docs/PHASES.md).
+# (seed, load, dbt-build, attribution-golden, report, simulate, writeback,
+# pipeline, test-int-*, tf-*) land with their phases (CLAUDE.md → Commands).
 
 .PHONY: setup test lint check-docs review-gate mutate
 
@@ -17,7 +17,7 @@ setup:
 	uv run pre-commit install
 
 # Offline unit suite: no services, no network. tests/integration is skipped
-# unless OTR_INT=1 (conftest.py) — the plumbing for Phase 8/9 live suites.
+# unless OTR_INT=1 (conftest.py); only the Phase 8/9 test-int-* targets export it.
 test:
 	uv run pytest --ignore=tests/integration
 

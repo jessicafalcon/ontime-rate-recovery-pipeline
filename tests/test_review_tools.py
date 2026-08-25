@@ -148,7 +148,7 @@ def test_gate_reports_a_collection_error_distinctly(
 ) -> None:
     # Zero ids with a NONZERO exit means collection ERRORED (a broken test module),
     # not the format drift — the message must name that cause, not the other, so it
-    # is confident-and-right (review-round r1-#1).
+    # is confident-and-right.
     err = "E   ImportError: cannot import name 'gone' from 'pkg.mod'"
     monkeypatch.setattr(
         gate, "_collect", lambda root: (2, f"collecting...\n{err}", set())
@@ -167,7 +167,7 @@ def test_addopts_clear_does_not_change_what_collects() -> None:
     # summed `path: count` total from a plain `--collect-only` run (doubled `-q` via
     # the repo's addopts). A future addopts smuggling in `-m` / `--ignore` / a `-p`
     # filter would change the set and fail HERE — where a string-pin on "addopts is
-    # only -q" would not (review-round r1-#2). Runs against the real repo.
+    # only -q" would not. Runs against the real repo.
     root = Path(__file__).parent.parent
     env = common.suite_env(root, otr_int="1")
     py = [
@@ -364,8 +364,8 @@ def test_make_targets_handles_multi_name_rules_and_skips_assignments(tmp_path):
     ],
 )
 def test_mutation_targets_under_tests_are_refused_for_every_operator(path: str):
-    # Resolved once, gated on Path.parts — never a string prefix (r3 security 1:
-    # `./tests/oracle.py` walked through `startswith("tests/")`).
+    # Resolved once, gated on Path.parts — never a string prefix (`./tests/x.py`
+    # would walk through `startswith("tests/")`).
     for op in ("delete-call", "constant-return:0", "invert-guard", "swap-sort-key"):
         text = f"## Invariants\n```mutations\n{path}::f   {op}\n```\n"
         with pytest.raises(common.Refused, match="under tests/"):

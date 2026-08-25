@@ -3,17 +3,18 @@
 (the CI lint job runs it too). Not a pytest file, so a docs-only edit does not
 re-trigger the full suite.
 
-Four checks (1-3 over README.md and every docs/*.md; 4 over CLAUDE.md/BACKLOG.md):
+Four checks (1 over the living docs, records and plans; 2-3 over the living docs
+= CLAUDE.md + README + docs/*.md minus the plans; 4 over CLAUDE.md/BACKLOG.md):
   1. Links/anchors — every relative markdown link points at a real file inside
      the repo, and a `#anchor` resolves to a heading there (GitHub-style slug).
   2. Make targets — every `make <target>` the LIVING docs name exists in the
      Makefile (a removed target must be removed from the docs in the same PR).
-     ARCHITECTURE.md and PHASES.md are plans — they describe targets not built
-     yet by design (CLAUDE.md: "allowed to describe things not built yet") — so
-     they are link-checked only, like the records.
+     ARCHITECTURE.md, PHASES.md and PROJECT_BRIEF.md are plans — they describe
+     targets not built yet by design (DECISIONS "Plans are link-checked only")
+     — so they are link-checked only, like the records.
   3. Traces — every (file, token) in TRACES exists in source as an EXACT token
      (a partial rename such as `label_accuracy` → `label_accuracy_v2` FAILS).
-     Empty until a phase names a guard by identity; add the row in that phase.
+     Starts with the tooling's own guards; add a row when a doc cites a symbol.
   4. BACKLOG count — CLAUDE.md's "Open BACKLOG rows: **N**" equals the
      un-struck rows in BACKLOG.md (the sentence two branches always rewrite).
 """

@@ -51,8 +51,8 @@ annotated **Superseded by …** in place and never deleted.
   `check_docs.py`, `round_tag.py`, `review_common.py`) carry their hardening from
   day one (unexpanded `$(value)` + `_Q` quoting, `unexport`, spec path
   validation, literal-only `constant-return`, worktree-registry check) rather
-  than earning it incident by incident. `check_docs.py` starts with an empty
-  `TRACES` list, filled as phases name guards.
+  than earning it incident by incident. `check_docs.py` starts with three tooling
+  traces in `TRACES`, extended as phases name guards.
 - **Phases re-cut by verifiable capability, not by layer.** The brief's
   original Phase 0 was the generator and its Phase 1 ("ingestion & staging")
   mixed contract, loader and dbt; tooling is now Phase 0, the generator + frozen
@@ -62,7 +62,7 @@ annotated **Superseded by …** in place and never deleted.
   opens recover the latent window) is proven in Phases 1–5 before any cloud.
 - **Mutation sweep covers Python only.** dbt SQL has no operator; an invariant
   upheld only in SQL names its dbt unit test in the Invariants table. BACKLOG
-  row with trigger "Phase 3 lands the first SQL-only invariant".
+  row with trigger "Phase 2 (staging dedupe is the first SQL-only invariant)".
 - **The run-tests hook is wired locally, not committed.** A committed
   `settings.json` would auto-execute an inbound branch's hook + conftest for
   anyone opening the repo in Claude Code.
@@ -83,14 +83,14 @@ annotated **Superseded by …** in place and never deleted.
   env passes it, `conftest.py` skips `tests/integration/` unless it is `1`. No
   integration suite exists yet; the plumbing is kept so Phase 8 (Airflow) and
   Phase 9 (BigQuery) add tests without touching the gate.
-- **`check_docs.py` keeps the four-check shape with an empty trace list.** The
-  link/anchor, make-target, and BACKLOG-count checks run from day one; TRACES
-  fills as phases name guards. Why not drop it: the BACKLOG-count sentence is
+- **`check_docs.py` keeps the four-check shape from day one.** Link/anchor,
+  make-target, trace (three tooling rows) and BACKLOG-count checks all run;
+  TRACES grows as phases name guards. Why not drop it: the BACKLOG-count sentence is
   the one two branches always rewrite.
 - **Plans are link-checked only.** `check_docs.py` scans CLAUDE.md, README and
   the living docs for `make <target>` existence, but ARCHITECTURE.md, PHASES.md
   and PROJECT_BRIEF.md name targets not built yet by design. First thing the
-  gate caught on itself (eight future targets); the alternative — a `(Phase N)`
+  gate caught on itself (the plans' future targets); the alternative — a `(Phase N)`
   marker syntax the scanner parses — was rejected as a second grammar.
 - **PROJECT_BRIEF.md stays at the repo root as the origin record**; it is not a
   living doc (ARCHITECTURE/PHASES supersede it) and is link-checked only.

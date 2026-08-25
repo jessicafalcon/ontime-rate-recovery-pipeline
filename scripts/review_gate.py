@@ -170,12 +170,11 @@ def check_evidence(spec_text: str, root: Path) -> bool:
     if tests and not ids:
         # Collection produced no ids at all while the spec names test ids — a GATE
         # defect, not an evidence defect. Reporting every named id as "missing" here
-        # would be the mirror of the vacuous-green pattern this repo keeps finding:
-        # vacuous-RED that hides the real cause. Name the cause, and distinguish its
-        # two shapes so the message is confident-and-right, not confident-and-wrong
-        # (review-round r1): a nonzero pytest exit means collection ERRORED (a broken
-        # test module), zero means the `--collect-only` output carried no node ids
-        # (the pytest-9 format drift this PR fixed).
+        # would be vacuous-RED hiding the real cause — the mirror of vacuous-green.
+        # Name the cause, and distinguish its two shapes so the message is
+        # confident-and-right: a nonzero pytest exit means collection ERRORED (a
+        # broken test module), zero means the `--collect-only` output carried no
+        # node ids (a pytest output-format drift).
         if code != 0:
             tail = "\n".join(out.strip().splitlines()[-15:])
             print(f"FAIL evidence: collection errored (pytest exit {code}):\n{tail}")

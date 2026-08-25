@@ -46,7 +46,8 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   `profiles.yml` (`duckdb`, `bigquery` targets).
 - `eval/` *(Phase 3+)* — the ONLY code that reads truth: label scoring,
   reachable-center MAE, `simulate.py`.
-- `serving/` *(Phase 10)* — write-back to `send_schedule`.
+- `serving/` *(Phase 8; Spanner target Phase 10)* — write-back to
+  `send_schedule`.
 - `orchestration/` *(Phase 8)* — the Airflow DAG. No logic, only ordering.
 - `infra/` *(Phase 9+)* — Terraform; `modules/composer`, `modules/spanner`
   behind `enable_*` toggles.
@@ -59,7 +60,7 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   (`make check-docs`), `round_tag.py` (review-round boundary tags),
   `review_common.py` (shared SPEC validator / section parser / reduced env).
 - `docs/` — ARCHITECTURE.md (spec), PHASES.md (plan); later METRICS.md,
-  AB_DESIGN.md, RESULTS.md, DEPLOYMENT.md.
+  AB_DESIGN.md, RESULTS.md, DEPLOYMENT.md (all under `docs/`).
 - `DECISIONS.md` — why-not-X log. One entry per non-obvious choice.
 - `BACKLOG.md` — deferred findings with revisit triggers. Reviewed at every
   phase exit: do due items or re-defer with a new trigger, never drop.
@@ -69,11 +70,13 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
 ## Commands (macOS, uv)
 
 - `make setup` — `uv sync`, `pre-commit install`
-- `make test` — pytest, no services, no network
+- `make test` — pytest, no services, no network; `tests/integration/` is
+  skipped unless `OTR_INT=1`, which only the `test-int-*` targets export
 - `make lint` — ruff via pre-commit (rewrites files; never run inside a gate)
 - `make check-docs` — `scripts/check_docs.py`: every relative link/anchor in
-  README + docs/ resolves; every `make <target>` the docs name exists in the
-  Makefile; every trace token in `TRACES` exists in source as an exact token;
+  CLAUDE.md, README, docs/, PROJECT_BRIEF, DECISIONS, BACKLOG resolves; every
+  `make <target>` the LIVING docs name exists in the Makefile (ARCHITECTURE,
+  PHASES and PROJECT_BRIEF are plans — link-checked only); every trace token in `TRACES` exists in source as an exact token;
   this file's "Open BACKLOG rows: **N**" equals BACKLOG.md's un-struck rows
 - `make review-gate [SPEC=specs/<f>.md] [BASE=main] [DELETED=a,b]` — the
   offline review gate: `make test` + `ruff check` + `ruff format --check`
@@ -87,9 +90,10 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   applied to HEAD in a throwaway `git worktree`, the offline suite runs there
   under a reduced env, verdict `KILLED | SURVIVED | ERROR` per line; exit 1 on
   any survivor. Python only — dbt SQL mutation is a BACKLOG row
-- Later phases add: `seed`, `load`, `dbt-build`, `attribution-golden`,
-  `report`, `simulate`, `pipeline`, `writeback`, `tf-*`. Each lands with its
-  phase and is listed here in the same PR.
+- Later phases add: `seed` (1), `load`, `dbt-build` (2), `attribution-golden`
+  (3), `report` (4), `simulate` (6), `writeback`, `pipeline`, `test-int-airflow`
+  (8), `tf-plan | tf-apply | tf-destroy`, `test-int-bigquery` (9). Each lands
+  with its phase and is listed here in the same PR.
 
 ## Event model facts (from ARCHITECTURE.md §2; update if reality differs)
 
@@ -122,7 +126,8 @@ DECISIONS.md or fix it.
   write-back twice is a no-op; a `final` label never changes.
 - Truth isolation: `truth/` is never a dbt source, never an input to
   `features`/`scores`. `tests/test_truth_isolation.py` greps every pipeline
-  directory for the word.
+  directory (`dbt/`, `serving/`, `orchestration/`) for the word; in
+  `generator/` only `truth.py` (the writer) and `models.py` may name it.
 - Model scoring and simulation are seeded; RESULTS blocks regenerate
   byte-identically.
 - Non-deterministic by nature and carved out: dbt run ids and timings,
@@ -167,7 +172,7 @@ DECISIONS.md or fix it.
 - Python 3.12 (`.python-version`). Type hints everywhere. No pandas on a
   pipeline path — SQL does the work; Python glues.
 - Dependencies: ask before adding ANY package. Pre-approved allowlist by phase:
-  pydantic, duckdb, dbt-core, dbt-duckdb (Phase 2); dbt-bigquery (Phase 9);
+  pydantic (Phase 1); duckdb, dbt-core, dbt-duckdb (Phase 2); dbt-bigquery (Phase 9);
   apache-airflow via Docker only (Phase 8); google-cloud-spanner (Phase 10);
   dev: pytest, ruff, pre-commit. Anything else is a STOP-and-ask.
 - SQL keywords lowercase, one column per line in select lists, every model

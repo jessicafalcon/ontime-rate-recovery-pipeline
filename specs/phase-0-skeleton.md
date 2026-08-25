@@ -1,4 +1,4 @@
-# Phase 0 — Skeleton and workflow machinery (APPROVED-PENDING)
+# Phase 0 — Skeleton and workflow machinery (PROPOSED)
 
 Contract for the `phase-0-skeleton` branch. Source: `docs/PHASES.md` Phase 0.
 Depends on nothing (first branch after the brief).
@@ -46,8 +46,9 @@ make review-gate SPEC=specs/phase-0-skeleton.md
    *Evidence: row 3.*
 4. **Truth isolation is enforced structurally** from day one, over
    directories that do not exist yet. *Evidence: row 4.*
-5. **The docs are load-bearing**: every relative link and named `make` target
-   in CLAUDE.md, docs/, PROJECT_BRIEF.md resolves; the BACKLOG count matches.
+5. **The docs are load-bearing**: every relative link in CLAUDE.md, docs/,
+   PROJECT_BRIEF, DECISIONS, BACKLOG resolves; every `make` target the living
+   docs name exists (plans are link-only); the BACKLOG count matches.
    *Evidence: row 5.*
 6. **CI is green on the Phase 0 PR** with SHA-pinned actions and
    `uv sync --locked`. *Evidence: row 6.*
@@ -87,9 +88,8 @@ scripts/check_docs.py::token_present          constant-return:True
 
 - **Hardened from day one.** The gate scripts carry their full hardening
   (unexpanded `$(value)` + `_Q`, `unexport`, literal-only `constant-return`,
-  registry check) — satisfies invariants 1–3. Rejected: a lighter gate that earns
-  each rule by incident.
-- **`check_docs.py` keeps four checks with an empty-ish TRACES list** —
+  registry check) — satisfies invariants 1–3. Rejected: a lighter gate.
+- **`check_docs.py` keeps four checks with three tooling traces** —
   satisfies invariant 4. Rejected: dropping traces until needed; the token
   matcher is the part that catches renames and costs nothing empty.
 - **Truth isolation greps directories that may not exist** — satisfies
@@ -103,7 +103,8 @@ scripts/check_docs.py::token_present          constant-return:True
 ## Scope (files)
 
 - `CLAUDE.md`, `docs/ARCHITECTURE.md`, `docs/PHASES.md`, `DECISIONS.md`,
-  `BACKLOG.md`, `specs/TEMPLATE.md`, `specs/phase-0-skeleton.md`
+  `BACKLOG.md`, `PROJECT_BRIEF.md` (§6 renumbered, §7 status),
+  `specs/TEMPLATE.md`, `specs/phase-0-skeleton.md`
 - `Makefile`, `pyproject.toml`, `uv.lock`, `.python-version`,
   `.pre-commit-config.yaml`, `.github/workflows/ci.yml`,
   `.github/pull_request_template.md`
@@ -119,6 +120,7 @@ scripts/check_docs.py::token_present          constant-return:True
 - [x] `CLAUDE.md` — Current status; Commands; Project tooling; BACKLOG count
 - [x] `docs/ARCHITECTURE.md` — new; §8 Gotchas empty by construction
 - [x] `BACKLOG.md` — five opening rows
+- [x] `PROJECT_BRIEF.md` — §6 renumbered to this plan; §7 status
 - [ ] Spec amendments — none (no later spec exists)
 - [ ] RESULTS / METRICS / DEPLOYMENT — none
 - [ ] README — none (Phase 13; PROJECT_BRIEF.md is the front door until then)
@@ -140,8 +142,8 @@ cannot see; threat model is "mistakes, not a user who controls the environment".
 
 ## Review & stack risk
 
-- **code-reviewer** (mandatory): the ported scripts against this CLAUDE.md
-  (`OTR_INT` marker consistent; no stale assumptions).
+- **code-reviewer** (mandatory): the gate scripts against this CLAUDE.md
+  (`OTR_INT` marker consistent between Commands, conftest and the scripts).
 - **security-reviewer**: triggered — CI workflow added. Checks SHA pins,
   `--locked`, no credentials, `.gitignore` coverage.
 - **functionality-tester**: DONE command; runs `make mutate

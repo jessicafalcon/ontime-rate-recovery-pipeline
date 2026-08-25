@@ -73,7 +73,9 @@ happens once, in staging, against the tz valid at `client_event_time`.
 `truth/users.jsonl`: per user the latent `reachable_center_local_hour` and
 `reachable_width_hours`; per prompt the generator's assigned cause. Lives under
 `fixtures/<profile>/truth/` and `data/truth/`; **no dbt source may reference
-it** (`tests/test_truth_isolation.py`). Only `eval/` reads it.
+it** (`tests/test_truth_isolation.py`). Only `eval/` reads it; inside
+`generator/` only `truth.py` (the writer) and `models.py` (the record type)
+may name it.
 
 ### 2.5 Attribution label set (exhaustive, exclusive) *(Phase 3)*
 
@@ -134,7 +136,7 @@ never by the wall clock.
 **The model is a dbt model.** Versioned, unit-tested, runs on both warehouses.
 Python is reserved for `eval/`.
 
-### 2.9 Serving table (Spanner) *(Phase 10)*
+### 2.9 Serving table *(DuckDB stand-in Phase 8; Spanner Phase 10)*
 
 `send_schedule(user_id PK, cohort_id, send_hour_local, send_minute_local, tz,
 confidence, model_version, computed_as_of, written_at)`. Written by an
@@ -161,7 +163,7 @@ EVAL (Python, reads truth)   label accuracy · reachable-center MAE · counterfa
    ▼
 WRITE-BACK (Python)   idempotent upsert → Spanner send_schedule (local: a DuckDB table stands in)
 
-AIRFLOW  ingest → dbt build → write-back, data-interval-aware, catchup for backfill
+AIRFLOW  load → dbt build → eval → write-back, data-interval-aware, catchup for backfill
          (local Docker | Cloud Composer, isolated Terraform module, applied once)
 TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · IAM · budget alerts
 ```
@@ -215,7 +217,7 @@ BACKLOG row, not code.
 
 Region `us-central1`. Free/near-free layer safe to leave up: BigQuery, GCS,
 IAM, budget alerts. Spanner: 90-day trial, `enable_spanner` toggle, teardown
-date in `DEPLOYMENT.md`. Composer: `enable_composer` toggle, applied once on
+date in `docs/DEPLOYMENT.md`. Composer: `enable_composer` toggle, applied once on
 demo day, destroyed the same hour. Budget alerts do not stop spend — stated,
 with the optional billing-disable function as the real guardrail. Terraform
 state in GCS (bootstrapped manually); WIF for CI, never JSON keys.
