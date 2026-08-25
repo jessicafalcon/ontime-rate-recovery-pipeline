@@ -529,6 +529,15 @@ def test_round_tag_refuses_another_checkout(tmp_path: Path, monkeypatch) -> None
         round_tag.check_cwd()
 
 
+def test_round_tag_reset_clears_only_round_tags_and_is_idempotent(repo: Path) -> None:
+    round_tag.write(1, repo)
+    _git(repo, "tag", "-a", "review-round-2", "HEAD", "-m", "round=2")
+    _git(repo, "tag", "-a", "keep-me", "HEAD", "-m", "not a round tag")
+    assert round_tag.reset(repo) == ["review-round-1", "review-round-2"]
+    assert _git(repo, "tag", "-l").split() == ["keep-me"]  # non-round tag survives
+    assert round_tag.reset(repo) == []  # nothing left — a no-op second run
+
+
 def test_exec_under_suite_env_uses_no_shell(tmp_path: Path, capsys, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-not-for-children")
     code = common.exec_under_suite_env(

@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); …
 
-.PHONY: setup test lint check-docs review-gate mutate seed freeze
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -43,6 +43,12 @@ review-gate:
 # in a throwaway git worktree, offline suite run there, KILLED/SURVIVED/ERROR.
 mutate:
 	uv run python scripts/mutate.py --spec $(call _Q,$(value SPEC))
+
+# Delete this checkout's local review-round-* tags (scripts/round_tag.py reset).
+# Run at phase start: round tags are local, never pushed, and phase-agnostic, so
+# a new phase's rounds would collide with the prior phase's leftovers.
+round-reset:
+	uv run python scripts/round_tag.py reset
 
 # The seeded generator (generator/cli.py): validates PROFILE ([a-z0-9_]+),
 # writes data/out/<PROFILE>/ only, compares its own hashes to
