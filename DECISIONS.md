@@ -76,6 +76,86 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### Phase 1
+
+*Event contract, generator, frozen tiny fixture (`phase-1-event-contract`).*
+
+- **`timing_gap` is delivery + no-action evidence alone (spec reconciliation,
+  2026-08-25).** ARCHITECTURE §2.5 rule 4 used to require that "the user's
+  organic activity says the window was outside their reachable hours" — that
+  clause makes Phase 3 attribution read the Phase 5 reachability features, a
+  layering inversion: the label would depend on a model downstream of it, and
+  the generator, which assigns the true cause in this phase, would have to
+  encode a reachability judgment into truth. Now: `timing_gap` = delivered in
+  grace, no `capture_started`, no `response_recorded`, no upload chain; the
+  former "delivered-and-reachable-but-no-action" case in rule 5 is absorbed
+  by it. Phase 5 scores reachability separately from organic opens and reports
+  how much of the timing-gap share it can move; it never feeds the label.
+  Rejected: keeping the clause and computing a Phase 3 reachability stub
+  (two definitions of reachability, one of them unversioned).
+- **Cause-first generation.** The generator draws each prompt's cause, then
+  emits the events that cause implies; injectors (duplicate, late arrival,
+  skew) run after and never change it. Truth is exact by construction. Rejected:
+  a behavioural model labelled afterwards — a second attribution to keep in sync.
+- **One response function, shared with Phase 6.** `generator/response.py::
+  responds` is pure and caller-seeded; `eval/simulate.py` imports it. Rejected:
+  inlining the draw (Phase 6 would re-implement it).
+- **`seed` writes `data/out/<p>/` only and self-checks against the manifest;
+  `freeze` is the only writer of `fixtures/`.** A `seed` that wrote into
+  `fixtures/` could repair its own golden and the DONE command would prove
+  nothing. `freeze` takes `CONFIRM=yes` with command-line origin — the first
+  live use of the Phase 0 `$(origin)` rule.
+- **The freeze guard is a review-gate check, not a TRACES row.** `check_docs`
+  tests token presence; read-only-ness is a diff property: any `fixtures/**`
+  path in `git diff BASE...HEAD` FAILs unless the spec declares
+  `Freeze: fixtures/<p>/MANIFEST.sha256`, and a fixture file changed without its
+  manifest FAILs regardless.
+- **Profiles are JSON, every knob required.** A missing knob is a validation
+  error, never a silent default; `tiny` and `medium` are data, not code.
+  Rejected: Python-module profiles (executable config), YAML (a package).
+- **Layout.** `raw/events_<upload-date>.jsonl` (one file per UTC
+  `server_upload_time` date — Phase 7's landing unit), `dims/dim_user.csv`,
+  `truth/{users,prompts}.jsonl`; canonical JSON (`sort_keys`, no spaces),
+  Amplitude timestamp strings, whole seconds, counter ids, `SIM_START` =
+  2026-01-05 (January: no DST transition in any profile tz). Rejected: one
+  `events.jsonl` (Phase 7 would split it).
+- **`cli.py` joins `truth.py`/`models.py` as a file that may name truth.** The
+  rule's property is "generation logic never names the side-file"; something
+  has to call the writer, and the entry point is the least-logic place. The
+  record types are `LatentUser` / `PromptCause` so `generate.py` and
+  `response.py` stay clean. Rejected: exempting all of `generator/` (vacates
+  the guard).
+- **Skew injector is forward-only** (client ahead). Backward skew is
+  observationally an upload delay (§8 Gotchas); the generator only produces
+  what attribution can in principle detect, so truth stays scoreable.
+- **Organic opens are drawn around the latent centre** (`organic_opens_per_day`
+  knob, Gaussian with σ = width/2). Phase 5's signal has to exist in the
+  fixture; the knob is named here because PHASES did not list it.
+- **Single-tz fallback emits one row, and the fix keeps the RNG stream (review
+  round 1, 2026-08-25).** `build_dims` used `others = [...] or tzs`, so a
+  one-entry `tz_mix` with `tz_change_rate > 0` produced two contiguous rows with
+  the *same* tz — a no-op SCD2 "change" that falsifies invariant 8. The `rng.random()`
+  draw still fires whenever `days > 1` (only `rng.choice`/`rng.randint` are now
+  skipped when there is no other tz), so multi-tz profiles consume the stream
+  identically and `tiny`/`medium` re-freeze byte-for-byte (`seed OK … manifest
+  match`). Rejected: short-circuiting before the `rng.random()` draw (would shift
+  every later user's tz and drift the fixtures).
+- **`dim_user` draws from its own seed-derived stream (`Random(profile.seed *
+  7919 + 1)`), not the event `rng` (phase-exit audit, 2026-08-25).** Dims (tz
+  assignment, the tz-change draw, signup dates) must not perturb the event
+  stream's bytes, nor the reverse: with a separate `Random`, adding or removing
+  an event-side draw never reshuffles `dim_user`, and each concern stays an
+  independent, reproducible function of `profile.seed`. The `* 7919 + 1` prime
+  offset decorrelates the two streams from the one seed. Rejected: threading the
+  event `rng` into `build_dims` (an added event draw would move every user's tz).
+- **`cli.py::seed`/`freeze` mutations are `constant-return:0`, not `delete-call`
+  (review round 1).** `delete-call` removes statement-level calls *to* the named
+  function, and `freeze` is only ever `return freeze(...)` in `main` (a value, not
+  a statement), so `freeze delete-call` finds no hit and errors. `constant-return:0`
+  keeps each function's normal success return while skipping every side effect —
+  the exact "the drift-exit / write path never ran" mutation — killed by the two
+  new `test_generator.py` tests.
+
 ### Phase 0
 
 *Skeleton and workflow machinery (`phase-0-skeleton`).*

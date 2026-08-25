@@ -89,3 +89,48 @@ def test_base_defaults_to_main_and_deleted_is_optional():
     out = _make_n("review-gate", {}, {})
     assert "--base 'main'" in out
     assert "--deleted" not in out and "--spec" not in out
+
+
+# ------------------------------------------------------- Phase 1: seed, freeze
+
+
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_profile_reaches_python_as_one_literal_from_both_origins(value: str):
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for target in ("seed", "freeze"):
+        for origin in ("cmdline", "env"):
+            out = _make_n(
+                target,
+                {"PROFILE": value} if origin == "cmdline" else {},
+                {"PROFILE": value} if origin == "env" else {},
+            )
+            assert f"generator.cli {target} {quoted}" in out, (target, origin, out)
+            assert "pwned" not in out.replace(value, "")
+
+
+def test_freeze_requires_confirm_from_the_command_line() -> None:
+    """The recipe passes `$(origin CONFIRM)` verbatim; Python accepts only
+    `command line` + `yes`. An exported CONFIRM=yes is refused, no write."""
+    from generator import cli
+
+    out = _make_n("freeze", {"PROFILE": "tiny", "CONFIRM": "yes"}, {})
+    assert "--confirm 'yes' --confirm-origin 'command line'" in out
+    out = _make_n("freeze", {"PROFILE": "tiny"}, {"CONFIRM": "yes"})
+    assert "--confirm 'yes' --confirm-origin 'environment'" in out
+    out = _make_n("freeze", {"PROFILE": "tiny"}, {})
+    # Gotcha (ARCHITECTURE §8): `unexport CONFIRM` counts as a file definition,
+    # so an unset CONFIRM has origin `file`, not `undefined`. Refused either way.
+    assert "--confirm '' --confirm-origin 'file'" in out
+    for confirm, origin in (
+        ("yes", "environment"),
+        ("", "undefined"),
+        ("no", "command line"),
+    ):
+        with pytest.raises(SystemExit) as e:
+            cli.freeze("tiny", confirm, origin)
+        assert e.value.code == 2
+    with pytest.raises(SystemExit) as e:
+        cli.freeze("../x", "yes", "command line")
+    assert e.value.code == 2

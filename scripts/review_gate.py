@@ -19,6 +19,11 @@ thing `/review-round N` does, before any agent is spawned.
   e. Deleted symbols — each name in --deleted still found anywhere in the tracked
                        tree (except the spec itself, which names the deletion) is
                        a FAIL (self-review item 1).
+  f. Fixtures        — `fixtures/<p>/**` in the diff is a FAIL unless the spec
+                       declares `Freeze: fixtures/<p>/MANIFEST.sha256`; a fixture
+                       file changed without its manifest changing is a FAIL
+                       regardless; with no --spec any fixture change is a FAIL
+                       (fixtures are read-only after the phase that froze them).
 
 Nothing here edits, commits, or fixes. Not a pytest file (the run-tests hook)."""
 
@@ -285,6 +290,50 @@ def check_deleted(symbols: list[str], root: Path, spec: Path | None) -> bool:
     return ok
 
 
+# --------------------------------------------------------------------- f
+
+_FREEZE = re.compile(r"Freeze: fixtures/([a-z0-9_]+)/MANIFEST\.sha256")
+_FIXTURE_FILE = re.compile(r"^fixtures/([a-z0-9_]+)/(.+)$")
+
+
+def freeze_declarations(spec_text: str | None) -> set[str]:
+    """Profiles the spec declares (re-)frozen; empty without a spec."""
+    return set(_FREEZE.findall(spec_text)) if spec_text else set()
+
+
+def check_fixtures(spec_text: str | None, root: Path, base: str) -> bool:
+    code, out = run(["git", "diff", "--name-only", f"{base}...HEAD"], root)
+    if code != 0:
+        print(f"FAIL fixtures: git diff {base}...HEAD failed:\n{tail(out, 3)}")
+        return False
+    touched: dict[str, set[str]] = {}
+    for ln in out.splitlines():
+        m = _FIXTURE_FILE.match(ln.strip())
+        if m:
+            touched.setdefault(m.group(1), set()).add(m.group(2))
+    if not touched:
+        print("PASS fixtures: no fixture file in the diff")
+        return True
+    declared = freeze_declarations(spec_text)
+    ok = True
+    for profile, files in sorted(touched.items()):
+        if "MANIFEST.sha256" not in files:
+            print(
+                f"FAIL fixtures: fixtures/{profile}/ changed without its manifest "
+                f"({len(files)} files) — fixtures are read-only"
+            )
+            ok = False
+        elif profile not in declared:
+            print(
+                f"FAIL fixtures: fixtures/{profile}/ changed but the spec has no "
+                f"`Freeze: fixtures/{profile}/MANIFEST.sha256` line"
+            )
+            ok = False
+        else:
+            print(f"PASS fixtures: fixtures/{profile}/ re-frozen as the spec declares")
+    return ok
+
+
 # ------------------------------------------------------------------ main
 
 
@@ -312,7 +361,9 @@ def main(argv: list[str] | None = None) -> int:
         text = spec.read_text()
         results += [check_evidence(text, ROOT), check_records(text, ROOT, base)]
     else:
+        text = None
         print("SKIP evidence, records: no --spec given")
+    results.append(check_fixtures(text, ROOT, base))
     symbols = [s.strip() for s in a.deleted.split(",") if s.strip()]
     if symbols:
         results.append(check_deleted(symbols, ROOT, spec))
