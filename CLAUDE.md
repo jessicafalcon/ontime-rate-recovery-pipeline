@@ -290,6 +290,24 @@ simple, standard way over the clever way.
 - Hotfixes on `fix/<slug>` from main, same rules. Never mix two phases in a
   PR; a needed change in an earlier phase is a STOP and its own fix PR.
 
+## Which review agents run (by diff surface)
+
+The deterministic gate (`make review-gate`, `make mutate`) runs on EVERY
+range. Agents run only when the range touches their surface — derived from
+`git diff --name-only <RANGE>`, a lookup, not a judgment:
+
+| Surface touched in the range | Agents |
+|---|---|
+| Code: `*.py`, `dbt/**` (models, macros, tests, yml), `Makefile`, `scripts/`, `tests/`, `generator/`, `eval/`, `serving/`, `orchestration/`, `infra/**/*.tf` | code-reviewer, then functionality-tester |
+| Sensitive: `.github/`, `infra/`, `serving/`, `.env*`, `dbt/profiles.yml`, `.claude/hooks/`, `.claude/settings*.json`, any target that deletes / applies / takes `CONFIRM` | + security-reviewer |
+| Docs and records only: `*.md` (incl. `specs/`, `docs/`, `DECISIONS.md`, `BACKLOG.md`, `CLAUDE.md`, `.claude/agents|commands/*.md`) | coherence-auditor only, scoped to the changed docs (drift and stale-record checks; no code to review or run) |
+| Any of the above at a phase exit | + coherence-auditor over the whole repo (mandatory) |
+
+A range that mixes surfaces runs the union. A docs-only range still runs the
+gate (`check-docs`, the BACKLOG count, Evidence/Record checks). Running an
+agent whose surface is untouched is waste and a source of noise findings;
+skipping one whose surface IS touched is a STOP.
+
 ## Project tooling
 
 Index only. All agents are report-only by contract: none carry Write/Edit
@@ -312,18 +330,21 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
   already wired); blocks writes containing secret-looking values.
 - `code-reviewer` agent — `.claude/agents/`; diff review against this file
   (determinism, truth isolation, schema/label/denominator contracts,
-  allowlist, read-only fixtures, dbt conventions). At every spec finish line.
+  allowlist, read-only fixtures, dbt conventions). When the range touches
+  code (table above).
 - `security-reviewer` agent — mandatory when CI, `.env`, `infra/`, IAM,
   service accounts, Spanner credentials, or a destructive target are touched.
 - `functionality-tester` agent — runs the suite + the spec's DONE command,
-  mutation step, Evidence rows. After code-reviewer.
+  mutation step, Evidence rows. After code-reviewer, same trigger.
 - `coherence-auditor` agent — whole-repo drift audit vs CLAUDE.md /
   ARCHITECTURE.md / PHASES.md / DECISIONS.md. MANDATORY once at each phase
-  exit, before merge.
+  exit, before merge; the ONLY agent for a docs-only range (scoped to the
+  changed docs).
 - `/selfcheck` — `.claude/commands/selfcheck.md`; verifies the last commit,
   then stops.
 - `/review-round N` — `.claude/commands/review-round.md`; gate → mutate →
-  invariants → scoped agents → table → tag → "Cap is the architect's call".
+  invariants → agents selected by diff surface → one table → tag → "Cap is
+  the architect's call".
 - `strategic-compact` skill — user-level; suggests /compact at breakpoints.
 
 ## Current status

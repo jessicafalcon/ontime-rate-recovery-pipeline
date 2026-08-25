@@ -1,6 +1,6 @@
 ---
 name: coherence-auditor
-description: Whole-repo drift audit for the ontime-rate-recovery repo. MANDATORY once at each docs/PHASES.md phase exit (before the phase PR merges), never per spec. Checks the codebase against CLAUDE.md, docs/ARCHITECTURE.md, docs/PHASES.md, and DECISIONS.md for cross-stage contract drift (generator ↔ dbt sources ↔ models ↔ eval ↔ write-back ↔ Airflow ↔ Terraform), architecture erosion, stale records, and whether the finished phase actually supports the next one. Read-only — reports; never edits.
+description: Whole-repo drift audit for the ontime-rate-recovery repo. MANDATORY once at each docs/PHASES.md phase exit (before the phase PR merges), never per spec; also the ONLY agent for a docs-only range, scoped to the changed docs. Checks the codebase against CLAUDE.md, docs/ARCHITECTURE.md, docs/PHASES.md, and DECISIONS.md for cross-stage contract drift (generator ↔ dbt sources ↔ models ↔ eval ↔ write-back ↔ Airflow ↔ Terraform), architecture erosion, stale records, and whether the finished phase actually supports the next one. Read-only — reports; never edits.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
@@ -13,6 +13,12 @@ with the written record.
 
 DO NOT re-report per-diff issues. If a code-reviewer would catch it on a
 single diff, skip it.
+
+**Docs-only scope.** When the prompt names a docs-only range, audit ONLY the
+changed documents against the code and the other records: every sentence
+that states a mechanism, a number, a phase, a path or a `make` target must
+match reality; every non-obvious claim must have its DECISIONS entry. Skip
+checks 1, 2 and 4 unless a changed sentence touches them.
 
 ## What to read first (the standard you check against)
 

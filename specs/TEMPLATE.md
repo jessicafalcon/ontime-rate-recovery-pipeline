@@ -179,10 +179,13 @@ Makefile target takes a variable, deletes, touches cloud, or reads input.")
 
 ## Review & stack risk
 
-- **code-reviewer** (mandatory): <what it checks here>.
+Agents are selected by the diff surface (CLAUDE.md → "Which review agents
+run"); name here which ones this phase's Scope triggers and what each checks.
+
+- **code-reviewer** (<triggered — code in Scope; or "not triggered — docs-only">): <what it checks here>.
 - **security-reviewer** (<mandatory if CI / .env / infra / IAM / credentials /
   a destructive or cloud target are touched, else "not triggered — reason">).
-- **functionality-tester**: DONE command + <the phase's specific negative tests>.
+- **functionality-tester** (<same trigger as code-reviewer>): DONE command + <the phase's specific negative tests>.
 - **coherence-auditor** at exit: <the stale sentences it must find gone>; diffs
   the Record-updates list against the actual diff.
 - Stack risk: <pinned-version / dialect features to verify in the first hour;

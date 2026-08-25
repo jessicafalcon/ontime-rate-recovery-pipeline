@@ -61,10 +61,34 @@ block, and every fix amendment appended to it (CLAUDE.md Workflow rules, "Fix
 amendments"). A spec with no Invariants section is a BLOCKER finding; record it
 and continue with the range alone.
 
-## 4. Spawn the agents, scoped
+## 4. Select the agents by diff surface, then spawn them scoped
 
-Spawn **code-reviewer** and **functionality-tester** (that order; both
-report-only — no Write/Edit, do not grant more). Each prompt contains:
+Run `git diff --name-only <RANGE>` and classify the range with the table in
+CLAUDE.md → "Which review agents run" (a lookup, not a judgment). Print the
+classification and the agent list BEFORE spawning:
+
+```
+Surface: code | sensitive | docs-only | mixed (<the surfaces>)
+Agents:  <list>
+```
+
+- **Code touched** (`*.py`, `dbt/**`, `Makefile`, `scripts/`, `tests/`,
+  `generator/`, `eval/`, `serving/`, `orchestration/`, `infra/**/*.tf`): spawn
+  **code-reviewer** and **functionality-tester** (that order).
+- **Sensitive touched** (`.github/`, `infra/`, `serving/`, `.env*`,
+  `dbt/profiles.yml`, `.claude/hooks/`, `.claude/settings*.json`, a target that
+  deletes / applies / takes `CONFIRM`): also **security-reviewer** (round 1;
+  later rounds only if the range touches it again).
+- **Docs-only** (every changed path is `*.md`): spawn **coherence-auditor**
+  ONLY, scoped to the changed files ("audit these docs against the code and
+  the other records; report stale, contradictory or unrecorded sentences").
+  Do not spawn code-reviewer or functionality-tester — there is no code in
+  the range to review or run; the gate already checked links, targets,
+  Evidence ids and the BACKLOG count.
+- **Mixed**: the union.
+
+All agents are report-only — no Write/Edit, do not grant more. Each prompt
+contains:
 
 - the range: "review `git diff <RANGE>`; read every changed file in full";
 - the invariant list from step 3, verbatim;
@@ -79,9 +103,6 @@ report-only — no Write/Edit, do not grant more). Each prompt contains:
   mechanism whose value comes from the caller or the clock rather than the data;
   a dbt model is code — read the SQL and its unit tests".
 
-Round 1 only: if `git diff --name-only <RANGE>` touches `.github/`, `infra/`,
-`serving/`, `.env*`, `dbt/profiles.yml`, or a Makefile target that deletes,
-applies, or takes `CONFIRM`, also spawn **security-reviewer** with the same range.
 
 ## 5. Consolidate, tag, STOP
 
@@ -92,10 +113,11 @@ every finding from every agent:
 | # | Finding (one sentence) | Raised by | file:line | Class | In range / missed in round N−1 |
 |---|---|---|---|---|---|
 
-Below the table, one verdict line per agent (`code-reviewer: pass | N
+Below the table, one verdict line per agent that ran (`code-reviewer: pass | N
 findings`, `functionality-tester: works | partially | doesn't`,
-`security-reviewer: pass | N findings`) — the whole round's summary in one
-place. Class is exactly one of **correctness** (wrong output, a survivor, an invariant
+`security-reviewer: pass | N findings`, `coherence-auditor: pass | N
+findings`) and one line naming the agents NOT run and the surface reason —
+the whole round's summary in one place. Class is exactly one of **correctness** (wrong output, a survivor, an invariant
 with no pin, a caller/clock-sourced mechanism), **security**, **record** (a
 stale or missing record sentence), **wording** (names, comments, docs prose).
 

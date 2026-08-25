@@ -63,6 +63,13 @@ annotated **Superseded by …** in place and never deleted.
 - **Mutation sweep covers Python only.** dbt SQL has no operator; an invariant
   upheld only in SQL names its dbt unit test in the Invariants table. BACKLOG
   row with trigger "Phase 2 (staging dedupe is the first SQL-only invariant)".
+- **Review agents are selected by diff surface, not run wholesale.** A
+  docs-only range gets the coherence-auditor (scoped) and the gate; code gets
+  code-reviewer + functionality-tester; sensitive paths add security-reviewer.
+  Table in CLAUDE.md; `/review-round` classifies `git diff --name-only` and
+  prints the list before spawning. Why: running code-reviewer on prose
+  produces noise findings and burns a round; the classification is a lookup so
+  it cannot drift by judgment.
 - **The run-tests hook is wired locally, not committed.** A committed
   `settings.json` would auto-execute an inbound branch's hook + conftest for
   anyone opening the repo in Claude Code.
