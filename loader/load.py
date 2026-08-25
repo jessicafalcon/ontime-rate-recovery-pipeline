@@ -32,11 +32,49 @@ def fixture_dir(profile: str) -> Path:
     raise FileNotFoundError(f"no raw/ under fixtures/{profile} or data/out/{profile}")
 
 
+STAGED_SUBTREES = ("raw", "dims")  # the only bytes the loader ever reads
+
+
 def manifest_drift(fixture: Path) -> list[str]:
-    """Files differing from `<fixture>/MANIFEST.sha256`; [] when there is no
-    manifest (an unfrozen profile) or everything matches."""
+    """Staged files (raw/, dims/) differing from `<fixture>/MANIFEST.sha256`;
+    [] when there is no manifest (an unfrozen profile) or they all match.
+    Hashes the two subtrees only — nothing else under the fixture is read."""
     m = fixture / manifest.NAME
-    return manifest.diff(fixture, m) if m.is_file() else []
+    if not m.is_file():
+        return []
+    have = {
+        f"{sub}/{rel}": digest
+        for sub in STAGED_SUBTREES
+        if (fixture / sub).is_dir()
+        for rel, digest in manifest.compute(fixture / sub).items()
+    }
+    want = {
+        k: v
+        for k, v in manifest.parse(m.read_text()).items()
+        if k.split("/", 1)[0] in STAGED_SUBTREES
+    }
+
+    def state(k: str) -> str:
+        if k not in have:
+            return "missing"
+        return "unexpected" if k not in want else "changed"
+
+    return sorted(
+        f"{k}: {state(k)}" for k in set(have) | set(want) if have.get(k) != want.get(k)
+    )
+
+
+def conflicting_duplicates(con: duckdb.DuckDBPyConnection) -> list[str]:
+    """insert_ids with two rows tying on all three clocks but differing in
+    event_properties — a data conflict, never a dedupe choice (invariant 1)."""
+    rows = con.execute(
+        "select insert_id from raw.events "
+        "group by insert_id, client_event_time, server_received_time, "
+        "server_upload_time "
+        "having count(distinct cast(event_properties as varchar)) > 1 "
+        "order by insert_id"
+    ).fetchall()
+    return [r[0] for r in rows]
 
 
 def event_files(fixture: Path) -> list[Path]:
@@ -96,8 +134,13 @@ def load_dims(con: duckdb.DuckDBPyConnection, csv: Path) -> int:
     return con.execute("select count(*) from raw.dim_user").fetchone()[0]
 
 
+class ConflictingDuplicates(ValueError):
+    pass
+
+
 def load(profile: str, db: Path | None = None) -> tuple[int, int, int]:
-    """(files, event rows, dim rows). Recreates `raw.*` from the fixture."""
+    """(files, event rows, dim rows). Recreates `raw.*` from the fixture;
+    raises ConflictingDuplicates (tables dropped again) on a payload conflict."""
     fixture = fixture_dir(profile)
     files = event_files(fixture)
     con = connect(db or db_path(profile))
@@ -105,6 +148,11 @@ def load(profile: str, db: Path | None = None) -> tuple[int, int, int]:
         create_raw_tables(con)
         n_events = load_events(con, files)
         n_dims = load_dims(con, fixture / "dims" / "dim_user.csv")
+        conflicts = conflicting_duplicates(con)
+        if conflicts:
+            con.execute("drop table raw.events")
+            con.execute("drop table raw.dim_user")
+            raise ConflictingDuplicates(", ".join(conflicts))
     finally:
         con.close()
     return len(files), n_events, n_dims

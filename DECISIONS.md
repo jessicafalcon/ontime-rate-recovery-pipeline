@@ -164,6 +164,15 @@ annotated **Superseded by …** in place and never deleted.
   is total: `+ client_event_time, md5(event_properties)` — the injector's
   offset can be 0 s, so the old two-clock key could tie and the "surviving
   row" was then unspecified (tiny has 0 such ties; the unit test plants one).
+- **Amendment 3 — review round 2 (approved 2026-08-25).** Amendment 2.5's
+  `md5(cast(event_properties as varchar))` tie-break was dialect SQL inline in
+  a model (no `varchar`, bytes-typed `MD5` on BigQuery) — the seam violation
+  the five macros exist to prevent. The key is the three clocks; a pair tying
+  on all three but differing in payload is a data conflict the loader refuses
+  (`load CONFLICT`, exit 1, tables dropped) — the generator cannot emit one.
+  Rejected: a sixth macro to fingerprint JSON. And `manifest_drift` hashes
+  only `raw/` and `dims/`: hashing the fixture root made a pipeline directory
+  read side-file bytes and refuse a load on a change confined to them.
 - **Pins are split where dedupe changes them.** `RAW_UPLOAD_ERROR_CODE_NULLS`
   (190) vs `STG_UPLOAD_ERROR_CODE_NULLS` (180): ten of the JSON-null copies
   were duplicates; one number for both would have been wrong in one table.

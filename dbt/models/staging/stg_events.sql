@@ -1,8 +1,9 @@
 -- One row per insert_id (the export carries duplicates), typed, with the
 -- user's tz valid at client_event_time and the event's local wall time.
 -- Dedupe keeps the earliest (server_upload_time, server_received_time,
--- client_event_time) copy; an exact tie is broken by the payload's hash —
--- a total, content-derived order, never file or load order (invariant 1).
+-- client_event_time) copy — content-derived, never file or load order
+-- (invariant 1). Copies tying on all three clocks are identical by contract:
+-- the loader refuses a landing where they differ in event_properties.
 
 with raw_events as (
 
@@ -21,8 +22,7 @@ with raw_events as (
         order by
             server_upload_time,
             server_received_time,
-            client_event_time,
-            md5(cast(event_properties as varchar))
+            client_event_time
     ) = 1
 
 ),

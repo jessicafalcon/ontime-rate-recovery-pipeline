@@ -182,6 +182,61 @@ def test_load_reports_its_source_and_refuses_manifest_drift(
     assert "load: source=data/out/mine (unfrozen)" in capsys.readouterr().out
 
 
+def test_manifest_check_reads_only_raw_and_dims(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A change confined to the side-file directory never touches the load;
+    a change to a staged file refuses it."""
+    import shutil
+
+    root = tmp_path / "repo"
+    fx = root / "fixtures" / "tiny"
+    shutil.copytree(TINY, fx)
+    monkeypatch.setattr(loader, "ROOT", root)
+    monkeypatch.setattr(loader, "DATA", root / "data")
+    other = next(
+        d for d in fx.iterdir() if d.is_dir() and d.name not in ("raw", "dims")
+    )
+    victim = next(other.iterdir())
+    victim.write_text(victim.read_text() + "\n")
+    assert loader.manifest_drift(fx) == []
+    assert cli.load("tiny") == 0
+    (fx / "dims" / "dim_user.csv").write_text(
+        (fx / "dims" / "dim_user.csv").read_text().replace("Europe/London", "UTC", 1)
+    )
+    assert loader.manifest_drift(fx) == ["dims/dim_user.csv: changed"]
+    assert cli.load("tiny") == 1
+
+
+def test_conflicting_duplicate_is_refused_at_landing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Same insert_id, same three clocks, different payload: never a dedupe
+    choice — the load fails and leaves no raw tables behind."""
+    a = _event("e-1", "2026-01-05 08:01:00.000000")
+    b = dict(a, event_properties={"x": 1}, event_type="app_opened")
+    same = dict(a)  # an exact copy is fine
+    _mini_fixture(tmp_path, {"events_2026-01-05.jsonl": [a, b, same]})
+    monkeypatch.setattr(loader, "ROOT", tmp_path)
+    monkeypatch.setattr(loader, "DATA", tmp_path / "data")
+    with pytest.raises(loader.ConflictingDuplicates, match="e-1"):
+        loader.load("mini", tmp_path / "m.duckdb")
+    con = duckdb.connect(str(tmp_path / "m.duckdb"))
+    tables = {
+        r[0]
+        for r in con.execute(
+            "select table_name from information_schema.tables"
+        ).fetchall()
+    }
+    assert "events" not in tables
+    con.close()
+    assert cli.load("mini") == 1
+    assert "load CONFLICT" in capsys.readouterr().out
+    _mini_fixture(tmp_path / "ok", {"events_2026-01-05.jsonl": [a, same]})
+    monkeypatch.setattr(loader, "ROOT", tmp_path / "ok")
+    assert loader.load("mini", tmp_path / "ok.duckdb") == (1, 2, 1)
+
+
 def test_profile_and_target_are_validated() -> None:
     for bad in ("", "../x", 'a"; b', "Tiny", "a b"):
         with pytest.raises(SystemExit) as e:

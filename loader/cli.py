@@ -44,6 +44,9 @@ def load(profile: str) -> int:
         files, events, dims = loader.load(profile)
     except FileNotFoundError as e:
         die(f"load: refused — {e}")
+    except loader.ConflictingDuplicates as e:
+        print(f"load CONFLICT: insert_ids with one clock triple and two payloads: {e}")
+        return 1
     tag = "" if source.parent.name == "fixtures" else " (unfrozen)"
     print(f"load: source={source.relative_to(loader.ROOT)}{tag}")
     print(f"load OK: {profile} — {files} files, {events} event rows, {dims} dim rows")

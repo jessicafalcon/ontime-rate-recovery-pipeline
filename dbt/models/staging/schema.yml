@@ -4,8 +4,10 @@ models:
   - name: stg_events
     description: >
       One row per insert_id — the raw export deduplicated by content
-      (earliest server_upload_time, then server_received_time), typed, with
-      the dim_user tz valid at client_event_time and the local wall time.
+      (earliest server_upload_time, then server_received_time, then
+      client_event_time; copies tying on all three are identical, the loader
+      refuses otherwise), typed, with the dim_user tz valid at
+      client_event_time and the local wall time.
     columns:
       - name: insert_id
         description: Dedupe key; unique here, not in raw.
@@ -63,9 +65,9 @@ unit_tests:
   - name: stg_events_dedupes_insert_id
     description: >
       Three insert_ids, six raw rows: copies split across two upload-date
-      files, one copy re-received later, and one EXACT tie on all three
-      clocks differing only in event_properties — exactly one row per id,
-      the earliest copy, the tie broken by the payload hash (invariant 1).
+      files (e-1), one copy re-received later (e-2), and one pair tying on
+      both server clocks but differing in client_event_time (e-3) — exactly
+      one row per id, the earliest on each key in turn (invariant 1).
     model: stg_events
     given:
       - input: source('raw', 'events')
@@ -75,17 +77,17 @@ unit_tests:
           union all select 'e-1', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:01', timestamp '2026-01-06 08:01:00', '{}'::json
           union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 09:00:00', timestamp '2026-01-05 09:00:01', timestamp '2026-01-05 09:01:00', '{}'::json
           union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 09:00:00', timestamp '2026-01-05 09:30:00', timestamp '2026-01-05 09:01:00', '{}'::json
-          union all select 'e-3', 'prompt_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:00:00', timestamp '2026-01-05 10:00:01', timestamp '2026-01-05 10:01:00', '{"prompt_id":"p-9"}'::json
-          union all select 'e-3', 'prompt_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:00:00', timestamp '2026-01-05 10:00:01', timestamp '2026-01-05 10:01:00', '{"prompt_id":"p-1"}'::json
+          union all select 'e-3', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:05:00', timestamp '2026-01-05 10:06:00', timestamp '2026-01-05 10:07:00', '{}'::json
+          union all select 'e-3', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:00:00', timestamp '2026-01-05 10:06:00', timestamp '2026-01-05 10:07:00', '{}'::json
       - input: source('raw', 'dim_user')
         format: sql
         rows: |
           select 'u-1' as user_id, 'UTC' as tz, 'c-morning' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
     expect:
       rows:
-        - {insert_id: e-1, server_upload_time: "2026-01-05 08:01:00", server_received_time: "2026-01-05 08:00:01", prompt_id: null}
-        - {insert_id: e-2, server_upload_time: "2026-01-05 09:01:00", server_received_time: "2026-01-05 09:00:01", prompt_id: null}
-        - {insert_id: e-3, server_upload_time: "2026-01-05 10:01:00", server_received_time: "2026-01-05 10:00:01", prompt_id: p-1}
+        - {insert_id: e-1, server_upload_time: "2026-01-05 08:01:00", server_received_time: "2026-01-05 08:00:01", client_event_time: "2026-01-05 08:00:00"}
+        - {insert_id: e-2, server_upload_time: "2026-01-05 09:01:00", server_received_time: "2026-01-05 09:00:01", client_event_time: "2026-01-05 09:00:00"}
+        - {insert_id: e-3, server_upload_time: "2026-01-05 10:07:00", server_received_time: "2026-01-05 10:06:00", client_event_time: "2026-01-05 10:00:00"}
   - name: stg_events_uses_tz_valid_at_client_event_time
     description: >
       A user with two dim rows (Tokyo until 2026-01-11, then London);
