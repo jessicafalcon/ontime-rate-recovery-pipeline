@@ -63,8 +63,9 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   will hold every pinned number.
 - `scripts/` — the offline guards, none a pytest file: `review_gate.py`
   (`make review-gate`), `mutate.py` (`make mutate`), `check_docs.py`
-  (`make check-docs`), `round_tag.py` (review-round boundary tags),
-  `review_common.py` (shared SPEC validator / section parser / reduced env).
+  (`make check-docs`), `round_tag.py` (review-round boundary tags;
+  `make round-reset` clears them at phase start), `review_common.py` (shared
+  SPEC validator / section parser / reduced env).
 - `docs/` — ARCHITECTURE.md (spec), PHASES.md (plan); later METRICS.md,
   AB_DESIGN.md, RESULTS.md, DEPLOYMENT.md (all under `docs/`).
 - `DECISIONS.md` — why-not-X log. One entry per non-obvious choice.
@@ -97,6 +98,10 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   applied to HEAD in a throwaway `git worktree`, the offline suite runs there
   under a reduced env, verdict `KILLED | SURVIVED | ERROR` per line; exit 1 on
   any survivor. Python only — dbt SQL mutation is a BACKLOG row
+- `make round-reset` — deletes this checkout's local `review-round-*` tags
+  (`scripts/round_tag.py reset`). Run at phase start: round tags are local,
+  never pushed, and phase-agnostic, so a new phase's rounds would otherwise
+  collide with the prior phase's leftovers. Leaves non-round tags alone
 - `make seed PROFILE=<p>` — the generator: validates `[a-z0-9_]+`, writes
   `data/out/<p>/` only, hashes its output and compares to
   `fixtures/<p>/MANIFEST.sha256` when one exists (`seed OK … manifest match`;
@@ -296,7 +301,10 @@ simple, standard way over the clever way.
   raised by, file:line, class, in-range / missed) followed by one verdict line
   per agent. Never relay agent results one at a time as they arrive.
 - Start each phase: `git checkout main && git pull && git checkout -b
-  phase-N-<slug>`. One phase = one branch = one PR.
+  phase-N-<slug> && make round-reset`. One phase = one branch = one PR;
+  `round-reset` clears the prior phase's local round tags so review round 1
+  does not collide with them. Run it at phase start ONLY — mid-phase it would
+  delete the current round's boundary.
 - Commits small, at green states, prefixed `phase-N:`.
 - PR via `gh pr create` when Done-when passes AND verdicts are approved. Body:
   Done-when check + output, files touched, decisions the spec didn't cover,
@@ -373,6 +381,6 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 contract, `tiny` fixture (frozen, 13 files, manifest) and `medium` profile
 exist; `make seed PROFILE=tiny` twice reports `manifest match`; the gate refuses
 fixture drift. Review rounds 1–2 and the phase-exit coherence audit are clean.
-Next: Phase 2 (staging on DuckDB). Open BACKLOG rows: **6**.
+Next: Phase 2 (staging on DuckDB). Open BACKLOG rows: **5**.
 
 (Update this section at the end of every working day.)

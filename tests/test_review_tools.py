@@ -529,6 +529,32 @@ def test_round_tag_refuses_another_checkout(tmp_path: Path, monkeypatch) -> None
         round_tag.check_cwd()
 
 
+def test_round_tag_reset_clears_only_round_tags_and_is_idempotent(repo: Path) -> None:
+    round_tag.write(1, repo)
+    _git(repo, "tag", "-a", "review-round-2", "HEAD", "-m", "round=2")
+    _git(repo, "tag", "-a", "keep-me", "HEAD", "-m", "outside the glob")
+    # glob-matching but off-scheme: these reach `_TAG_RE` and must be excluded,
+    # so neutralizing the FILTER (not just the glob) is caught, not only the glob.
+    _git(repo, "tag", "-a", "review-round-0", "HEAD", "-m", "leading zero")
+    _git(repo, "tag", "-a", "review-round-final", "HEAD", "-m", "not a number")
+    assert round_tag.reset(repo) == ["review-round-1", "review-round-2"]
+    assert _git(repo, "tag", "-l").split() == [
+        "keep-me",
+        "review-round-0",
+        "review-round-final",
+    ]  # non-round and off-scheme tags all survive
+    assert round_tag.reset(repo) == []  # nothing left — a no-op second run
+
+
+def test_round_tag_main_reset_before_n_check(monkeypatch, capsys) -> None:
+    # `reset` has no `n` arg; the dispatch must return before `a.n` is read.
+    # Reorder the `a.n < 1` check above it and this crashes with AttributeError.
+    monkeypatch.setattr(round_tag, "check_cwd", lambda *a, **k: None)
+    monkeypatch.setattr(round_tag, "reset", lambda *a, **k: ["review-round-1"])
+    assert round_tag.main(["reset"]) == 0
+    assert "reset: deleted 1 round tag(s): review-round-1" in capsys.readouterr().out
+
+
 def test_exec_under_suite_env_uses_no_shell(tmp_path: Path, capsys, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-not-for-children")
     code = common.exec_under_suite_env(

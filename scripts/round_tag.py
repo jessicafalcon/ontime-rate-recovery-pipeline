@@ -8,6 +8,9 @@ that it names the right round and that it is on this branch's history.
 
     round_tag.py write N   → tags HEAD `review-round-N` with the message `round=N`
     round_tag.py read N    → prints `round=N` after the anchored parse + ancestry check
+    round_tag.py reset     → deletes this checkout's local `review-round-*` tags
+                             (phase start: the prior phase's boundaries are stale;
+                             the tag names are phase-agnostic so they would collide)
 
 `read` is a parse error (exit 2) when the tag is missing, its message is not
 exactly the one line `round=N`, or it is not an ancestor of HEAD (a tag from
@@ -29,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from review_common import ROOT, Refused, die, run  # noqa: E402
 
 _LINE = re.compile(r"^round=([1-9][0-9]*)$")
+_TAG_RE = re.compile(r"^review-round-[1-9][0-9]*$")  # the exact round-tag scheme
 
 
 def tag_name(n: int) -> str:
@@ -78,6 +82,25 @@ def read(n: int, root: Path = ROOT) -> int:
     return n
 
 
+def reset(root: Path = ROOT) -> list[str]:
+    """Delete every local `review-round-*` tag in this checkout and return the
+    names deleted (sorted). Run at phase start: the prior phase's rounds are
+    merged and their boundaries are stale, and the names are phase-agnostic so a
+    new phase's round 1 would collide. Local only — `git tag -d` never touches a
+    remote. Filters to the exact scheme, so an unrelated tag is left alone.
+
+    NEVER mid-phase: it deletes THIS phase's `review-round-N` boundaries too, and
+    round N+1 needs `review-round-N..HEAD` — a deleted annotated tag is
+    unrecoverable. Phase start only."""
+    _, out = run(["git", "tag", "-l", "review-round-*"], root)
+    tags = sorted(t for t in out.splitlines() if _TAG_RE.match(t.strip()))
+    for t in tags:
+        code, err = run(["git", "tag", "-d", t], root)
+        if code != 0:
+            raise Refused(f"git tag -d {t} failed: {err.strip()}")
+    return tags
+
+
 def write(n: int, root: Path = ROOT) -> None:
     _, out = run(["git", "tag", "-l", tag_name(n)], root)
     if out.strip():
@@ -95,9 +118,18 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("write").add_argument("n", type=int)
     sub.add_parser("read").add_argument("n", type=int)
+    sub.add_parser("reset")
     a = ap.parse_args(argv)
     try:
         check_cwd()
+        if a.cmd == "reset":
+            deleted = reset()
+            print(
+                f"reset: deleted {len(deleted)} round tag(s): {', '.join(deleted)}"
+                if deleted
+                else "reset: no round tags to delete"
+            )
+            return 0
         if a.n < 1:
             raise Refused("refusing: N must be ≥ 1")
         if a.cmd == "write":

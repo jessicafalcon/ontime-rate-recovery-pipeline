@@ -4,7 +4,8 @@ Items accepted "for now" with a concrete revisit trigger. Reviewed at every
 phase exit (alongside the coherence audit); an item whose trigger has arrived
 is either done in that phase or re-deferred here with a new trigger — never
 silently dropped. Cite rows by TITLE (bold text); line numbers shift. A closed
-row is struck through with "DONE Phase N", never deleted.
+row is struck through with "DONE Phase N" — or the landing branch, e.g.
+"DONE — `fix/<slug>`", when a non-phase fix closes it — never deleted.
 
 | Item | Source | Trigger |
 |---|---|---|
@@ -15,4 +16,4 @@ row is struck through with "DONE Phase N", never deleted.
 | **Budget alerts do not stop spend** — optional Pub/Sub → Cloud Function that disables billing at $150 is the real guardrail; documented as optional in Phase 9, built only if the author wants it. | Architecture review 2026-08-24 | Phase 9 |
 | ~~**CI green on the Phase 0 PR is unverified until first push** — Done-when 6 / Evidence row 6; the workflow has never run (branch unpushed).~~ **DONE Phase 0** — `ci / lint-test` green on PR #1 (run 32880728851). | Review round 1 | First push of `phase-0-skeleton`: confirm `ci / lint-test` green, then strike |
 | **Cross-warehouse dialect drift is caught only on DuckDB in CI** — BigQuery runs are manual. A scheduled or on-demand BigQuery CI job needs WIF; deferred until Phase 9 proves the four macros by hand. | Phase 0 | Phase 9 exit |
-| **Round tags are phase-agnostic (`review-round-N`), so each phase's tags collide with the prior phase's leftovers** — Phase 0's `review-round-1`/`-2` tripped Phase 1's round-1 collision check; deleted by hand to proceed. Fix on its own `fix/round-tag-phase-reset` branch (Phase 0 tooling, kept out of the Phase 1 PR): recommended a `round_tag.py reset` subcommand deleting local `review-round-*`, run at phase start (+ `make round-reset`, a CLAUDE.md phase-start note); alternative is phase-scoped tag names. | Review round 1 | Phase 2 review round 1, or when the fix branch lands (whichever first) |
+| ~~**Round tags are phase-agnostic (`review-round-N`), so each phase's tags collide with the prior phase's leftovers** — Phase 0's `review-round-1`/`-2` tripped Phase 1's round-1 collision check; deleted by hand to proceed.~~ **DONE — `fix/round-tag-phase-reset`** — `round_tag.py reset` (+ `make round-reset`) deletes local `review-round-*`; the CLAUDE.md phase-start step runs it so a new phase's round 1 cannot collide. | Review round 1 | Phase 2 review round 1, or when the fix branch lands (whichever first) |
