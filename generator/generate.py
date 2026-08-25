@@ -1,6 +1,8 @@
 """The seeded generator. `generate(profile)` is a pure function of the profile
-(which carries the seed): one `random.Random`, a fixed `SIM_START`, counter
-ids, sorted iteration everywhere, emit order = arrival order.
+(which carries the seed): every draw derives from `profile.seed` — the event
+stream here, plus a separate `dim_user` stream seeded `profile.seed*7919+1` in
+`dims.py` (see DECISIONS) — with a fixed `SIM_START`, counter ids, sorted
+iteration everywhere, emit order = arrival order.
 
 Cause-first: for every prompt×user the cause is drawn, then the events that
 cause implies are emitted; injectors run after and never change it (skew sets

@@ -140,6 +140,14 @@ annotated **Superseded by …** in place and never deleted.
   identically and `tiny`/`medium` re-freeze byte-for-byte (`seed OK … manifest
   match`). Rejected: short-circuiting before the `rng.random()` draw (would shift
   every later user's tz and drift the fixtures).
+- **`dim_user` draws from its own seed-derived stream (`Random(profile.seed *
+  7919 + 1)`), not the event `rng` (phase-exit audit, 2026-08-25).** Dims (tz
+  assignment, the tz-change draw, signup dates) must not perturb the event
+  stream's bytes, nor the reverse: with a separate `Random`, adding or removing
+  an event-side draw never reshuffles `dim_user`, and each concern stays an
+  independent, reproducible function of `profile.seed`. The `* 7919 + 1` prime
+  offset decorrelates the two streams from the one seed. Rejected: threading the
+  event `rng` into `build_dims` (an added event draw would move every user's tz).
 - **`cli.py::seed`/`freeze` mutations are `constant-return:0`, not `delete-call`
   (review round 1).** `delete-call` removes statement-level calls *to* the named
   function, and `freeze` is only ever `return freeze(...)` in `main` (a value, not

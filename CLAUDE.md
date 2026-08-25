@@ -368,10 +368,11 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 1 implemented, under review (`phase-1-event-contract`).** Phase 0
-merged (PR #1). The generator, pydantic contract, `tiny` fixture (frozen, 13
-files, manifest) and `medium` profile exist; `make seed PROFILE=tiny` twice
-reports `manifest match`; the gate refuses fixture drift. Review round 1
-next; then Phase 2 (staging on DuckDB). Open BACKLOG rows: **6**.
+**Phase 1 implemented and reviewed, ready to open the PR
+(`phase-1-event-contract`).** Phase 0 merged (PR #1). The generator, pydantic
+contract, `tiny` fixture (frozen, 13 files, manifest) and `medium` profile
+exist; `make seed PROFILE=tiny` twice reports `manifest match`; the gate refuses
+fixture drift. Review rounds 1–2 and the phase-exit coherence audit are clean.
+Next: Phase 2 (staging on DuckDB). Open BACKLOG rows: **6**.
 
 (Update this section at the end of every working day.)
