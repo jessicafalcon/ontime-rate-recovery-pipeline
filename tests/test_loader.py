@@ -232,9 +232,29 @@ def test_conflicting_duplicate_is_refused_at_landing(
     con.close()
     assert cli.load("mini") == 1
     assert "load CONFLICT" in capsys.readouterr().out
+    # make dbt-build reaches the same refusal and never starts dbt
+    assert cli.dbt_build("mini", "duckdb") == 1
+    assert "dbt-build" not in capsys.readouterr().out
     _mini_fixture(tmp_path / "ok", {"events_2026-01-05.jsonl": [a, same]})
     monkeypatch.setattr(loader, "ROOT", tmp_path / "ok")
     assert loader.load("mini", tmp_path / "ok.duckdb") == (1, 2, 1)
+
+
+def test_distinct_insert_ids_sharing_all_clocks_are_not_a_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The conflict key includes insert_id: two different ids with identical
+    whole-second clocks and different payloads are two events, not a conflict
+    (reachable at medium/prod scale; tiny has none)."""
+    a = _event("e-1", "2026-01-05 08:01:00.000000")
+    b = dict(_event("e-2", "2026-01-05 08:01:00.000000"), event_properties={"x": 1})
+    _mini_fixture(tmp_path, {"events_2026-01-05.jsonl": [a, b]})
+    monkeypatch.setattr(loader, "ROOT", tmp_path)
+    monkeypatch.setattr(loader, "DATA", tmp_path / "data")
+    assert loader.load("mini", tmp_path / "m.duckdb") == (1, 2, 1)
+    con = duckdb.connect(str(tmp_path / "m.duckdb"))
+    assert loader.conflicting_duplicates(con) == []
+    con.close()
 
 
 def test_profile_and_target_are_validated() -> None:
