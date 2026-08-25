@@ -5,6 +5,8 @@ One build per session (module fixture); every assertion reads the tables."""
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -25,10 +27,11 @@ def build(db: Path) -> bool:
     from dbt.cli.main import dbtRunner
 
     loader.load("tiny", db)
-    os.environ["OTR_DUCKDB_PATH"] = str(db)
     args = ["build", "--project-dir", str(DBT), "--profiles-dir", str(DBT)]
     args += ["--target", "duckdb", "--quiet", "--target-path", str(db.parent / "t")]
-    return bool(dbtRunner().invoke(args).success)
+    with pytest.MonkeyPatch.context() as mp:  # never leaks into later tests
+        mp.setenv("OTR_DUCKDB_PATH", str(db))
+        return bool(dbtRunner().invoke(args).success)
 
 
 @pytest.fixture(scope="module")
@@ -44,6 +47,14 @@ def q(db: Path, sql: str) -> list[tuple]:
         return con.execute(sql).fetchall()
     finally:
         con.close()
+
+
+def table_hash(db: Path, table: str) -> tuple:
+    sql = (
+        "select md5(string_agg(r::varchar, '|' order by r::varchar)) "
+        f"from (select {table} as r from main_staging.{table})"
+    )
+    return q(db, sql)[0]
 
 
 def test_tiny_build_is_green(built: Path) -> None:
@@ -106,10 +117,11 @@ def test_tz_change_users_are_converted_under_each_row(built: Path) -> None:
         )
     changers = [u for u, r in dims.items() if len(r) > 1]
     assert changers == ["u-000008", "u-000010"]
+    users = ", ".join(f"'{u}'" for u in changers)
     events = q(
         built,
         "select user_id, tz, client_event_time, client_event_time_local "
-        f"from main_staging.stg_events where user_id in {tuple(changers)}",
+        f"from main_staging.stg_events where user_id in ({users})",
     )
     assert len({tz for _, tz, _, _ in events}) > 1  # both rows actually used
     for user_id, tz, t, local in events:
@@ -121,7 +133,7 @@ def test_tz_change_users_are_converted_under_each_row(built: Path) -> None:
         )
 
 
-def test_every_event_has_a_tz_and_first_receipt_is_taken(built: Path) -> None:
+def test_every_event_has_a_tz_and_undelivered_prompts_match_pin(built: Path) -> None:
     assert q(
         built, "select count(*) from main_staging.stg_events where tz is null"
     ) == [(0,)]
@@ -129,18 +141,51 @@ def test_every_event_has_a_tz_and_first_receipt_is_taken(built: Path) -> None:
         built, "select count(*), count(delivered_at) from main_staging.stg_prompts"
     )[0]
     assert n_prompts == pins.STG_PROMPT_ROWS
-    assert 0 < n_delivered < n_prompts  # delivery faults exist in tiny
+    assert n_prompts - n_delivered == pins.STG_PROMPTS_UNDELIVERED
+    # the receipt taken is the earliest one for its prompt
+    earlier = q(
+        built,
+        "select count(*) from main_staging.stg_prompts p "
+        "join main_staging.stg_events e on e.prompt_id = p.prompt_id "
+        "and e.event_type = 'prompt_delivered' "
+        "and e.client_event_time < p.delivered_at",
+    )
+    assert earlier == [(0,)]
+
+
+def test_upload_delay_sign_and_range_match_pins(built: Path) -> None:
+    """received − client: negative = client clock ahead (skew injector)."""
+    lo, hi, neg = q(
+        built,
+        "select min(upload_delay_seconds), max(upload_delay_seconds), "
+        "sum(case when upload_delay_seconds < 0 then 1 else 0 end) "
+        "from main_staging.stg_events",
+    )[0]
+    assert (lo, hi) == pins.STG_DELAY_RANGE_SECONDS
+    assert neg == pins.STG_NEGATIVE_DELAY_ROWS
 
 
 def test_two_builds_are_identical(built: Path, tmp_path: Path) -> None:
     db2 = tmp_path / "again.duckdb"
     assert build(db2)
     for table in ("stg_events", "stg_prompts"):
-        sql = (
-            "select md5(string_agg(r::varchar, '|' order by r::varchar)) "
-            f"from (select {table} as r from main_staging.{table})"
-        )
-        assert q(built, sql) == q(db2, sql), table
+        assert table_hash(built, table) == table_hash(db2, table), table
+
+
+def test_build_under_a_non_utc_host_zone_is_identical(built: Path, tmp_path: Path):
+    """A second process with TZ=Asia/Tokyo (DuckDB's default session zone
+    follows the host) produces the same staged bytes (spec invariant 3)."""
+    db2 = tmp_path / "tokyo.duckdb"
+    code = (
+        "import sys; from pathlib import Path; from tests.test_staging import build; "
+        "sys.exit(0 if build(Path(sys.argv[1])) else 1)"
+    )
+    env = {**os.environ, "TZ": "Asia/Tokyo", "PYTHONPATH": str(ROOT)}
+    subprocess.run(
+        [sys.executable, "-c", code, str(db2)], cwd=ROOT, env=env, check=True
+    )
+    for table in ("stg_events", "stg_prompts"):
+        assert table_hash(built, table) == table_hash(db2, table), table
 
 
 def test_tokyo_day_one_lands_on_the_previous_utc_day(built: Path) -> None:

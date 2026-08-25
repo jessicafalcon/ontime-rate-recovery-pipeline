@@ -22,6 +22,7 @@ delivered as (
 
     select
         prompt_id,
+        insert_id as delivered_insert_id,
         client_event_time as delivered_at,
         client_event_time_local as delivered_at_local
     from {{ ref('stg_events') }}
@@ -42,6 +43,7 @@ select
     s.window_minutes,
     s.sent_at,
     s.sent_at_local,
+    d.delivered_insert_id,
     d.delivered_at,
     d.delivered_at_local
 from sent as s

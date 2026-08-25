@@ -4,6 +4,8 @@
 name: ontime
 version: "0.1.0"
 profile: ontime
+# unit_tests: needs ≥ 1.8; `accepted_values … arguments:` needs ≥ 1.10.
+require-dbt-version: [">=1.10.0", "<2.0.0"]
 
 model-paths: ["models"]
 macro-paths: ["macros"]

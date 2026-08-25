@@ -82,6 +82,40 @@ def test_no_default_dispatch_body() -> None:
         assert f"default__{name}" not in (DBT / "macros" / f"{name}.sql").read_text()
 
 
+def test_session_zone_is_pinned_in_profile_and_macro() -> None:
+    """Belt and braces for invariant 3: the profile pins the session zone and
+    the macro pins its input as UTC (ARCHITECTURE §8: timezone() direction)."""
+    assert "TimeZone: UTC" in (DBT / "profiles.yml").read_text()
+    macro = (DBT / "macros" / "to_local_time.sql").read_text()
+    assert "timezone('UTC', " in macro
+
+
+def test_schema_event_types_equal_the_contract() -> None:
+    """schema.yml's hand-written accepted_values list equals EventType (the
+    generated sources.yml is derived from it; this one is not)."""
+    from generator.models import EventType
+
+    schema = (DBT / "models" / "staging" / "schema.yml").read_text()
+    m = re.search(r"values: \[([^\]]+)\]", schema)
+    assert m, "no accepted_values in schema.yml"
+    listed = [v.strip().strip('"') for v in m.group(1).split(",")]
+    assert listed == [e.value for e in EventType]
+
+
+SINGULAR = {
+    "assert_every_event_matches_one_dim_row.sql": "ref('stg_events')",
+    "assert_dim_user_key_unique.sql": "source('raw', 'dim_user')",
+    "assert_error_code_only_on_upload_failed.sql": "ref('stg_events')",
+}
+
+
+def test_singular_tests_exist_and_target_their_relation() -> None:
+    files = {p.name for p in (DBT / "tests").glob("*.sql")}
+    assert files == set(SINGULAR)
+    for name, relation in SINGULAR.items():
+        assert relation in (DBT / "tests" / name).read_text(), name
+
+
 def test_no_dbt_packages() -> None:
     assert not (DBT / "packages.yml").exists()
     assert not (DBT / "package-lock.yml").exists()

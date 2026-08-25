@@ -7,6 +7,7 @@ Idempotent: every load recreates both tables from the files."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import duckdb
@@ -45,13 +46,22 @@ def create_raw_tables(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(DDL.read_text())
 
 
+_IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
+_TYPE = re.compile(r"^[A-Za-z][A-Za-z0-9 ()]*$")
+
+
 def column_spec(con: duckdb.DuckDBPyConnection, table: str) -> str:
-    """`{col: 'type', …}` for read_json/read_csv, from the DDL-created table."""
+    """`{col: 'type', …}` for read_json/read_csv, from the DDL-created table.
+    The spec is interpolated (DuckDB has no parameter for `columns=`), so every
+    identifier and type is asserted quote-free first."""
     rows = con.execute(
         "select column_name, data_type from information_schema.columns "
         "where table_schema = 'raw' and table_name = ? order by ordinal_position",
         [table],
     ).fetchall()
+    for c, t in rows:
+        if not (_IDENT.match(c) and _TYPE.match(t)):
+            raise ValueError(f"refusing column spec {c!r}: {t!r}")
     return "{" + ", ".join(f"{c}: '{t}'" for c, t in rows) + "}"
 
 

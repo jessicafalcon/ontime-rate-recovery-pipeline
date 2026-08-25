@@ -12,6 +12,7 @@ import argparse
 import os
 import re
 import sys
+from typing import NoReturn
 
 from loader import load as loader
 
@@ -19,7 +20,7 @@ NAME_RE = re.compile(r"^[a-z0-9_]+$")
 DBT_DIR = loader.ROOT / "dbt"
 
 
-def die(msg: str, code: int = 2) -> None:
+def die(msg: str, code: int = 2) -> NoReturn:
     print(msg)
     sys.exit(code)
 

@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     for p, s in rendered.items():
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(s)
-    print(f"gen-sources OK: {len(rendered)} files, {len(stale)} rewritten")
+    print(f"gen-sources OK: {len(rendered)} files, {len(stale)} stale")
     return 0
 
 

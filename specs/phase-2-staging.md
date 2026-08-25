@@ -1,10 +1,10 @@
-# Phase 2 — Staging on DuckDB (PROPOSED)
+# Phase 2 — Staging on DuckDB (APPROVED 2026-08-25 — implemented, in review)
 
 Contract for the `phase-2-staging` branch. Source: `docs/PHASES.md` Phase 2.
 Depends on Phase 1 merged (PR #2, `e844cea`) and `fix/round-tag-phase-reset`
 (PR #3, `661c402`).
 
-**Status: PROPOSED — do not start until approved.** Three new runtime
+**Status: APPROVED 2026-08-25; implemented on `phase-2-staging`.** Three new runtime
 dependencies, all on the Phase 2 allowlist: `duckdb`, `dbt-core`, `dbt-duckdb`.
 No dbt package (`dbt-utils` included) — a need for one is a STOP-and-ask. dbt
 unit tests (`unit_tests:` in schema yml) need dbt-core ≥ 1.8; if the resolved
@@ -55,8 +55,8 @@ approval before any implementation; the rest are facts the spec pins.
    unit test (`unit_tests: stg_events_dedupes_insert_id` — given four raw rows
    with two `insert_id`s across two `server_upload_time` dates, expect two
    rows), a `unique` data test on `stg_events.insert_id`, and the Python pin
-   (`tests/test_pins.py`: raw row count, staged count, their difference =
-   `DEDUPE_COUNT`). An operator that deletes a `qualify`/`where` clause would
+   (`tests/pins.py`, asserted by `tests/test_staging.py`: raw row count, staged
+   count, their difference = `DEDUPE_COUNT`). An operator that deletes a `qualify`/`where` clause would
    be killed by exactly these three, so it adds nothing in Phase 2; Phase 3's
    precedence rules are the first place a SQL survivor could hide (five
    `case` arms, each with a unit test — a `swap-predicate` operator over the
@@ -146,7 +146,7 @@ make review-gate SPEC=specs/phase-2-staging.md && make dbt-build PROFILE=tiny
 
 - `make review-gate SPEC=…` — offline suite (loader, pins via an in-process
   dbt build into `tmp_path`, sources regeneration equality, the no-clock and
-  four-macro greps, Makefile origin tests, truth isolation over `dbt/` and
+  five-macro greps, Makefile origin tests, truth isolation over `dbt/` and
   `loader/`) + lint + check-docs + Evidence / Record / fixture checks.
 - `make dbt-build PROFILE=tiny` — validates `tiny`, loads
   `fixtures/tiny/{raw,dims}` into `data/tiny.duckdb` schema `raw`, runs
@@ -186,22 +186,22 @@ make review-gate SPEC=specs/phase-2-staging.md && make dbt-build PROFILE=tiny
 | Done-when | Proof |
 |---|---|
 | 1 | `make dbt-build PROFILE=tiny` output line `dbt-build OK: tiny/duckdb`; `tests/test_staging.py::test_tiny_build_is_green` (in-process build into `tmp_path`) |
-| 2 | `tests/test_staging.py::test_pins_are_reproduced` (every constant in `tests/pins.py` vs the built tables), `tests/test_loader.py::test_loader_globs_every_raw_file` (10 files, 970 rows, incl. `events_2026-01-04.jsonl`) |
-| 3 | dbt unit test `stg_events_dedupes_insert_id` (`dbt/models/staging/schema.yml`), dbt data test `unique` on `stg_events.insert_id`, `tests/test_staging.py::test_dedupe_count_matches_pin`, `tests/test_loader.py::test_duplicate_insert_id_across_files_is_loaded_twice_and_staged_once` |
+| 2 | `tests/test_staging.py::test_pins_are_reproduced` (every constant in `tests/pins.py` vs the built tables), `::test_upload_delay_sign_and_range_match_pins`, `::test_every_event_has_a_tz_and_undelivered_prompts_match_pin`, `tests/test_loader.py::test_loader_globs_every_raw_file` (10 files, 970 rows, incl. `events_2026-01-04.jsonl`) |
+| 3 | dbt unit test `stg_events_dedupes_insert_id` (`dbt/models/staging/schema.yml`), dbt data test `unique` on `stg_events.insert_id`, `tests/test_staging.py::test_dedupe_count_matches_pin`, `tests/test_loader.py::test_duplicate_insert_id_across_files_is_loaded_twice` (raw keeps both; staging them to one is the unit test's job) |
 | 4 | dbt unit test `stg_events_uses_tz_valid_at_client_event_time` (a two-row user, events on both sides of the change), singular test `dbt/tests/assert_every_event_matches_one_dim_row.sql`, `tests/test_loader.py::test_empty_valid_to_loads_as_null`, `tests/test_staging.py::test_tz_change_users_are_converted_under_each_row` |
-| 5 | `tests/test_dbt_conventions.py::test_exactly_five_dispatch_macros`, `::test_each_macro_has_duckdb_body_and_bigquery_stub_that_raises`, `::test_no_default_dispatch_body`, `::test_no_clock_call_in_any_model_or_macro`, `::test_no_dbt_packages`, `::test_every_model_has_description_and_a_test` |
-| 6 | `tests/test_dbt_sources.py::test_committed_sources_equal_regeneration`, `::test_hand_edit_is_detected` (tmp copy with one column removed → not equal), `::test_no_unique_test_on_raw_insert_id`; `make gen-sources` output line `gen-sources OK: 2 files unchanged` |
+| 5 | `tests/test_dbt_conventions.py::test_exactly_five_dispatch_macros`, `::test_each_macro_has_duckdb_body_and_bigquery_stub_that_raises`, `::test_no_default_dispatch_body`, `::test_no_clock_call_in_any_model_or_macro`, `::test_session_zone_is_pinned_in_profile_and_macro`, `::test_no_dbt_packages`, `::test_every_model_has_description_and_a_test`; `tests/test_staging.py::test_build_under_a_non_utc_host_zone_is_identical` |
+| 6 | `tests/test_dbt_sources.py::test_committed_sources_equal_regeneration`, `::test_hand_edit_is_detected` (tmp copy with one column removed → not equal), `::test_no_unique_test_on_raw_insert_id`; `make gen-sources` output line `gen-sources OK: 2 files, 0 stale` |
 
 ## Invariants (REQUIRED)
 
 | Invariant ("for all …, … holds") | Falsified by (scenario test) |
 |---|---|
-| 1. For all `insert_id`, exactly one `stg_events` row, regardless of how many raw rows carry it and which upload-date files they land in; the surviving row is the one with the earliest `server_upload_time`, then earliest `server_received_time` (content-derived tie-break, never file or load order). | dbt unit test `stg_events_dedupes_insert_id` (4 raw rows, 2 ids, copies split across two `server_upload_time` dates, one copy with a later `server_received_time` → 2 rows, the earlier ones); `unique` on `stg_events.insert_id`; `tests/test_loader.py::test_duplicate_insert_id_across_files_is_loaded_twice_and_staged_once`; `tests/test_staging.py::test_dedupe_count_matches_pin` |
+| 1. For all `insert_id`, exactly one `stg_events` row, regardless of how many raw rows carry it and which upload-date files they land in; the surviving row is the one with the earliest `server_upload_time`, then earliest `server_received_time` (content-derived tie-break, never file or load order). | dbt unit test `stg_events_dedupes_insert_id` (4 raw rows, 2 ids, copies split across two `server_upload_time` dates, one copy with a later `server_received_time` → 2 rows, the earlier ones); `unique` on `stg_events.insert_id`; `tests/test_loader.py::test_duplicate_insert_id_across_files_is_loaded_twice`; `tests/test_staging.py::test_dedupe_count_matches_pin` |
 | 2. For all events, `client_event_time_local` is `client_event_time` converted under the `dim_user` row with `valid_from <= client_event_time and (valid_to is null or client_event_time < valid_to)`; every event matches exactly one row. | dbt unit test `stg_events_uses_tz_valid_at_client_event_time`; singular `assert_every_event_matches_one_dim_row`; `tests/test_staging.py::test_tz_change_users_are_converted_under_each_row` (`u-000008`, `u-000010` against `generator/dims.py::tz_at`); `tests/test_loader.py::test_empty_valid_to_loads_as_null` |
-| 3. For all models and macros, no call reads the clock (`current_timestamp`, `now()`, `current_date`, `get_current_timestamp`, `run_started_at`) and no source has a freshness block; two builds of the same fixture produce identical staged tables. | `tests/test_dbt_conventions.py::test_no_clock_call_in_any_model_or_macro` (grep over `dbt/models/**`, `dbt/macros/**`, `dbt/tests/**`; a planted `now()` in a tmp copy is found), `::test_no_freshness_block`, `tests/test_staging.py::test_two_builds_are_identical` (row hashes of both staging tables, build twice into two `tmp_path` dbs) |
+| 3. For all models and macros, no call reads the clock (`current_timestamp`, `now()`, `current_date`, `get_current_timestamp`, `run_started_at`) and no source has a freshness block; two builds of the same fixture produce identical staged tables. | `tests/test_dbt_conventions.py::test_no_clock_call_in_any_model_or_macro` (grep over `dbt/models/**`, `dbt/macros/**`, `dbt/tests/**`; a planted `now()` in a tmp copy is found), `::test_no_freshness_block`, `::test_session_zone_is_pinned_in_profile_and_macro`, `tests/test_staging.py::test_two_builds_are_identical` (row hashes of both staging tables, build twice into two `tmp_path` dbs), `::test_build_under_a_non_utc_host_zone_is_identical` (second process, `TZ=Asia/Tokyo`) |
 | 4. For all dialect-divergent SQL, it goes through exactly five `adapter.dispatch` macros; every macro has a `duckdb__` implementation and a `bigquery__` implementation that raises `exceptions.raise_compiler_error` — never a `default__` body a new adapter could silently fall into. | `tests/test_dbt_conventions.py::test_exactly_five_dispatch_macros` (parses `dbt/macros/*.sql`; `adapter.dispatch` nowhere else), `::test_each_macro_has_duckdb_body_and_bigquery_stub_that_raises`, `::test_no_default_dispatch_body` |
-| 5. For all constants in `tests/pins.py`, a build from `fixtures/tiny/` reproduces them; a pin that drifts is a red test, never a rewritten number. | `tests/test_staging.py::test_pins_are_reproduced`; `tests/test_loader.py::test_loader_globs_every_raw_file` |
-| 6. For all raw tables, the source tests are `not_null` on every non-Optional field, `accepted_values` on `event_type` over `EventType`, `unique` on `dim_user (user_id, valid_from)`; NO `unique` on `raw.events.insert_id` and NO `freshness`. | `tests/test_dbt_sources.py::test_no_unique_test_on_raw_insert_id`, `::test_source_tests_cover_every_required_column`, `tests/test_dbt_conventions.py::test_no_freshness_block` |
+| 5. For all constants in `tests/pins.py`, a build from `fixtures/tiny/` reproduces them; a pin that drifts is a red test, never a rewritten number. | `tests/test_staging.py::test_pins_are_reproduced`, `::test_upload_delay_sign_and_range_match_pins` (sign of `upload_delay_seconds`: a swapped `timestamp_diff` argument order is red), `::test_every_event_has_a_tz_and_undelivered_prompts_match_pin`; `tests/test_loader.py::test_loader_globs_every_raw_file`; dbt unit test `stg_events_upload_delay_sign` |
+| 6. For all raw tables, the source tests are `not_null` on every non-Optional field, `accepted_values` on `event_type` over `EventType`, `unique` on `dim_user (user_id, valid_from)`; NO `unique` on `raw.events.insert_id` and NO `freshness`. | `tests/test_dbt_sources.py::test_no_unique_test_on_raw_insert_id`, `::test_source_tests_cover_every_required_column`, `tests/test_dbt_conventions.py::test_no_freshness_block`, `::test_singular_tests_exist_and_target_their_relation` (the composite key is `dbt/tests/assert_dim_user_key_unique.sql`), `::test_schema_event_types_equal_the_contract` |
 | 7. For all committed generated files (`dbt/models/staging/sources.yml`, `loader/ddl.sql`), the bytes equal a fresh render from `generator/models.py`. | `tests/test_dbt_sources.py::test_committed_sources_equal_regeneration`, `::test_hand_edit_is_detected` |
 | 8. For all `load` / `dbt-build` / `drop-db` runs, `PROFILE` and `TARGET` are validated `[a-z0-9_]+` before any path is derived; `drop-db` deletes only `data/<profile>.duckdb` and only with `CONFIRM=yes` from the command line; `load` is idempotent (raw tables recreated from the fixture, never appended). | `tests/test_makefile.py::test_load_and_dbt_build_pass_profile_and_target_as_one_literal`, `::test_drop_db_requires_confirm_from_the_command_line`, `tests/test_loader.py::test_profile_and_target_are_validated`, `::test_load_twice_gives_the_same_row_count`, `::test_drop_db_removes_only_the_named_file` |
 | 9. For all files under `dbt/` and `loader/`, the word truth does not appear (invariant 2 of Phase 1, now live for two new pipeline dirs). | `tests/test_truth_isolation.py::test_pipeline_dirs_never_mention_truth`, `::test_pipeline_dirs_are_derived_from_the_tree` |
@@ -267,7 +267,10 @@ folding it into `timestamp_diff` (unrelated semantics under one name).
   the Makefile with `--vars` (the profile name would reach a path unvalidated).
 - **`stg_prompts` is one row per `prompt_id`** (reconciliation item 6): from
   `prompt_sent`, left-joined to the first `prompt_delivered` (by
-  `client_event_time`, then `insert_id`) — the grain Phase 3 attributes on.
+  `client_event_time`, then `insert_id`; the winner is exposed as
+  `delivered_insert_id` so the tie-break is observable — unit test
+  `stg_prompts_takes_first_delivery_receipt` ties two receipts) — the grain
+  Phase 3 attributes on.
   Rejected: prompt×user (identical here, one user per prompt; the name would
   mislead).
 
@@ -289,19 +292,21 @@ folding it into `timestamp_diff` (unrelated semantics under one name).
 
 ## Record updates (REQUIRED)
 
-- [ ] `DECISIONS.md` — Phase 2 entry: dim_user as loaded source, generated
+- [x] `DECISIONS.md` — Phase 2 entry: dim_user as loaded source, generated
       sources, dedupe tie-break, stub-raises macros, single entry point,
       `stg_prompts` grain, SQL-mutation re-deferral
-- [ ] `docs/PHASES.md` — Phase 2 Done-when as landed; "Delivered" paragraph;
+- [x] `docs/PHASES.md` — Phase 2 Done-when as landed; "Delivered" paragraph;
       source-test wording (no `unique` on raw `insert_id`)
-- [ ] `CLAUDE.md` — Current status; Commands (`load`, `dbt-build`, `drop-db`,
+- [x] `CLAUDE.md` — Current status; Commands (`load`, `dbt-build`, `drop-db`,
       `gen-sources`); Repo map (`dbt/`, `loader/` real); allowlist unchanged
       (three Phase 2 packages landed); BACKLOG count
-- [ ] `docs/ARCHITECTURE.md` — §3 / §3.3 "dim seed file (loaded as a source)";
+- [x] `docs/ARCHITECTURE.md` — §3 / §3.3 "dim seed file (loaded as a source)";
       §8 Gotchas for every dbt-duckdb / DuckDB JSON surprise found live
-- [ ] `BACKLOG.md` — strike "Raw DDL and dbt sources.yml …" (DONE Phase 2);
+- [x] `BACKLOG.md` — strike "Raw DDL and dbt sources.yml …" (DONE Phase 2);
       re-defer "Mutation sweep has no operator for dbt SQL" with trigger
-      Phase 3
+      Phase 3; rows opened at review round 1: `partition_overwrite` unrendered
+      (Phase 7), two cohort keys on `stg_prompts` (Phase 3), row-hash content
+      pin (Phase 3 `expected/`)
 - [ ] Spec amendments — none (no later spec exists)
 - [ ] RESULTS / METRICS / DEPLOYMENT — none
 - [ ] README — none (Phase 13)
@@ -329,7 +334,7 @@ removes a gitignored file that `load` recreates from the fixture.
 
 - **code-reviewer** (triggered — code in Scope): no clock on a data path, the
   tie-break key named, one column per line / lowercase SQL, every model has a
-  description + a test, the four-macro count, allowlist (three packages, no
+  description + a test, the five-macro count, allowlist (three packages, no
   dbt package), truth isolation over `dbt/` and `loader/`, fixtures untouched.
 - **security-reviewer** (mandatory — CI, `dbt/profiles.yml`, `drop-db` with
   `CONFIRM`): origin gating, path derivation, no credentials in
@@ -343,7 +348,7 @@ removes a gitignored file that `load` recreates from the fixture.
 - **coherence-auditor** at exit (mandatory): §3/§3.3 no longer say "seed";
   Repo map marks `dbt/`, `loader/` real; BACKLOG rows struck / re-deferred;
   PHASES Phase 2 matches the spec as landed; CLAUDE.md Commands lists the
-  four targets.
+  four new targets (`load`, `dbt-build`, `drop-db`, `gen-sources`).
 - Stack risk, verified in the first hour (all held; two surprises logged under §8: `timezone()` direction, `unit_tests:` top-level + dict `expect`): dbt-core
   version resolved by uv supports `unit_tests:` (≥ 1.8); dbt-duckdb reads
   `path` from `env_var`; DuckDB `json` column keeps a JSON `null` value and
@@ -357,4 +362,4 @@ removes a gitignored file that `load` recreates from the fixture.
 - Incremental materialization / `partition_overwrite` callers — Phase 7 (the
   macro body exists, unused).
 - `fixtures/tiny/expected/` — Phase 3 (needs a declared re-freeze).
-- BigQuery bodies for the four macros — Phase 9.
+- BigQuery bodies for the five macros — Phase 9.

@@ -101,12 +101,12 @@ def _event(
     }
 
 
-def test_duplicate_insert_id_across_files_is_loaded_twice_and_staged_once(
+def test_duplicate_insert_id_across_files_is_loaded_twice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Raw keeps both copies (the source has no unique test by design); the
-    staging dedupe is proven by the dbt unit test + tests/test_staging.py.
-    Here: the loader itself never dedupes and never drops a file."""
+    """Raw keeps both copies (the source has no unique test by design) — the
+    loader never dedupes and never drops a file. Staging them to one row is
+    the dbt unit test + tests/test_staging.py's job."""
     _mini_fixture(
         tmp_path,
         {
@@ -122,6 +122,24 @@ def test_duplicate_insert_id_across_files_is_loaded_twice_and_staged_once(
         con.execute("select count(distinct insert_id) from raw.events").fetchone()[0]
         == 1
     )
+
+
+def test_connection_session_is_utc_and_format_is_the_contract(tmp_path: Path) -> None:
+    from generator.models import AMPLITUDE_TS
+
+    assert loader.TS_FORMAT == AMPLITUDE_TS
+    con = loader.connect(tmp_path / "t.duckdb")
+    assert con.execute("select current_setting('TimeZone')").fetchone() == ("UTC",)
+    con.close()
+
+
+def test_column_spec_refuses_a_quoted_identifier(tmp_path: Path) -> None:
+    con = loader.connect(tmp_path / "t.duckdb")
+    loader.create_raw_tables(con)
+    con.execute('alter table raw.dim_user add column "x\'y" varchar')
+    with pytest.raises(ValueError, match="refusing column spec"):
+        loader.column_spec(con, "dim_user")
+    con.close()
 
 
 def test_profile_and_target_are_validated() -> None:

@@ -407,6 +407,6 @@ PROFILE=tiny` is green (2 models, 33 data tests, 4 unit tests); `tests/pins.py`
 pins 970 raw → 926 staged (44 duplicates), 140 prompts, 22 dim rows; the raw
 DDL and `sources.yml` are generated from the pydantic contract; five dispatch
 macros with BigQuery stubs. Next: review rounds, then Phase 3 (attribution).
-Open BACKLOG rows: **4**.
+Open BACKLOG rows: **7**.
 
 (Update this section at the end of every working day.)

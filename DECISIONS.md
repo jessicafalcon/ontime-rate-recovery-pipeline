@@ -135,6 +135,19 @@ annotated **Superseded by …** in place and never deleted.
   of its clauses were shown by hand to turn a unit test red; the five-arm
   attribution `case` is where a survivor could first hide. BACKLOG trigger
   updated.
+- **Review round 1 fixes (2026-08-25).** `stg_prompts` exposes
+  `delivered_insert_id` so the first-receipt tie-break is observable (the tied
+  receipts were otherwise identical on every selected column, so the key was
+  provably unpinnable); `upload_delay_seconds` gets a sign unit test + range
+  pin (a swapped `timestamp_diff` argument order survived); a second-process
+  `TZ=Asia/Tokyo` build pins host-zone independence; `schema.yml`'s
+  `event_type` list is tested equal to `EventType`; the three singular tests
+  are named in a test; the truth-isolation grep skips `target/`, `logs/`,
+  `dbt_packages/` so its verdict is the same on CI and a built checkout;
+  `column_spec` asserts identifiers and types are quote-free before
+  interpolation; `require-dbt-version: >=1.10`. Three findings became BACKLOG
+  rows (Phase 7 / Phase 3 triggers); five are design changes in the amendment
+  that follows.
 - **Pins are split where dedupe changes them.** `RAW_UPLOAD_ERROR_CODE_NULLS`
   (190) vs `STG_UPLOAD_ERROR_CODE_NULLS` (180): ten of the JSON-null copies
   were duplicates; one number for both would have been wrong in one table.
