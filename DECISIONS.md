@@ -53,10 +53,12 @@ annotated **Superseded by …** in place and never deleted.
   validation, literal-only `constant-return`, worktree-registry check) rather
   than earning it incident by incident. `check_docs.py` starts with an empty
   `TRACES` list, filled as phases name guards.
-- **Phases re-cut by verifiable capability, not by layer.** The brief's Phase 1
-  ("ingestion & staging") mixed contract, generator, loader and dbt; it is now
-  Phases 1–2 with the frozen fixture landing first, so every later phase is a
-  diff against it. The core risk (attribution recovers assigned causes; organic
+- **Phases re-cut by verifiable capability, not by layer.** The brief's
+  original Phase 0 was the generator and its Phase 1 ("ingestion & staging")
+  mixed contract, loader and dbt; tooling is now Phase 0, the generator + frozen
+  fixture Phase 1, staging Phase 2, so every later phase is a diff against the
+  fixture. PROJECT_BRIEF.md §6 was renumbered to match (one numbering
+  everywhere; `docs/PHASES.md` authoritative). The core risk (attribution recovers assigned causes; organic
   opens recover the latent window) is proven in Phases 1–5 before any cloud.
 - **Mutation sweep covers Python only.** dbt SQL has no operator; an invariant
   upheld only in SQL names its dbt unit test in the Invariants table. BACKLOG

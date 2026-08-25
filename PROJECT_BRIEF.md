@@ -193,7 +193,7 @@ schema with no dbt source; a CI check asserts no model references it.
 
 ---
 
-## 5. Validated foundation (already done — Phase 0)
+## 5. Validated foundation (premise validation — feeds Phase 1)
 
 A synthetic event generator produces a daily-prompt dataset engineered so the
 two lateness causes are **separable** and the timing gap is **recoverable**.
@@ -216,7 +216,8 @@ as "the dataset is engineered so the signal exists and is separable," never as
 insight. The retention gap in particular is a designed property, not a finding.
 
 **Repo gap (open):** the generator and locked dataset are not yet committed.
-Phase 0 is not reproducible until they are, with a fixed seed and a dataset hash.
+The validation is not reproducible until Phase 1 lands them with a fixed seed
+and a dataset hash (`fixtures/tiny/MANIFEST.sha256`).
 
 ### 5b. Validation: counterfactual simulation + production A/B spec
 
@@ -237,44 +238,53 @@ the model keeps learning and provides a continuous natural experiment.
 
 ## 6. Build phases
 
-> **Superseded 2026-08-24:** the authoritative plan is `docs/PHASES.md`
-> (re-cut by verifiable capability, Phases 0–13); the spec is
-> `docs/ARCHITECTURE.md`. The table below is the original brief, kept as the
-> origin record.
+Authoritative plan: `docs/PHASES.md` (re-cut by verifiable capability on
+2026-08-24; each phase ends in a demoable capability with a one-line "Done
+when" whose proof is a command). Spec: `docs/ARCHITECTURE.md`. The table below
+is the same plan in the brief's track view.
 
 **Track A = local pipeline (free). Track B = real GCP (free tier/trial).
-Composer is last and torn down after one run.**
+Composer is last and torn down after one run.** ⭐ = checkpoint (stopping there
+yields a coherent project).
 
 | Phase | Track | What it delivers |
 |-------|-------|------------------|
-| **0 — Data foundation & premise validation** | A | Event generator (seeded, deterministic, **committed**, dataset hash locked); proved separability, recoverable curve, retention coupling. Emits tz per user and delivery-fault events. |
-| **0.5 — Event contract** | A | Amplitude-shaped event schema (three clocks, `insert_id`); exhaustive attribution taxonomy; tz handling; cohort constraint; metric definitions. Half a day; de-risks 1–3. |
-| **1 — Ingestion & staging** | A | Loader → warehouse; dbt sources + staging (dedupe, tz-convert); freshness/uniqueness tests; **CI: `dbt build` on DuckDB per PR**; truth-schema isolation check. |
-| **2 — Attribution & on-time marts** ⭐ *review checkpoint* | A | Core logic: exhaustive label per event (upload / delivery / timing / unattributed) with provisional→final over the lookback window; on-time-rate + on-time→retention marts; **dbt unit tests** on attribution; bound on `unattributed` share. |
-| **3 — Send-time model & counterfactual simulation** | A | Cohort-constrained reachable-window model as a dbt model; scored vs held-out truth (MAE, coverage); simulated on-time lift; production A/B spec written. |
-| **4 — Local orchestration** | A | Makefile + Airflow DAG chaining all stages with the test gate; whole pipeline runs on DuckDB, no GCP needed. |
-| **5 — GCP foundation (Terraform)** | B | Real BigQuery datasets, GCS bucket, service account + IAM, budget alerts. Free tier. |
-| **6 — Spanner trial + closed loop** | B | Spanner free-trial instance; app + serving-table schema; score write-back; dbt against real BigQuery. |
-| **7 — Composer module (written, not applied)** | Composer | Composer env as isolated Terraform module (own apply/destroy); DAG auto-uploads. Zero meter until applied. |
-| **8 — Live run & teardown** | demo day | Apply Composer (~25 min provision), trigger DAG once, capture green run, `terraform destroy`. Under $25. |
-| **9 — Docs, dashboard & narrative** | — | Neutral README, architecture doc, `DEPLOYMENT.md` (bring-up/run/teardown + guardrails), stack-roles table, one-page insight writeup, findings chart. |
+| **0 — Skeleton & workflow machinery** | — | uv/ruff/pytest, Makefile gates (`review-gate`, `mutate`, `check-docs`), CI, review agents, spec template, DECISIONS/BACKLOG, the three load-bearing docs. No pipeline code. |
+| **1 — Event contract, generator, frozen tiny fixture** | A | Pydantic models (Amplitude shape, three clocks, tz, delivery events); seeded generator with fault/late/skew/duplicate knobs; `fixtures/tiny/` committed with a sha256 manifest, read-only after. Carries §5's validation. |
+| **2 — Staging on DuckDB** | A | dbt project; loader; `stg_*` (dedupe on `insert_id`, tz → local); source tests; the four dispatch macros; **CI: `dbt build`**. |
+| **3 — Attribution** ⭐ | A | Five-label exhaustive set with precedence; dbt unit tests per rule; `expected/attribution.csv` golden diff; label accuracy vs truth pinned; `unattributed` bound. |
+| **4 — On-time marts & metric definitions** | A | `ontime_rate_daily` (denominator = prompts delivered), `ontime_retention`, `docs/METRICS.md`, `make report`. |
+| **5 — Send-time model as a dbt model** | A | Organic-open features; cohort-constrained scores with bounded per-user shift, shrinkage, circular hours; MAE vs truth pinned on tiny + medium. |
+| **6 — Counterfactual simulation & A/B spec** ⭐ | A | Seeded re-simulation under the recommended schedule; `docs/AB_DESIGN.md`; `docs/RESULTS.md` generated block. |
+| **7 — Incrementality & late arrival** | A | Lookback-window reprocessing behind one partition-overwrite macro; provisional→final; two-landing convergence proof. |
+| **8 — Local orchestration** ⭐ | A | Airflow DAG (Docker) + `make pipeline`; byte-identical outputs; backfill equals one run over the union. |
+| **9 — GCP foundation (Terraform, BigQuery)** | B | Datasets, GCS, least-privilege IAM, budget alerts, GCS state; dbt `bigquery` target with the same pins as DuckDB. |
+| **10 — Spanner: dims & write-back** | B | `enable_spanner` module; dims via federation; idempotent `send_schedule` upsert; threat model on destructive targets. |
+| **11 — Composer module (written, not applied)** | Composer | Isolated module behind `enable_composer`; DAG upload; `DEPLOYMENT.md`. Zero meter. |
+| **12 — Live run & teardown** | demo day | Apply, one DAG run, capture, `terraform destroy`. Under $25. |
+| **13 — Docs, dashboard & narrative** | — | README first screen + diagram, findings chart, insight writeup, `check-docs` traces. |
 
-**Ordering logic:** local-first so cloud deploys known-good SQL; Phase 2 is the
-intellectual core (attribution) and the natural review pause; Composer split into
-"write it" (7) vs "run it" (8) to keep the meter off until demo day; docs last so
-the numbers in them are real.
+**Ordering logic:** machinery before code so the first phase is judged by a
+command, not a judgment; the frozen fixture lands first so every later phase is
+a diff against it; the core risk (attribution recovers assigned causes, organic
+opens recover the latent window) is proven in 1–5 before any cloud; Composer
+split into "write it" (11) vs "run it" (12) to keep the meter off until demo
+day; docs last so the numbers in them are real.
 
 ---
 
 ## 7. Current status & next action
 
-- **Done:** Phase 0 validation (generator + dataset exist locally, **not yet
-  committed**). Architecture and full phase plan agreed. Deployment decisions
-  locked (region, dual-path, Composer-once). **Architecture review completed
-  2026-08-24** — decisions folded into this document (see §8).
-- **Next:** commit Phase 0 (seeded generator + dataset hash), then **Phase 0.5
-  event contract**, then Phase 1, then **pause at the Phase 2 checkpoint** for
-  review of the attribution logic before building the model and cloud layers.
+- **Done:** premise validation (§5; generator + dataset exist locally, **not
+  yet committed**). Architecture and full phase plan agreed. Deployment
+  decisions locked (region, dual-path, Composer-once). **Architecture review
+  completed 2026-08-24** — decisions folded into this document (see §8).
+  **Phase 0 (skeleton & workflow machinery) built on `phase-0-skeleton`**,
+  awaiting review and merge.
+- **Next:** merge Phase 0, then **Phase 1** (event contract + seeded generator
+  + frozen `fixtures/tiny/`), Phase 2 staging, then **pause at the Phase 3
+  checkpoint** for review of the attribution logic before building the model
+  and cloud layers.
 
 ### Key facts for a resuming session
 - Project is **product-agnostic** for public GitHub — no real app names anywhere.
@@ -282,8 +292,8 @@ the numbers in them are real.
 - Local warehouse: **DuckDB**; prod warehouse: **BigQuery**; same SQL via dbt
   cross-warehouse dispatch macros.
 - The **honest core** of the pitch: cannot prove real-world retention lift from
-  synthetic data, so the pipeline *estimates* on-time lift via offline A/B and
-  ships the A/B design to confirm in production. State this plainly — it's a
+  synthetic data, so the pipeline *estimates* on-time lift via counterfactual
+  simulation and ships the A/B design to confirm in production. State this plainly — it's a
   strength, not a hedge.
 - Spanner is an **app DB**, not analytics — only two roles (dim source incl.
   tz SCD2; serving-table write-back). Don't let it drift elsewhere.
@@ -314,4 +324,5 @@ for demo; `dbt build` as the gate; dbt unit tests; enforced truth isolation.
 
 Risk register: budget alerts don't stop spend; Spanner trial expiry; Dataflow
 cost; Composer demo-day failure; cross-warehouse dialect drift; synthetic
-numbers mistaken for findings; Phase 0 not reproducible until committed.
+numbers mistaken for findings; §5 validation not reproducible until Phase 1
+commits the generator.
