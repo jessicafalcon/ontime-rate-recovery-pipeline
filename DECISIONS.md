@@ -108,7 +108,7 @@ annotated **Superseded by …** in place and never deleted.
   `make mutate` is also run standalone.
 - **`PIPELINE_DIRS` is derived from the tree.** Every top-level package not in
   an explicit exemption set (`tests`, `scripts`, `eval`, `generator`, docs,
-  specs, fixtures, infra, dotdirs) is a pipeline directory; a new package is
+  specs, fixtures, infra, data, dotdirs) is a pipeline directory; a new package is
   guarded the day it appears, and a positive-control test proves the grep
   finds a planted reference. Rejected: a hand-maintained list (vacuous on day
   one, forgotten later).
