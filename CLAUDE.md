@@ -116,16 +116,19 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   have command-line origin (`$(origin CONFIRM)`); a re-freeze also needs a
   DECISIONS entry and a `Freeze: fixtures/<p>/MANIFEST.sha256` line in the spec
 - `make load PROFILE=<p>` — validates `[a-z0-9_]+`, loads
-  `fixtures/<p>/{raw/events_*.jsonl,dims/dim_user.csv}` (falls back to
-  `data/out/<p>/` for an unfrozen profile) into `data/<p>.duckdb` schema `raw`;
-  types come from the generated `loader/ddl.sql`, never inferred. Idempotent:
-  tables are recreated
-- `make dbt-build PROFILE=<p> [TARGET=duckdb]` — `load`, then `dbt build`
-  (source tests → `stg_events`, `stg_prompts` → data, unit and singular tests)
-  against `data/<p>.duckdb`; prints `dbt-build OK: <p>/<target>`, exit 1 on any
-  failure. `TARGET=bigquery` is Phase 9's manual path
-- `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` (the only
-  file); `CONFIRM=yes` must have command-line origin
+  `fixtures/<p>/{raw/events_*.jsonl,dims/dim_user.csv}` into `data/<p>.duckdb`
+  schema `raw`; prints `load: source=…` (falls back to `data/out/<p>/`,
+  marked `(unfrozen)`), verifies `MANIFEST.sha256` first when one exists
+  (`load DRIFT`, exit 1); types come from the generated `loader/ddl.sql`, never
+  inferred. Idempotent: tables are recreated
+- `make dbt-build PROFILE=<p> [TARGET=duckdb] [CONFIRM=yes]` — `load`, then
+  `dbt build` (source tests → `stg_events`, `stg_prompts` → data, unit and
+  singular tests) against `data/<p>.duckdb`; prints `dbt-build OK:
+  <p>/<target>`, exit 1 on any failure. Any `TARGET` other than `duckdb` is a
+  cloud-cost command: refused unless `CONFIRM=yes` has command-line origin.
+  dbt telemetry is off (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`)
+- `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` and its
+  `.wal` (nothing else); `CONFIRM=yes` must have command-line origin
 - `make gen-sources` — re-renders `loader/ddl.sql` and
   `dbt/models/staging/sources.yml` from `generator/models.py`;
   `tests/test_dbt_sources.py` fails on a hand edit

@@ -271,6 +271,11 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   it names; `format: sql` inputs are still the way to type a `json` column.
   `accepted_values` takes `arguments: {values: […]}` in dbt-core 1.12
   (deprecation warning otherwise).
+- **dbt phones home by default** (Phase 2). `send_anonymous_usage_stats`
+  defaults to true: every `dbt build` — including the in-process one under
+  `make test` — POSTs to a vendor endpoint and writes `dbt/.user.yml`. Off in
+  `dbt_project.yml` (`flags:`) and via `DO_NOT_TRACK=1` before dbt imports;
+  pinned by `tests/test_dbt_conventions.py::test_telemetry_is_off`.
 - **`dbt/target/` compiles `schema.yml` into a directory named `schema.yml`**
   (Phase 2). A grep that treats every `.yml` path as a file raises
   `IsADirectoryError`; `test_truth_isolation.py` now checks `is_file()`.

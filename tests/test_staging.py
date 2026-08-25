@@ -24,6 +24,7 @@ DBT = ROOT / "dbt"
 
 
 def build(db: Path) -> bool:
+    os.environ.setdefault("DO_NOT_TRACK", "1")
     from dbt.cli.main import dbtRunner
 
     loader.load("tiny", db)

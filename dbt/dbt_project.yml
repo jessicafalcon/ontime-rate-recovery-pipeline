@@ -7,6 +7,10 @@ profile: ontime
 # unit_tests: needs ≥ 1.8; `accepted_values … arguments:` needs ≥ 1.10.
 require-dbt-version: [">=1.10.0", "<2.0.0"]
 
+# No services, no network (CLAUDE.md): dbt's anonymous usage tracking is off.
+flags:
+  send_anonymous_usage_stats: false
+
 model-paths: ["models"]
 macro-paths: ["macros"]
 test-paths: ["tests"]

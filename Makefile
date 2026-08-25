@@ -75,12 +75,13 @@ load:
 	uv run python -m loader.cli load $(call _Q,$(value PROFILE))
 
 # load, then `dbt build` (sources tests → staging models → their tests) against
-# data/<PROFILE>.duckdb. TARGET selects the dbt target (default duckdb; bigquery
-# is Phase 9's manual path). Both names validated in Python before any path.
+# data/<PROFILE>.duckdb. TARGET selects the dbt target (default duckdb); any
+# other target is a cloud-cost command and needs CONFIRM=yes from the COMMAND
+# LINE ($(origin CONFIRM)). Both names validated in Python before any path.
 dbt-build:
-	uv run python -m loader.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET))
+	uv run python -m loader.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
-# Deletes data/<PROFILE>.duckdb (gitignored; `make load` recreates it). The only
+# Deletes data/<PROFILE>.duckdb and its .wal (gitignored; `make load` recreates it). The only
 # deleter this phase adds: CONFIRM=yes must have COMMAND-LINE origin.
 drop-db:
 	uv run python -m loader.cli drop-db $(call _Q,$(value PROFILE)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'

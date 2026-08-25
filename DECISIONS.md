@@ -148,6 +148,22 @@ annotated **Superseded by …** in place and never deleted.
   interpolation; `require-dbt-version: >=1.10`. Three findings became BACKLOG
   rows (Phase 7 / Phase 3 triggers); five are design changes in the amendment
   that follows.
+- **Amendment 2 — review round 1 design changes (approved 2026-08-25).**
+  (1) dbt telemetry off in `dbt_project.yml` + `DO_NOT_TRACK` before dbt
+  imports — "no services, no network" was false for every `make test` and CI
+  run (a POST per invocation, `dbt/.user.yml` minted). (2) A non-`duckdb`
+  `TARGET` needs `CONFIRM=yes` with command-line origin — the raising macro
+  stubs were the only thing between `make dbt-build TARGET=bigquery` and a
+  developer's ADC, and Phase 9 removes them; rejected: refusing all cloud
+  targets until Phase 9 (the recipe would be re-opened). (3) `drop-db` removes
+  the `.wal` too — DuckDB replays a leftover log into the next file. (4)
+  `load` prints its source and verifies the manifest when one exists — a build
+  from edited output was indistinguishable from the golden; the `data/out/`
+  fallback stays for unfrozen profiles, marked. `loader/` imports
+  `generator/manifest.py` (hashes only; names no side-file). (5) The dedupe key
+  is total: `+ client_event_time, md5(event_properties)` — the injector's
+  offset can be 0 s, so the old two-clock key could tie and the "surviving
+  row" was then unspecified (tiny has 0 such ties; the unit test plants one).
 - **Pins are split where dedupe changes them.** `RAW_UPLOAD_ERROR_CODE_NULLS`
   (190) vs `STG_UPLOAD_ERROR_CODE_NULLS` (180): ten of the JSON-null copies
   were duplicates; one number for both would have been wrong in one table.

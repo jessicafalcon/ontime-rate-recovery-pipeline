@@ -155,7 +155,15 @@ def test_load_and_dbt_build_pass_profile_and_target_as_one_literal(value: str):
                 assert f"--target {quoted}" in out
             assert "pwned" not in out.replace(value, "")
     out = _make_n("dbt-build", {"PROFILE": "tiny"}, {})
-    assert "--target ''" in out  # Python defaults it to duckdb
+    assert "--target '' --confirm '' --confirm-origin 'file'" in out  # → duckdb
+    out = _make_n(
+        "dbt-build", {"PROFILE": "tiny", "TARGET": "bigquery"}, {"CONFIRM": "yes"}
+    )
+    assert "--target 'bigquery' --confirm 'yes' --confirm-origin 'environment'" in out
+    out = _make_n(
+        "dbt-build", {"PROFILE": "tiny", "TARGET": "bigquery", "CONFIRM": "yes"}, {}
+    )
+    assert "--confirm 'yes' --confirm-origin 'command line'" in out
 
 
 def test_drop_db_requires_confirm_from_the_command_line() -> None:

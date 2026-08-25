@@ -142,13 +142,53 @@ def test_column_spec_refuses_a_quoted_identifier(tmp_path: Path) -> None:
     con.close()
 
 
+def test_cloud_target_requires_confirm_from_the_command_line() -> None:
+    for confirm, origin in (
+        ("", "file"),
+        ("yes", "environment"),
+        ("no", "command line"),
+    ):
+        with pytest.raises(SystemExit) as e:
+            cli.dbt_build("tiny", "bigquery", confirm, origin)
+        assert e.value.code == 2
+    # duckdb needs no confirmation (the validation error proves we got past the gate)
+    with pytest.raises(SystemExit) as e:
+        cli.dbt_build("nosuchprofile", "duckdb")
+    assert e.value.code == 2
+
+
+def test_load_reports_its_source_and_refuses_manifest_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    import shutil
+
+    root = tmp_path / "repo"
+    shutil.copytree(TINY, root / "fixtures" / "tiny")
+    monkeypatch.setattr(loader, "ROOT", root)
+    monkeypatch.setattr(loader, "DATA", root / "data")
+    assert loader.manifest_drift(root / "fixtures" / "tiny") == []
+    assert cli.load("tiny") == 0
+    out = capsys.readouterr().out
+    assert "load: source=fixtures/tiny\n" in out and "(unfrozen)" not in out
+    # one edited byte in a frozen fixture → refused, exit 1, nothing loaded
+    f = root / "fixtures" / "tiny" / "raw" / "events_2026-01-04.jsonl"
+    f.write_text(f.read_text().replace("u-000008", "u-000009", 1))
+    assert cli.load("tiny") == 1
+    assert "load DRIFT: 1 files" in capsys.readouterr().out
+    # an unfrozen profile (no manifest) loads from data/out and says so
+    shutil.copytree(TINY, root / "data" / "out" / "mine")
+    (root / "data" / "out" / "mine" / "MANIFEST.sha256").unlink()
+    assert cli.load("mine") == 0
+    assert "load: source=data/out/mine (unfrozen)" in capsys.readouterr().out
+
+
 def test_profile_and_target_are_validated() -> None:
     for bad in ("", "../x", 'a"; b', "Tiny", "a b"):
         with pytest.raises(SystemExit) as e:
             cli.load(bad)
         assert e.value.code == 2
         with pytest.raises(SystemExit) as e:
-            cli.dbt_build("tiny", bad or "../x")
+            cli.dbt_build("tiny", bad or "../x", "yes", "command line")
         assert e.value.code == 2
     with pytest.raises(SystemExit) as e:
         cli.load("nosuchprofile")
@@ -172,7 +212,11 @@ def test_drop_db_removes_only_the_named_file(
     assert (tmp_path / "tiny.duckdb").exists()
     with pytest.raises(SystemExit):
         cli.drop_db("../x", "yes", "command line")
+    (tmp_path / "tiny.duckdb.wal").write_bytes(b"w")  # a leftover WAL replays
+    (tmp_path / "other.duckdb.wal").write_bytes(b"w")
     assert cli.drop_db("tiny", "yes", "command line") == 0
     assert not (tmp_path / "tiny.duckdb").exists()
+    assert not (tmp_path / "tiny.duckdb.wal").exists()
     assert (tmp_path / "other.duckdb").exists()
+    assert (tmp_path / "other.duckdb.wal").exists()
     assert cli.drop_db("tiny", "yes", "command line") == 0  # idempotent

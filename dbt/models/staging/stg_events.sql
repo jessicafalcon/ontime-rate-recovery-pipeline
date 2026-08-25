@@ -1,7 +1,8 @@
 -- One row per insert_id (the export carries duplicates), typed, with the
 -- user's tz valid at client_event_time and the event's local wall time.
--- Dedupe keeps the earliest (server_upload_time, server_received_time) copy —
--- a content-derived key, never file or load order (spec invariant 1).
+-- Dedupe keeps the earliest (server_upload_time, server_received_time,
+-- client_event_time) copy; an exact tie is broken by the payload's hash —
+-- a total, content-derived order, never file or load order (invariant 1).
 
 with raw_events as (
 
@@ -17,7 +18,11 @@ with raw_events as (
     from {{ source('raw', 'events') }}
     qualify row_number() over (
         partition by insert_id
-        order by server_upload_time, server_received_time
+        order by
+            server_upload_time,
+            server_received_time,
+            client_event_time,
+            md5(cast(event_properties as varchar))
     ) = 1
 
 ),

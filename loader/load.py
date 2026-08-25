@@ -12,6 +12,8 @@ from pathlib import Path
 
 import duckdb
 
+from generator import manifest  # hashes only; names no side-file
+
 ROOT = Path(__file__).parent.parent
 DDL = ROOT / "loader" / "ddl.sql"
 DATA = ROOT / "data"
@@ -28,6 +30,13 @@ def fixture_dir(profile: str) -> Path:
         if (d / "raw").is_dir():
             return d
     raise FileNotFoundError(f"no raw/ under fixtures/{profile} or data/out/{profile}")
+
+
+def manifest_drift(fixture: Path) -> list[str]:
+    """Files differing from `<fixture>/MANIFEST.sha256`; [] when there is no
+    manifest (an unfrozen profile) or everything matches."""
+    m = fixture / manifest.NAME
+    return manifest.diff(fixture, m) if m.is_file() else []
 
 
 def event_files(fixture: Path) -> list[Path]:

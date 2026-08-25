@@ -62,9 +62,10 @@ models:
 unit_tests:
   - name: stg_events_dedupes_insert_id
     description: >
-      Two insert_ids, four raw rows, copies split across two upload-date
-      files and one copy re-received later — exactly one row per id,
-      the earliest copy (spec invariant 1).
+      Three insert_ids, six raw rows: copies split across two upload-date
+      files, one copy re-received later, and one EXACT tie on all three
+      clocks differing only in event_properties — exactly one row per id,
+      the earliest copy, the tie broken by the payload hash (invariant 1).
     model: stg_events
     given:
       - input: source('raw', 'events')
@@ -74,14 +75,17 @@ unit_tests:
           union all select 'e-1', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:01', timestamp '2026-01-06 08:01:00', '{}'::json
           union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 09:00:00', timestamp '2026-01-05 09:00:01', timestamp '2026-01-05 09:01:00', '{}'::json
           union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 09:00:00', timestamp '2026-01-05 09:30:00', timestamp '2026-01-05 09:01:00', '{}'::json
+          union all select 'e-3', 'prompt_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:00:00', timestamp '2026-01-05 10:00:01', timestamp '2026-01-05 10:01:00', '{"prompt_id":"p-9"}'::json
+          union all select 'e-3', 'prompt_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:00:00', timestamp '2026-01-05 10:00:01', timestamp '2026-01-05 10:01:00', '{"prompt_id":"p-1"}'::json
       - input: source('raw', 'dim_user')
         format: sql
         rows: |
           select 'u-1' as user_id, 'UTC' as tz, 'c-morning' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
     expect:
       rows:
-        - {insert_id: e-1, server_upload_time: "2026-01-05 08:01:00", server_received_time: "2026-01-05 08:00:01"}
-        - {insert_id: e-2, server_upload_time: "2026-01-05 09:01:00", server_received_time: "2026-01-05 09:00:01"}
+        - {insert_id: e-1, server_upload_time: "2026-01-05 08:01:00", server_received_time: "2026-01-05 08:00:01", prompt_id: null}
+        - {insert_id: e-2, server_upload_time: "2026-01-05 09:01:00", server_received_time: "2026-01-05 09:00:01", prompt_id: null}
+        - {insert_id: e-3, server_upload_time: "2026-01-05 10:01:00", server_received_time: "2026-01-05 10:00:01", prompt_id: p-1}
   - name: stg_events_uses_tz_valid_at_client_event_time
     description: >
       A user with two dim rows (Tokyo until 2026-01-11, then London);
