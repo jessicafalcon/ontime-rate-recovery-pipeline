@@ -352,11 +352,13 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 0 in progress (`phase-0-skeleton`).** The workflow machinery (spec
-layer, review gate, mutation sweep, agents) and the three load-bearing docs
-exist; no pipeline code. Next: approve the docs, run `/review-round 1` on
-this branch, merge, then Phase 1 (event contract + generator + frozen tiny
+**Phase 0 under review (`phase-0-skeleton`, PR #1 open).** The workflow
+machinery (spec layer, review gate, mutation sweep, agents) and the three
+load-bearing docs exist; no pipeline code. Review rounds 1 and 2 done
+(round 2 converged: 3 wording/record findings, all fixed), phase-exit
+coherence audit passed, CI `lint-test` green on PR #1. Next: developer
+squash-merges, then Phase 1 (event contract + generator + frozen tiny
 fixture) — its spec is the first commit on `phase-1-event-contract`.
-Open BACKLOG rows: **6**.
+Open BACKLOG rows: **5**.
 
 (Update this section at the end of every working day.)
