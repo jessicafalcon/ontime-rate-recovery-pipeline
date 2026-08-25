@@ -4,7 +4,8 @@ Items accepted "for now" with a concrete revisit trigger. Reviewed at every
 phase exit (alongside the coherence audit); an item whose trigger has arrived
 is either done in that phase or re-deferred here with a new trigger — never
 silently dropped. Cite rows by TITLE (bold text); line numbers shift. A closed
-row is struck through with "DONE Phase N", never deleted.
+row is struck through with "DONE Phase N" — or the landing branch, e.g.
+"DONE — `fix/<slug>`", when a non-phase fix closes it — never deleted.
 
 | Item | Source | Trigger |
 |---|---|---|

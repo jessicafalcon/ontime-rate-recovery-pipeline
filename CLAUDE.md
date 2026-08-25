@@ -303,7 +303,8 @@ simple, standard way over the clever way.
 - Start each phase: `git checkout main && git pull && git checkout -b
   phase-N-<slug> && make round-reset`. One phase = one branch = one PR;
   `round-reset` clears the prior phase's local round tags so review round 1
-  does not collide with them.
+  does not collide with them. Run it at phase start ONLY — mid-phase it would
+  delete the current round's boundary.
 - Commits small, at green states, prefixed `phase-N:`.
 - PR via `gh pr create` when Done-when passes AND verdicts are approved. Body:
   Done-when check + output, files touched, decisions the spec didn't cover,

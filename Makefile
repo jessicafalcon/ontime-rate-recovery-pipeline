@@ -46,7 +46,9 @@ mutate:
 
 # Delete this checkout's local review-round-* tags (scripts/round_tag.py reset).
 # Run at phase start: round tags are local, never pushed, and phase-agnostic, so
-# a new phase's rounds would collide with the prior phase's leftovers.
+# a new phase's rounds would collide with the prior phase's leftovers. NEVER
+# mid-phase — it deletes THIS phase's round boundary (round N+1 needs
+# review-round-N..HEAD; a deleted annotated tag is unrecoverable).
 round-reset:
 	uv run python scripts/round_tag.py reset
 

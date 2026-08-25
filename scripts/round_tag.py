@@ -87,7 +87,11 @@ def reset(root: Path = ROOT) -> list[str]:
     names deleted (sorted). Run at phase start: the prior phase's rounds are
     merged and their boundaries are stale, and the names are phase-agnostic so a
     new phase's round 1 would collide. Local only — `git tag -d` never touches a
-    remote. Filters to the exact scheme, so an unrelated tag is left alone."""
+    remote. Filters to the exact scheme, so an unrelated tag is left alone.
+
+    NEVER mid-phase: it deletes THIS phase's `review-round-N` boundaries too, and
+    round N+1 needs `review-round-N..HEAD` — a deleted annotated tag is
+    unrecoverable. Phase start only."""
     _, out = run(["git", "tag", "-l", "review-round-*"], root)
     tags = sorted(t for t in out.splitlines() if _TAG_RE.match(t.strip()))
     for t in tags:
