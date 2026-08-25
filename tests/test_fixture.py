@@ -34,6 +34,7 @@ def test_manifest_roundtrip_and_a_changed_byte_is_a_diff(tmp_path: Path) -> None
     assert manifest.matches(tmp_path, tmp_path / manifest.NAME)
     (tmp_path / "sub" / "b.txt").write_text("B")
     (tmp_path / "c.txt").write_text("c")
+    assert not manifest.matches(tmp_path, tmp_path / manifest.NAME)
     assert manifest.diff(tmp_path, tmp_path / manifest.NAME) == [
         "c.txt: extra",
         "sub/b.txt: changed",
