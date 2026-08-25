@@ -267,6 +267,10 @@ simple, standard way over the clever way.
 - STOP-on-findings: when any agent returns findings, STOP and report them
   verbatim. Do NOT fix anything — not even a trivial one — until the developer
   has reviewed the issue AND the proposed fix and says proceed.
+- One consolidated report, not one per agent: wait for every agent in the
+  round to finish, then present a single table over all findings (finding,
+  raised by, file:line, class, in-range / missed) followed by one verdict line
+  per agent. Never relay agent results one at a time as they arrive.
 - Start each phase: `git checkout main && git pull && git checkout -b
   phase-N-<slug>`. One phase = one branch = one PR.
 - Commits small, at green states, prefixed `phase-N:`.

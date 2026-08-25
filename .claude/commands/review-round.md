@@ -85,12 +85,17 @@ applies, or takes `CONFIRM`, also spawn **security-reviewer** with the same rang
 
 ## 5. Consolidate, tag, STOP
 
-Print one table over every finding from every agent:
+Wait for EVERY agent spawned in step 4 to finish before printing anything from
+any of them — no per-agent relay as results arrive. Then print one table over
+every finding from every agent:
 
 | # | Finding (one sentence) | Raised by | file:line | Class | In range / missed in round N−1 |
 |---|---|---|---|---|---|
 
-Class is exactly one of **correctness** (wrong output, a survivor, an invariant
+Below the table, one verdict line per agent (`code-reviewer: pass | N
+findings`, `functionality-tester: works | partially | doesn't`,
+`security-reviewer: pass | N findings`) — the whole round's summary in one
+place. Class is exactly one of **correctness** (wrong output, a survivor, an invariant
 with no pin, a caller/clock-sourced mechanism), **security**, **record** (a
 stale or missing record sentence), **wording** (names, comments, docs prose).
 
