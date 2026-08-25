@@ -62,7 +62,7 @@ def test_json_null_error_code_survives_as_json_null(tmp_path: Path) -> None:
         "select count(*) from raw.events where event_type like 'upload_%' "
         "and json_extract_string(event_properties, 'error_code') is null"
     ).fetchone()[0]
-    assert nulls == pins.UPLOAD_ERROR_CODE_NULLS
+    assert nulls == pins.RAW_UPLOAD_ERROR_CODE_NULLS
     # the key is still present (exact-keys rule), not dropped by inference
     keys = con.execute(
         "select count(*) from raw.events where event_type = 'upload_started' "

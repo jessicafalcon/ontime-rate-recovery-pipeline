@@ -83,7 +83,7 @@ def column_tests(nullable: bool, values: list[str] | None) -> list[str]:
         tests.append("not_null")
     if values is not None:
         vals = ", ".join(f'"{v}"' for v in values)
-        tests.append(f"accepted_values:\n            values: [{vals}]")
+        tests.append(f"accepted_values:\n  arguments:\n    values: [{vals}]")
     return tests
 
 
@@ -128,7 +128,7 @@ def render_sources() -> str:
                 for t in tests:
                     first, *rest = t.split("\n")
                     lines.append(f"              - {first}")
-                    lines += [f"      {r}" for r in rest]
+                    lines += [f"                {r}" for r in rest]
     return "\n".join(lines) + "\n"
 
 

@@ -18,7 +18,8 @@ sources:
             data_tests:
               - not_null
               - accepted_values:
-                  values: ["prompt_sent", "prompt_delivered", "prompt_opened", "capture_started", "upload_started", "upload_failed", "upload_completed", "response_recorded", "app_opened"]
+                  arguments:
+                    values: ["prompt_sent", "prompt_delivered", "prompt_opened", "capture_started", "upload_started", "upload_failed", "upload_completed", "response_recorded", "app_opened"]
           - name: user_id
             description: varchar
             data_tests:

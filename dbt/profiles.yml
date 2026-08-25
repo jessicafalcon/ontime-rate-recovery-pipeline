@@ -1,0 +1,18 @@
+# Two targets, one project (ARCHITECTURE §3.2). No credential lives here:
+# duckdb is a local file whose path loader/cli.py sets after validating
+# PROFILE; bigquery (Phase 9) authenticates by ADC/WIF only.
+ontime:
+  target: duckdb
+  outputs:
+    duckdb:
+      type: duckdb
+      path: "{{ env_var('OTR_DUCKDB_PATH') }}"
+      threads: 1
+      settings:
+        TimeZone: UTC
+    bigquery:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('OTR_GCP_PROJECT', '') }}"
+      dataset: ontime
+      threads: 1

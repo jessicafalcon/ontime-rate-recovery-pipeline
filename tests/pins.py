@@ -10,4 +10,5 @@ DIM_USER_CLOSED_ROWS = 2  # rows with valid_to set
 STG_EVENT_ROWS = 926  # distinct insert_id
 DEDUPE_COUNT = RAW_EVENT_ROWS - STG_EVENT_ROWS  # 44
 STG_PROMPT_ROWS = 140  # 20 users × 7 days
-UPLOAD_ERROR_CODE_NULLS = 190  # upload_started/completed carry error_code: null
+RAW_UPLOAD_ERROR_CODE_NULLS = 190  # upload_started/completed carry error_code: null
+STG_UPLOAD_ERROR_CODE_NULLS = 180  # the same after dedupe (10 copies were duplicates)

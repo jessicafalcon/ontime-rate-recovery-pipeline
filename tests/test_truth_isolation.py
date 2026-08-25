@@ -40,7 +40,9 @@ def offenders(root: Path, dirname: str) -> list[str]:
     return sorted(
         str(path.relative_to(root))
         for path in (root / dirname).rglob("*")
-        if path.suffix in SOURCE_SUFFIXES and "truth" in path.read_text().lower()
+        if path.is_file()  # dbt/target/ compiles schema.yml into a DIRECTORY
+        and path.suffix in SOURCE_SUFFIXES
+        and "truth" in path.read_text().lower()
     )
 
 
