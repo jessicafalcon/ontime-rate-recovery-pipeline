@@ -76,6 +76,24 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### Phase 1
+
+*Event contract, generator, frozen tiny fixture (`phase-1-event-contract`).*
+
+- **`timing_gap` is delivery + no-action evidence alone (spec reconciliation,
+  2026-08-25).** ARCHITECTURE §2.5 rule 4 used to require that "the user's
+  organic activity says the window was outside their reachable hours" — that
+  clause makes Phase 3 attribution read the Phase 5 reachability features, a
+  layering inversion: the label would depend on a model downstream of it, and
+  the generator, which assigns the true cause in this phase, would have to
+  encode a reachability judgment into truth. Now: `timing_gap` = delivered in
+  grace, no `capture_started`, no `response_recorded`, no upload chain; the
+  former "delivered-and-reachable-but-no-action" case in rule 5 is absorbed
+  by it. Phase 5 scores reachability separately from organic opens and reports
+  how much of the timing-gap share it can move; it never feeds the label.
+  Rejected: keeping the clause and computing a Phase 3 reachability stub
+  (two definitions of reachability, one of them unversioned).
+
 ### Phase 0
 
 *Skeleton and workflow machinery (`phase-0-skeleton`).*

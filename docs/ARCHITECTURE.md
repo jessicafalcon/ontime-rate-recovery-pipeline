@@ -91,11 +91,15 @@ delivery fault cannot also be a timing gap — the prompt never arrived):
    AND `server_received_time` inside the window.
 3. `upload_fault` — client time inside the window, received time outside; or an
    `upload_failed` chain with no `response_recorded`.
-4. `timing_gap` — delivered, no `capture_started` inside the window, and the
-   user's *organic* activity says the window was outside their reachable hours.
+4. `timing_gap` — delivered inside `DELIVERY_GRACE_MIN`, no `capture_started`
+   and no `response_recorded` inside the window, no `upload_*` chain. Evidence
+   is delivery + no-action ALONE; whether the window was outside the user's
+   reachable hours is Phase 5's question (2.8), never an attribution input
+   (DECISIONS Phase 1, "timing_gap is delivery + no-action evidence alone").
 5. `unattributed` — everything else (skew beyond bound, contradictory evidence,
-   delivered-and-reachable-but-no-action). Its share is bounded by a dbt test
-   (`UNATTRIBUTED_MAX`, spec-pinned); the bound is what makes the metric honest.
+   e.g. `capture_started` without any upload or response event). Its share is
+   bounded by a dbt test (`UNATTRIBUTED_MAX`, spec-pinned); the bound is what
+   makes the metric honest.
 
 Labels are `provisional` until the reprocessing lookback closes (2.7), then
 `final`. A final label never changes.
