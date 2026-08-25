@@ -237,6 +237,11 @@ the model keeps learning and provides a continuous natural experiment.
 
 ## 6. Build phases
 
+> **Superseded 2026-08-24:** the authoritative plan is `docs/PHASES.md`
+> (re-cut by verifiable capability, Phases 0–13); the spec is
+> `docs/ARCHITECTURE.md`. The table below is the original brief, kept as the
+> origin record.
+
 **Track A = local pipeline (free). Track B = real GCP (free tier/trial).
 Composer is last and torn down after one run.**
 
