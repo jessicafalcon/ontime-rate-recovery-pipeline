@@ -311,7 +311,7 @@ def _baseline_is_green(root: Path, scratch: Path, suite: list[str]) -> bool:
     Red here means every later KILLED would be meaningless."""
     tree = scratch / "baseline"
     try:
-        code, out = run(
+        code, _ = run(
             ["git", "worktree", "add", "--detach", "-q", str(tree), "HEAD"], root
         )
         if code != 0:

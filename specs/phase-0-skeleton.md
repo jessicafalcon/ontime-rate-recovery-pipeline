@@ -107,6 +107,9 @@ scripts/round_tag.py::parse                   constant-return:1
 scripts/review_gate.py::evidence_ids          constant-return:([],[])
 scripts/review_gate.py::_matches              constant-return:True
 scripts/review_common.py::make_targets        constant-return:set()
+scripts/review_gate.py::resolve_base          invert-guard
+scripts/check_docs.py::named_targets          constant-return:set()
+scripts/mutate.py::parse_mutations            invert-guard
 ```
 
 ## Pinned decisions (do not re-litigate)
