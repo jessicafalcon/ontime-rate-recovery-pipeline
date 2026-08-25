@@ -32,4 +32,7 @@ jobs:
       - run: make lint
       - run: make check-docs
       - run: make test
-      # Phase 2 adds: dbt build on DuckDB over fixtures/tiny (the golden gate).
+      # The golden gate: load fixtures/tiny into DuckDB and `dbt build` it
+      # (sources tests → staging → model, unit and singular tests). In-process,
+      # no service.
+      - run: make dbt-build PROFILE=tiny

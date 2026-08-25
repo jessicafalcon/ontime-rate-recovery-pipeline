@@ -36,11 +36,19 @@ def pipeline_dirs(root: Path) -> list[str]:
     )
 
 
+# Gitignored build output (dbt compiles models into target/); the guard reads
+# source, so its verdict is the same on CI and on a machine that ran a build.
+BUILD_DIRS = {"target", "logs", "dbt_packages"}
+
+
 def offenders(root: Path, dirname: str) -> list[str]:
     return sorted(
         str(path.relative_to(root))
         for path in (root / dirname).rglob("*")
-        if path.suffix in SOURCE_SUFFIXES and "truth" in path.read_text().lower()
+        if path.is_file()  # dbt/target/ compiles schema.yml into a DIRECTORY
+        and not BUILD_DIRS & set(path.relative_to(root / dirname).parts[:-1])
+        and path.suffix in SOURCE_SUFFIXES
+        and "truth" in path.read_text().lower()
     )
 
 
@@ -63,6 +71,8 @@ def test_a_planted_truth_reference_is_found(tmp_path: Path) -> None:
     (tmp_path / "dbt" / "models" / "a.yml").write_text("source: TRUTH")
     (tmp_path / "dbt" / "models" / "ok.sql").write_text("select 1")
     (tmp_path / "dbt" / "notes.md").write_text("truth is fine in prose")
+    (tmp_path / "dbt" / "target" / "compiled").mkdir(parents=True)
+    (tmp_path / "dbt" / "target" / "compiled" / "b.sql").write_text("-- truth")
     assert offenders(tmp_path, "dbt") == ["dbt/models/a.yml", "dbt/models/z.sql"]
 
 

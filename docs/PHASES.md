@@ -60,13 +60,23 @@ users × 7 days = 140 prompts, 970 events (incl. duplicates), 13 files.
 **Goal.** dbt project with `duckdb` target; loader `fixtures/<profile>/raw` →
 raw tables (`make load PROFILE=<p>`); `stg_events` (dedupe on `insert_id`,
 typed, tz → local via `dim_user` valid-at-time), `stg_prompts`; source tests
-(uniqueness, not-null, accepted values — no freshness test: it reads the wall
-clock); the four dispatch macros stubbed for both
-dialects; CI runs `dbt build`.
+(not-null, accepted values, uniqueness on `dim_user (user_id, valid_from)` —
+`insert_id` is unique only after staging, and no freshness test: it reads the
+wall clock); the dispatch macros stubbed for both dialects; CI runs
+`dbt build`.
 
 **Done when.** `make dbt-build PROFILE=tiny` green; staging row counts and the
 dedupe count pinned in `tests/pins.py`; a duplicated `insert_id` in raw yields
 one staged row.
+
+**Delivered** (`phase-2-staging`, spec `specs/phase-2-staging.md`): as
+planned, plus `sources.yml` + raw DDL generated from `generator/models.py`
+(`make gen-sources`, equality-tested), `dim_user` loaded as a source (not a
+dbt seed), a fifth dispatch macro `to_local_time`, `drop-db` (the only
+deleter, `CONFIRM=yes` command-line origin), five dbt unit tests + three
+singular tests. tiny: 970 raw → 926 staged (44 duplicates), 140 prompts, 22
+dim rows. `stg_prompts` = one row per `prompt_id` with the first delivery
+receipt. dbt SQL mutation operator re-deferred to Phase 3.
 
 ---
 
@@ -154,7 +164,8 @@ one run over the union.
 **Goal.** `infra/`: BigQuery datasets, GCS bucket, service account + least-
 privilege IAM, budget alerts ($50/$150), GCS state backend (bootstrap documented),
 `terraform.tfvars` gitignored; `make tf-plan | tf-apply | tf-destroy`. dbt
-`bigquery` target; the four macros proven on BigQuery; `make test-int-bigquery`.
+`bigquery` target; the five macros proven on BigQuery (the fifth,
+`to_local_time`, added in Phase 2); `make test-int-bigquery`.
 
 **Done when.** `terraform plan` clean from a fresh clone with only
 `project_id`; `make dbt-build TARGET=bigquery PROFILE=tiny` green with the same

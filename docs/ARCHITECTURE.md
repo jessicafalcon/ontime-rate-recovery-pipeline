@@ -65,8 +65,10 @@ arrived" from "arrived at a bad time".
 ### 2.3 Dimensions (Spanner, SCD2) *(seed file locally; Phase 1 / Phase 10)*
 
 `dim_user`: `user_id`, `tz` (IANA), `cohort_id`, `signup_date`, `valid_from`,
-`valid_to`. **All reachability math is in user-local time**; the conversion
-happens once, in staging, against the tz valid at `client_event_time`.
+`valid_to` (empty = the open row). **All reachability math is in user-local
+time**; the conversion happens once, in staging
+(`stg_events.client_event_time_local`), against the tz valid at
+`client_event_time` — `valid_from <= t and (valid_to is null or t < valid_to)`.
 
 ### 2.4 Ground truth (generator side-file, never a source)
 
@@ -155,10 +157,10 @@ falls back to the cohort default when no row exists.
 ## 3. Components
 
 ```
-GENERATOR (seeded)  ── truth side-file (never a source) ── dim_user seed (tz SCD2)
+GENERATOR (seeded)  ── truth side-file (never a source) ── dim_user seed file (tz SCD2)
    │ raw events, Amplitude export shape (three clocks, insert_id)
    ▼
-RAW LANDING   fixtures/<profile>/raw/*.jsonl  →  DuckDB (local) | BigQuery (prod, Amplitude export)
+RAW LANDING   fixtures/<profile>/{raw/*.jsonl, dims/dim_user.csv}  →  DuckDB `raw` schema (local, `make load`) | BigQuery (prod, Amplitude export)
    ▼
 dbt  staging      dedupe on insert_id · tz → local time · typed columns
      attribution  exhaustive label per prompt×user · provisional→final over LOOKBACK_DAYS
@@ -181,6 +183,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | component | reads | writes | may NOT |
 |---|---|---|---|
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
+| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked) | `raw.events`, `raw.dim_user` | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
 | eval | dbt outputs, truth | `docs/RESULTS.md` blocks, console | write any table the pipeline reads |
 | write-back | `scores_send_time` | `send_schedule` | read truth; read raw |
@@ -189,16 +192,20 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 ### 3.2 Local ↔ GCP profile switch
 
 One dbt project, two `profiles.yml` targets (`duckdb`, `bigquery`). Dialect
-divergences behind exactly four dispatch macros: JSON extraction,
-`timestamp_diff`, `safe_divide`, partition overwrite. CI runs `dbt build` on
-DuckDB per PR; BigQuery runs are manual (`make dbt-build TARGET=bigquery`).
+divergences behind exactly five dispatch macros: JSON extraction,
+`timestamp_diff`, `safe_divide`, `to_local_time` (UTC → local wall time; added
+in Phase 2, DECISIONS), partition overwrite. Each has a DuckDB body and a
+BigQuery body that raises until Phase 9 — no `default__` an unknown adapter
+could fall into. CI runs `dbt build` on DuckDB per PR; BigQuery runs are manual
+(`make dbt-build PROFILE=<p> TARGET=bigquery`). `PROFILE` names the data
+profile, `TARGET` the warehouse.
 
 ### 3.3 What is stubbed (and the production swap)
 
 | stub | replaces | swap |
 |---|---|---|
 | generator → `fixtures/<profile>/raw/events_<upload-date>.jsonl` (one file per UTC `server_upload_time` date — the landing unit Phase 7 replays) | Amplitude → BigQuery export | dbt `source` config |
-| `dim_user` seed | Spanner change streams / federation | `EXTERNAL_QUERY` source (demo), Dataflow template (prod) |
+| `dim_user` seed file (`dims/dim_user.csv`, loaded as the `raw.dim_user` source by `make load` — not a dbt seed, whose path could not follow `PROFILE`) | Spanner change streams / federation | `EXTERNAL_QUERY` source (demo), Dataflow template (prod) — a source-config swap, no model changes |
 | DuckDB `send_schedule` table | Spanner serving table | write-back target flag |
 
 ## 4. System invariants (hold across every phase)
@@ -250,3 +257,26 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   large and positive); only a clock *ahead* (negative delay past
   `SKEW_MAX_MIN`) is distinguishable. The generator's skew injector is
   forward-only; Phase 3 pins the rule on the negative side.
+- **DuckDB `timezone(tz, ts)` converts in the wrong direction for a UTC
+  column** (Phase 2). On a naive `timestamp` it interprets the value as local
+  wall time in `tz` and returns a `timestamptz` that the client renders in the
+  session `TimeZone` (the host's zone by default — a non-UTC machine shows a
+  different hour). The session-independent UTC → local form is
+  `timezone(tz, timezone('UTC', ts))::timestamp`, verified identical under
+  UTC / America/Mexico_City / Asia/Tokyo sessions; it is the DuckDB body of
+  `to_local_time`, and the loader and profile also pin `TimeZone = 'UTC'`.
+- **dbt unit tests: `unit_tests:` is a top-level YAML key, and a `format: sql`
+  `expect` must list every model column** (Phase 2). Nested under `models:`
+  they parse silently and never run (the first green build reported "33 data
+  tests" and 0 unit tests). A dict-format `expect` compares only the columns
+  it names; `format: sql` inputs are still the way to type a `json` column.
+  `accepted_values` takes `arguments: {values: […]}` in dbt-core 1.12
+  (deprecation warning otherwise).
+- **dbt phones home by default** (Phase 2). `send_anonymous_usage_stats`
+  defaults to true: every `dbt build` — including the in-process one under
+  `make test` — POSTs to a vendor endpoint and writes `dbt/.user.yml`. Off in
+  `dbt_project.yml` (`flags:`) and via `DO_NOT_TRACK=1` before dbt imports;
+  pinned by `tests/test_dbt_conventions.py::test_telemetry_is_off`.
+- **`dbt/target/` compiles `schema.yml` into a directory named `schema.yml`**
+  (Phase 2). A grep that treats every `.yml` path as a file raises
+  `IsADirectoryError`; `test_truth_isolation.py` now checks `is_file()`.

@@ -134,3 +134,42 @@ def test_freeze_requires_confirm_from_the_command_line() -> None:
     with pytest.raises(SystemExit) as e:
         cli.freeze("../x", "yes", "command line")
     assert e.value.code == 2
+
+
+# ------------------------------------------------- Phase 2: load, dbt-build, drop-db
+
+
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_load_and_dbt_build_pass_profile_and_target_as_one_literal(value: str):
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for target in ("load", "dbt-build", "drop-db"):
+        for origin in ("cmdline", "env"):
+            kv = {"PROFILE": value, "TARGET": value}
+            out = _make_n(
+                target, kv if origin == "cmdline" else {}, kv if origin == "env" else {}
+            )
+            assert f"loader.cli {target} {quoted}" in out, (target, origin, out)
+            if target == "dbt-build":
+                assert f"--target {quoted}" in out
+            assert "pwned" not in out.replace(value, "")
+    out = _make_n("dbt-build", {"PROFILE": "tiny"}, {})
+    assert "--target '' --confirm '' --confirm-origin 'file'" in out  # → duckdb
+    out = _make_n(
+        "dbt-build", {"PROFILE": "tiny", "TARGET": "bigquery"}, {"CONFIRM": "yes"}
+    )
+    assert "--target 'bigquery' --confirm 'yes' --confirm-origin 'environment'" in out
+    out = _make_n(
+        "dbt-build", {"PROFILE": "tiny", "TARGET": "bigquery", "CONFIRM": "yes"}, {}
+    )
+    assert "--confirm 'yes' --confirm-origin 'command line'" in out
+
+
+def test_drop_db_requires_confirm_from_the_command_line() -> None:
+    out = _make_n("drop-db", {"PROFILE": "tiny", "CONFIRM": "yes"}, {})
+    assert "--confirm 'yes' --confirm-origin 'command line'" in out
+    out = _make_n("drop-db", {"PROFILE": "tiny"}, {"CONFIRM": "yes"})
+    assert "--confirm 'yes' --confirm-origin 'environment'" in out
+    out = _make_n("drop-db", {"PROFILE": "tiny"}, {})
+    assert "--confirm '' --confirm-origin 'file'" in out

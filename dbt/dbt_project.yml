@@ -1,0 +1,24 @@
+# The dbt project (CLAUDE.md → Repo map). One project, two targets
+# (dbt/profiles.yml: duckdb, bigquery). Every var has a default here and is
+# named in the spec that introduced it — Phase 2 introduces none.
+name: ontime
+version: "0.1.0"
+profile: ontime
+# unit_tests: needs ≥ 1.8; `accepted_values … arguments:` needs ≥ 1.10.
+require-dbt-version: [">=1.10.0", "<2.0.0"]
+
+# No services, no network (CLAUDE.md): dbt's anonymous usage tracking is off.
+flags:
+  send_anonymous_usage_stats: false
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  ontime:
+    staging:
+      +materialized: table
+      +schema: staging

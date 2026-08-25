@@ -1,0 +1,162 @@
+version: 2
+
+models:
+  - name: stg_events
+    description: >
+      One row per insert_id — the raw export deduplicated by content
+      (earliest server_upload_time, then server_received_time, then
+      client_event_time; copies tying on all three are identical, the loader
+      refuses otherwise), typed, with the dim_user tz valid at
+      client_event_time and the local wall time.
+    columns:
+      - name: insert_id
+        description: Dedupe key; unique here, not in raw.
+        data_tests: [unique, not_null]
+      - name: event_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [prompt_sent, prompt_delivered, prompt_opened, capture_started, upload_started, upload_failed, upload_completed, response_recorded, app_opened]
+      - name: user_id
+        data_tests: [not_null]
+      - name: tz
+        description: IANA zone valid at client_event_time (SCD2 range join).
+        data_tests: [not_null]
+      - name: cohort_id
+        description: From dim_user (the prompt's own cohort_id is prompt_cohort_id).
+        data_tests: [not_null]
+      - name: client_event_time_local
+        data_tests: [not_null]
+      - name: upload_delay_seconds
+        description: server_received_time − client_event_time; negative = client clock ahead.
+        data_tests: [not_null]
+      - name: prompt_id
+        description: Null only for app_opened (organic).
+      - name: error_code
+        description: Non-null only on upload_failed; upload_started/completed carry JSON null.
+
+  - name: stg_prompts
+    description: >
+      One row per prompt_id — the prompt_sent event joined to the first
+      prompt_delivered receipt (by client_event_time, then insert_id);
+      delivered_at null when the prompt never arrived. Phase 3's grain.
+    columns:
+      - name: prompt_id
+        data_tests: [unique, not_null]
+      - name: user_id
+        data_tests: [not_null]
+      - name: cohort_id
+        data_tests: [not_null]
+      - name: window_minutes
+        data_tests: [not_null]
+      - name: sent_at
+        data_tests: [not_null]
+      - name: sent_at_local
+        data_tests: [not_null]
+      - name: delivered_at
+        description: Null = no receipt (delivery fault candidate).
+      - name: delivered_insert_id
+        description: Which receipt won (earliest client_event_time, then insert_id) — the tie-break is observable here.
+      - name: prompt_cohort_id
+        description: cohort_id carried on the prompt_sent event; cohort_id is dim_user's. Phase 3 picks the denominator key (BACKLOG).
+
+unit_tests:
+  - name: stg_events_dedupes_insert_id
+    description: >
+      Three insert_ids, six raw rows: copies split across two upload-date
+      files (e-1), one copy re-received later (e-2), and one pair tying on
+      both server clocks but differing in client_event_time (e-3) — exactly
+      one row per id, the earliest on each key in turn (invariant 1).
+    model: stg_events
+    given:
+      - input: source('raw', 'events')
+        format: sql
+        rows: |
+          select 'e-1' as insert_id, 'app_opened' as event_type, 'u-1' as user_id, 'd-1' as device_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:01' as server_received_time, timestamp '2026-01-05 08:01:00' as server_upload_time, '{}'::json as event_properties
+          union all select 'e-1', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:01', timestamp '2026-01-06 08:01:00', '{}'::json
+          union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 09:00:00', timestamp '2026-01-05 09:00:01', timestamp '2026-01-05 09:01:00', '{}'::json
+          union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 09:00:00', timestamp '2026-01-05 09:30:00', timestamp '2026-01-05 09:01:00', '{}'::json
+          union all select 'e-3', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:05:00', timestamp '2026-01-05 10:06:00', timestamp '2026-01-05 10:07:00', '{}'::json
+          union all select 'e-3', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:00:00', timestamp '2026-01-05 10:06:00', timestamp '2026-01-05 10:07:00', '{}'::json
+      - input: source('raw', 'dim_user')
+        format: sql
+        rows: |
+          select 'u-1' as user_id, 'UTC' as tz, 'c-morning' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
+    expect:
+      rows:
+        - {insert_id: e-1, server_upload_time: "2026-01-05 08:01:00", server_received_time: "2026-01-05 08:00:01", client_event_time: "2026-01-05 08:00:00"}
+        - {insert_id: e-2, server_upload_time: "2026-01-05 09:01:00", server_received_time: "2026-01-05 09:00:01", client_event_time: "2026-01-05 09:00:00"}
+        - {insert_id: e-3, server_upload_time: "2026-01-05 10:07:00", server_received_time: "2026-01-05 10:06:00", client_event_time: "2026-01-05 10:00:00"}
+  - name: stg_events_uses_tz_valid_at_client_event_time
+    description: >
+      A user with two dim rows (Tokyo until 2026-01-11, then London);
+      an event on each side of the change converts under its own row,
+      and the open row (valid_to null) is unbounded (spec invariant 2).
+    model: stg_events
+    given:
+      - input: source('raw', 'events')
+        format: sql
+        rows: |
+          select 'e-1' as insert_id, 'app_opened' as event_type, 'u-8' as user_id, 'd-8' as device_id, timestamp '2026-01-10 23:00:00' as client_event_time, timestamp '2026-01-10 23:00:01' as server_received_time, timestamp '2026-01-10 23:01:00' as server_upload_time, '{}'::json as event_properties
+          union all select 'e-2', 'app_opened', 'u-8', 'd-8', timestamp '2026-01-11 00:00:00', timestamp '2026-01-11 00:00:01', timestamp '2026-01-11 00:01:00', '{}'::json
+          union all select 'e-3', 'app_opened', 'u-8', 'd-8', timestamp '2027-06-01 12:00:00', timestamp '2027-06-01 12:00:01', timestamp '2027-06-01 12:01:00', '{}'::json
+      - input: source('raw', 'dim_user')
+        format: sql
+        rows: |
+          select 'u-8' as user_id, 'Asia/Tokyo' as tz, 'c-morning' as cohort_id, date '2025-12-08' as signup_date, timestamp '2025-12-08 00:00:00' as valid_from, timestamp '2026-01-11 00:00:00' as valid_to
+          union all select 'u-8', 'Europe/London', 'c-morning', date '2025-12-08', timestamp '2026-01-11 00:00:00', cast(null as timestamp)
+    expect:
+      rows:
+        - {insert_id: e-1, tz: Asia/Tokyo, client_event_time_local: "2026-01-11 08:00:00"}
+        - {insert_id: e-2, tz: Europe/London, client_event_time_local: "2026-01-11 00:00:00"}
+        - {insert_id: e-3, tz: Europe/London, client_event_time_local: "2027-06-01 13:00:00"}
+  - name: stg_events_json_null_error_code_is_sql_null
+    model: stg_events
+    given:
+      - input: source('raw', 'events')
+        format: sql
+        rows: |
+          select 'e-1' as insert_id, 'upload_started' as event_type, 'u-1' as user_id, 'd-1' as device_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:01' as server_received_time, timestamp '2026-01-05 08:01:00' as server_upload_time, '{"attempt":1,"error_code":null,"prompt_id":"p-1"}'::json as event_properties
+          union all select 'e-2', 'upload_failed', 'u-1', 'd-1', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:01', timestamp '2026-01-05 08:01:00', '{"attempt":1,"error_code":"E_NET","prompt_id":"p-1"}'::json
+      - input: source('raw', 'dim_user')
+        format: sql
+        rows: |
+          select 'u-1' as user_id, 'UTC' as tz, 'c-morning' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
+    expect:
+      rows:
+        - {insert_id: e-1, prompt_id: p-1, attempt: 1, error_code: null}
+        - {insert_id: e-2, prompt_id: p-1, attempt: 1, error_code: E_NET}
+  - name: stg_events_upload_delay_sign
+    description: received − client in seconds; a client clock ahead of the server gives a NEGATIVE delay (the Phase 3 skew signal, ARCHITECTURE §8).
+    model: stg_events
+    given:
+      - input: source('raw', 'events')
+        format: sql
+        rows: |
+          select 'e-1' as insert_id, 'app_opened' as event_type, 'u-1' as user_id, 'd-1' as device_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 09:00:00' as server_received_time, timestamp '2026-01-05 09:01:00' as server_upload_time, '{}'::json as event_properties
+          union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 08:10:00', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:01:00', '{}'::json
+      - input: source('raw', 'dim_user')
+        format: sql
+        rows: |
+          select 'u-1' as user_id, 'UTC' as tz, 'c-morning' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
+    expect:
+      rows:
+        - {insert_id: e-1, upload_delay_seconds: 3600}
+        - {insert_id: e-2, upload_delay_seconds: -600}
+  - name: stg_prompts_takes_first_delivery_receipt
+    description: Three receipts for one prompt — two TIE on the earliest client_event_time and the lower insert_id wins (e-2 over e-3); a later receipt (e-4) loses on time; a prompt with no receipt keeps a null delivered_at.
+    model: stg_prompts
+    given:
+      - input: ref('stg_events')
+        format: sql
+        rows: |
+          select 'e-1' as insert_id, 'prompt_sent' as event_type, 'u-1' as user_id, 'c-morning' as cohort_id, 'c-morning' as prompt_cohort_id, 'UTC' as tz, 60 as window_minutes, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as client_event_time_local, 'p-1' as prompt_id
+          union all select 'e-3', 'prompt_delivered', 'u-1', 'c-morning', null, 'UTC', null, timestamp '2026-01-05 08:00:10', timestamp '2026-01-05 08:00:10', 'p-1'
+          union all select 'e-2', 'prompt_delivered', 'u-1', 'c-morning', null, 'UTC', null, timestamp '2026-01-05 08:00:10', timestamp '2026-01-05 08:00:10', 'p-1'
+          union all select 'e-4', 'prompt_delivered', 'u-1', 'c-morning', null, 'UTC', null, timestamp '2026-01-05 08:00:30', timestamp '2026-01-05 08:00:30', 'p-1'
+          union all select 'e-5', 'prompt_sent', 'u-1', 'c-morning', 'c-morning', 'UTC', 60, timestamp '2026-01-06 08:00:00', timestamp '2026-01-06 08:00:00', 'p-2'
+    expect:
+      rows:
+        - {prompt_id: p-1, window_minutes: 60, delivered_at: "2026-01-05 08:00:10", delivered_insert_id: e-2}
+        - {prompt_id: p-2, window_minutes: 60, delivered_at: null, delivered_insert_id: null}
