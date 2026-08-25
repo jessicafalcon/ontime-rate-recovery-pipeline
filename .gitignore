@@ -2,6 +2,7 @@
 data/
 .env
 .env.*
+.claude/settings.local.json
 *.duckdb
 *.duckdb.wal
 

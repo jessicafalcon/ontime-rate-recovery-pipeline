@@ -1,0 +1,26 @@
+[project]
+name = "ontime-rate-recovery"
+version = "0.1.0"
+description = "Attributes missed daily-prompt responses to their true cause and recovers the on-time rate with a cohort send-time model"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+# Runtime packages land with their phase (CLAUDE.md → Conventions allowlist).
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff==0.16.3", # keep in lockstep with .pre-commit-config.yaml rev
+    "pre-commit>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
