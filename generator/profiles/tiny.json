@@ -1,0 +1,18 @@
+{
+  "seed": 1,
+  "users": 20,
+  "days": 7,
+  "tz_mix": {"America/New_York": 0.5, "Europe/London": 0.3, "Asia/Tokyo": 0.2},
+  "tz_change_rate": 0.1,
+  "cohorts": {"c-morning": 8, "c-evening": 20},
+  "window_minutes": 60,
+  "upload_fault_rate": 0.15,
+  "delivery_fault_rate": 0.1,
+  "reachable_width_hours": 6,
+  "duplicate_rate": 0.05,
+  "late_arrival_rate": 0.1,
+  "late_arrival_max_hours": 48,
+  "clock_skew_rate": 0.05,
+  "clock_skew_min": 30,
+  "organic_opens_per_day": 1.5
+}

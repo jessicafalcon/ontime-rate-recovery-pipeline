@@ -1,8 +1,7 @@
-# On-Time Rate Recovery Pipeline — Phase 0: tooling only. Pipeline targets
-# (seed, load, dbt-build, attribution-golden, report, simulate, writeback,
-# pipeline, test-int-*, tf-*) land with their phases (CLAUDE.md → Commands).
+# On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
+# (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); …
 
-.PHONY: setup test lint check-docs review-gate mutate
+.PHONY: setup test lint check-docs review-gate mutate seed freeze
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -44,3 +43,17 @@ review-gate:
 # in a throwaway git worktree, offline suite run there, KILLED/SURVIVED/ERROR.
 mutate:
 	uv run python scripts/mutate.py --spec $(call _Q,$(value SPEC))
+
+# The seeded generator (generator/cli.py): validates PROFILE ([a-z0-9_]+),
+# writes data/out/<PROFILE>/ only, compares its own hashes to
+# fixtures/<PROFILE>/MANIFEST.sha256 when one exists (exit 1 on drift).
+seed:
+	uv run python -m generator.cli seed $(call _Q,$(value PROFILE))
+
+# The ONLY writer of fixtures/: copies data/out/<PROFILE>/ over
+# fixtures/<PROFILE>/ and writes the manifest. Overwrites a committed golden, so
+# CONFIRM=yes must come from the COMMAND LINE ($(origin CONFIRM)); Python refuses
+# any other origin or value. A re-freeze needs a DECISIONS entry + a `Freeze:`
+# line in the phase spec (the review gate checks the diff).
+freeze:
+	uv run python -m generator.cli freeze $(call _Q,$(value PROFILE)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'

@@ -3,8 +3,10 @@
 Structural guard: no pipeline directory may even mention truth or the truth
 path. Pipeline directories are DERIVED from the tree — every top-level package
 not in EXEMPT — so a new package is guarded the day it appears (review round 1:
-a hand-maintained list was vacuously green on day one). Only the generator's
-writer (`truth.py`), its record type (`models.py`), `eval/` and tests may name it.
+a hand-maintained list was vacuously green on day one). Inside `generator/` only
+the writer (`truth.py`), the record types (`models.py`) and the entry point that
+invokes the writer (`cli.py`) may name it; generation logic never does. `eval/`
+and tests may.
 """
 
 from pathlib import Path
@@ -64,14 +66,30 @@ def test_a_planted_truth_reference_is_found(tmp_path: Path) -> None:
     assert offenders(tmp_path, "dbt") == ["dbt/models/a.yml", "dbt/models/z.sql"]
 
 
-def test_generator_truth_writer_is_confined() -> None:
-    """The generator may name truth only in truth.py (writer) and models.py."""
-    gen = REPO_ROOT / "generator"
-    if not gen.exists():
-        return
-    hits = sorted(
-        str(p.relative_to(REPO_ROOT))
+GENERATOR_MAY_NAME_TRUTH = {"truth", "models", "cli"}
+
+
+def generator_offenders(root: Path) -> list[str]:
+    gen = root / "generator"
+    return sorted(
+        str(p.relative_to(root))
         for p in gen.rglob("*.py")
-        if "truth" in p.read_text().lower() and p.stem not in {"truth", "models"}
+        if "truth" in p.read_text().lower() and p.stem not in GENERATOR_MAY_NAME_TRUTH
     )
-    assert not hits, f"generator references truth outside truth.py/models.py: {hits}"
+
+
+def test_generator_truth_writer_is_confined() -> None:
+    """The generator may name truth only in truth.py (writer), models.py (record
+    types) and cli.py (the entry point that calls the writer)."""
+    assert (REPO_ROOT / "generator" / "truth.py").is_file()  # no longer vacuous
+    hits = generator_offenders(REPO_ROOT)
+    assert not hits, f"generator references truth outside the sanctioned files: {hits}"
+
+
+def test_generator_confinement_is_not_vacuous(tmp_path: Path) -> None:
+    """Positive control: a planted reference in generation code is found."""
+    (tmp_path / "generator").mkdir()
+    (tmp_path / "generator" / "generate.py").write_text("x = load_truth()\n")
+    (tmp_path / "generator" / "truth.py").write_text("TRUTH = 1\n")
+    (tmp_path / "generator" / "response.py").write_text("y = 2\n")
+    assert generator_offenders(tmp_path) == ["generator/generate.py"]

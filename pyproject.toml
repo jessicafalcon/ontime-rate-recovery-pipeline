@@ -3,7 +3,9 @@ name = "ontime-rate-recovery"
 version = "0.1.0"
 description = "Attributes missed daily-prompt responses to their true cause and recovers the on-time rate with a cohort send-time model"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "pydantic>=2.13.4",
+]
 # Runtime packages land with their phase (CLAUDE.md → Conventions allowlist).
 
 [dependency-groups]

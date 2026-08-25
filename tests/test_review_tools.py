@@ -644,3 +644,54 @@ def test_cli_refusals_are_one_line_exit_2() -> None:
         assert res.returncode == 2, (script, args, res.stdout, res.stderr)
         assert res.stdout.count("\n") == 1 and res.stdout.startswith("refusing")
         assert "Traceback" not in res.stderr
+
+
+# --------------------------------------------------------- fixtures (check f)
+
+
+def _fixture_repo(repo: Path) -> None:
+    fx = repo / "fixtures" / "tiny"
+    (fx / "raw").mkdir(parents=True)
+    (fx / "raw" / "events.jsonl").write_text("{}\n")
+    (fx / "MANIFEST.sha256").write_text("abc  raw/events.jsonl\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "freeze")
+    _git(repo, "checkout", "-q", "-b", "branch")
+
+
+def test_gate_fails_on_fixture_change_without_manifest_change(repo: Path, capsys):
+    _fixture_repo(repo)
+    (repo / "fixtures" / "tiny" / "raw" / "events.jsonl").write_text("{1}\n")
+    _git(repo, "commit", "-q", "-am", "drift")
+    declared = SPEC + "\nFreeze: fixtures/tiny/MANIFEST.sha256\n"
+    assert gate.check_fixtures(declared, repo, "main") is False
+    assert "changed without its manifest" in capsys.readouterr().out
+
+
+def test_gate_fails_on_manifest_change_without_freeze_declaration(repo: Path, capsys):
+    _fixture_repo(repo)
+    (repo / "fixtures" / "tiny" / "raw" / "events.jsonl").write_text("{1}\n")
+    (repo / "fixtures" / "tiny" / "MANIFEST.sha256").write_text(
+        "def  raw/events.jsonl\n"
+    )
+    _git(repo, "commit", "-q", "-am", "refreeze")
+    assert gate.check_fixtures(SPEC, repo, "main") is False
+    assert "no `Freeze: fixtures/tiny/MANIFEST.sha256` line" in capsys.readouterr().out
+    assert gate.check_fixtures(None, repo, "main") is False  # no spec at all
+    other = SPEC + "\nFreeze: fixtures/medium/MANIFEST.sha256\n"
+    assert gate.check_fixtures(other, repo, "main") is False  # wrong profile
+
+
+def test_gate_accepts_a_declared_freeze(repo: Path, capsys) -> None:
+    _fixture_repo(repo)
+    assert gate.check_fixtures(None, repo, "main") is True  # untouched: fine
+    (repo / "fixtures" / "tiny" / "raw" / "events.jsonl").write_text("{1}\n")
+    (repo / "fixtures" / "tiny" / "MANIFEST.sha256").write_text(
+        "def  raw/events.jsonl\n"
+    )
+    _git(repo, "commit", "-q", "-am", "refreeze")
+    declared = SPEC + "\nFreeze: fixtures/tiny/MANIFEST.sha256\n"
+    assert gate.check_fixtures(declared, repo, "main") is True
+    assert "re-frozen as the spec declares" in capsys.readouterr().out
+    assert gate.freeze_declarations(declared) == {"tiny"}
+    assert gate.freeze_declarations(None) == set()
