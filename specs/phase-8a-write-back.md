@@ -197,9 +197,11 @@ make review-gate SPEC=specs/phase-8a-write-back.md && make dbt-build PROFILE=tin
   negatives), ruff, check-docs, Evidence ids, Record-updates files.
 - `make dbt-build PROFILE=tiny` — the new `dim_user_current` model builds; every
   existing model unchanged; `dbt-build OK: tiny/duckdb`.
-- `make writeback PROFILE=tiny` **twice** — first builds `send_schedule`
-  (`writeback OK: tiny, 20 users, 20 written`); the second is a no-op
-  (`0 written`, table byte-identical) — idempotence in the DONE command itself.
+- `make writeback PROFILE=tiny` **twice** — on a fresh build the first writes
+  `20 written`, the second is a no-op (`0 written`, table byte-identical) —
+  idempotence in the DONE command itself. (A repeated local run over an already-
+  written `send_schedule` writes `0` both times — still idempotent; `dbt-build`
+  does not touch the `serving` schema.)
 - `make pipeline PROFILE=tiny` — the full chain; `pipeline OK: tiny`;
   `scores_send_time` and `send_schedule` byte-identical to the step-by-step run.
 - `make attribution-golden / report / scores-golden / eval PROFILE=tiny` — every
@@ -242,7 +244,7 @@ authoritative if the landing diverges.)
 | 1 | `tests/test_writeback.py::test_replace_only_on_strictly_greater` (seed a row, apply candidates with lesser / equal / greater `(model_version, computed_as_of)`; only the strictly-greater one replaces); `::test_new_user_inserts`; `::test_should_replace_is_strict` (unit table over the four orderings) |
 | 2 | `tests/test_writeback.py::test_writeback_twice_is_a_noop` (second run writes 0 rows, `send_schedule` hash identical); `make writeback PROFILE=tiny` run twice in the DONE command → `20 written` then `0 written` |
 | 3 | `tests/test_writeback.py::test_send_schedule_has_the_nine_columns` (DDL vs §2.9); `::test_tz_is_the_open_dim_user_row`; `::test_written_at_equals_computed_as_of`; `::test_writeback_under_tokyo_is_identical`; `tests/pins.py::SEND_SCHEDULE_ROWS_TINY` (20) |
-| 4 | `tests/test_pipeline.py::test_pipeline_equals_step_by_step` (one db via `make pipeline`, one via the four steps; `scores_send_time` and `send_schedule` hashes equal); `::test_pipeline_scores_equal_main` (scores unchanged); `make pipeline PROFILE=tiny` → `pipeline OK: tiny` |
+| 4 | `tests/test_pipeline.py::test_pipeline_send_schedule_matches_pin` (`make pipeline` → `send_schedule` == the pinned hash); `::test_pipeline_equals_standalone_writeback` (the chained write-back == the standalone one after dropping the table); `::test_pipeline_scores_equal_frozen_golden` (scores unchanged — the chain re-derives no score); `make pipeline PROFILE=tiny` → `pipeline OK: tiny` |
 | 5 | `tests/test_truth_isolation.py` (now covers `serving/`); `tests/test_writeback.py::test_writeback_reads_only_scores_and_dim_current`; `make attribution-golden/report/scores-golden/eval PROFILE=tiny` all `0 differ`/pins; `dbt/models/marts/schema.yml` `dim_user_current` `unique`/`not_null` tests green |
 | 6 | `git diff main --stat -- generator/ fixtures/` empty; `uv.lock` unchanged; `tests/test_dbt_conventions.py::test_exactly_five_dispatch_macros`; review-gate `PASS fixtures` |
 
@@ -253,7 +255,7 @@ authoritative if the landing diverges.)
 | 1. **Replace-iff-greater.** For all rows, `send_schedule` is overwritten iff the incoming `(model_version, computed_as_of)` is strictly greater than the stored pair (absent → insert; ≤ → untouched), on the row's own columns. | `test_replace_only_on_strictly_greater`; `test_new_user_inserts`; mutation `serving/writeback.py::should_replace invert-guard` (flips the comparison → a lesser pair replaces / a fresh user is dropped) |
 | 2. **Idempotence.** For all runs over the same scores, applying the write-back twice equals once — the second writes zero rows, the table is byte-identical. | `test_writeback_twice_is_a_noop`; mutation `serving/writeback.py::apply_writeback delete-call` (drops the write → `send_schedule` empty/unwritten → both rows red) |
 | 3. **Nine-column, data-derived shape.** For all rows, `send_schedule` carries exactly §2.9's nine columns, `user_id` PK, `tz` = the open `dim_user` row, `written_at = computed_as_of`; no clock. | `test_send_schedule_has_the_nine_columns`; `test_tz_is_the_open_dim_user_row`; `test_written_at_equals_computed_as_of`; `test_writeback_under_tokyo_is_identical` |
-| 4. **Pipeline equals its steps.** For all profiles, `make pipeline` produces `scores_send_time` and `send_schedule` byte-identical to the manual `load → dbt build → eval → writeback`, and re-derives no score. | `test_pipeline_equals_step_by_step`; `test_pipeline_scores_equal_main` |
+| 4. **Pipeline equals its steps.** For all profiles, `make pipeline` produces `send_schedule` byte-identical to the standalone write-back over the same build, and `scores_send_time` unchanged (re-derives no score). | `test_pipeline_send_schedule_matches_pin`; `test_pipeline_equals_standalone_writeback`; `test_pipeline_scores_equal_frozen_golden` |
 | 5. **Boundary.** For all of `serving/`, it reads only `scores_send_time` + `dim_user_current`, writes only `send_schedule`, and never names `truth`/`raw`. | `tests/test_truth_isolation.py`; `test_writeback_reads_only_scores_and_dim_current`; mutation `serving/cli.py::validate_name invert-guard` (accepts a bad PROFILE / rejects `tiny` → the happy-path write red) |
 | 6. **Downstream and carry-forward unchanged.** For all Phase 3–6 outputs, adding `dim_user_current` and the write-back reproduces them byte-for-byte; no new package, generator/fixtures untouched, five dispatch macros. | `make attribution-golden/report/scores-golden/eval PROFILE=tiny`; `test_exactly_five_dispatch_macros`; `git diff main -- generator/ fixtures/` empty; `uv.lock` unchanged |
 
@@ -374,8 +376,8 @@ the existing `make drop-db … CONFIRM=yes`). Residual `MAKEFLAGS` is the standi
 
 | Target | empty | `../x` | `"; ` | env-exported | `$(origin)` on CONFIRM | Pinned by |
 |---|---|---|---|---|---|---|
-| `make writeback PROFILE=<p>` | refused (`profile: refused — [a-z0-9_]+`) | refused, never a path | one literal, refused | reaches Python, validated the same | n/a — no CONFIRM | `tests/test_makefile.py::test_writeback_passes_profile_as_one_literal`; `tests/test_writeback.py::test_cli_refuses_bad_profile` |
-| `make pipeline PROFILE=<p>` | refused | refused, never a path | one literal, refused | validated the same | n/a — no CONFIRM | `tests/test_makefile.py::test_pipeline_passes_profile_as_one_literal`; `tests/test_pipeline.py::test_cli_refuses_bad_profile` |
+| `make writeback PROFILE=<p>` | refused (`profile: refused — [a-z0-9_]+`) | refused, never a path | one literal, refused | reaches Python, validated the same | n/a — no CONFIRM | `tests/test_makefile.py::test_writeback_and_pipeline_pass_profile_as_one_literal`; `tests/test_writeback.py::test_cli_refuses_bad_profile` |
+| `make pipeline PROFILE=<p>` | refused | refused, never a path | one literal, refused | validated the same | n/a — no CONFIRM | `tests/test_makefile.py::test_writeback_and_pipeline_pass_profile_as_one_literal`; `tests/test_pipeline.py::test_cli_refuses_bad_profile` |
 
 ## Review & stack risk
 

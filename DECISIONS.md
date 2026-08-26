@@ -47,6 +47,20 @@ annotated **Superseded by …** in place and never deleted.
   writes it as generated blocks in committed docs. ([Phase 0](#phase-0),
   [Phase 6](#phase-6))
 
+**Serving & orchestration**
+
+- **The write-back replaces a row only on a strictly greater
+  `(model_version, computed_as_of)`, keyed `user_id`, and re-derives no score.**
+  The comparison is on the row's own data-derived columns (never a caller-supplied
+  marker), so a re-run over the same scores is a no-op (§4 invariant 5); the
+  write-back consumes the served `send_hour_local`/`send_minute_local` verbatim.
+  `written_at = computed_as_of` (data-derived, never a clock), which keeps
+  `send_schedule` byte-identical on a re-run and under a backfill. ([Phase 8a](#phase-8a))
+- **Airflow contains no logic — a task is a `make` target or a dbt command.**
+  `make pipeline` is the same chain minus the scheduler; the DAG's only
+  "computation" is Airflow's own `data_interval` rendered to a `THROUGH` date via
+  templating. ([Phase 0](#phase-0), [Phase 8a](#phase-8a))
+
 **Infra**
 
 - **Local-first, DuckDB for CI, BigQuery by profile switch; Composer and Spanner
@@ -93,6 +107,39 @@ annotated **Superseded by …** in place and never deleted.
   anyone opening the repo in Claude Code.
 
 ## Appendix — by phase
+
+### Phase 8a
+
+*Write-back and `make pipeline` (`phase-8-orchestration`, spec
+`specs/phase-8a-write-back.md`).*
+
+- **Phase 9a was set aside to run Phase 8 first.** The `phase-9-gcp-foundation`
+  branch (GCP/Terraform) was started before the Phase 8 checkpoint, out of
+  `docs/PHASES.md` order; its uncommitted working-tree records (a `BACKLOG.md`
+  edit, an untracked `docs/DEPLOYMENT.md`) were stashed and the branch parked. The
+  committed-main BACKLOG baseline is 10; 8a opens one row (→ 11).
+- **The write-back is `serving/` Python, not a dbt model, and adds no sixth
+  dispatch macro.** DuckDB has no `MERGE`; the write is the repo's delete-and-
+  insert idiom, gated by the Python `should_replace` (so the mutation sweep's
+  `invert-guard` falsifies replace-iff-greater). Phase 10 swaps the whole
+  statement for Spanner's mutation API behind the write-back `TARGET` flag.
+  Rejected: an `ON CONFLICT`/MERGE dispatch macro (the five-macro contract).
+- **`send_schedule` DDL is hand-written, `written_at = computed_as_of`.** The
+  generator's DDL emitter is `schema raw` + `create or replace` (destructive), and
+  there is no pydantic model for a serving contract; `serving/ddl.sql` is
+  `schema serving`, `create table if not exists`, `user_id` PK, the nine §2.9
+  columns. A wall-clock `written_at` breaks byte-identical and no-clock; a
+  batch-level stamp breaks backfill≡union; only a per-row function of the winning
+  score row is stable, and `computed_as_of` is that (and the only timestamp §3.1
+  lets the write-back read).
+- **Serving `tz` comes from a new `dim_user_current` dbt model (§3.1 amended).**
+  `tz` is not on `scores_send_time` (§2.8) and §3.1 bars the write-back from raw
+  (`raw.dim_user`), so `dim_user_current` (the open SCD2 row) exposes it as a dbt
+  output the write-back reads; §3.1's write-back `reads` cell gains it. Rejected:
+  a `tz` score column; the write-back reading `raw.dim_user`.
+- **`make pipeline` is one validated Python process.** `serving.cli pipeline`
+  chains `dbt build → eval → write-back`; a Makefile target re-invoking `$(MAKE)`
+  would re-expand user variables and lose the one-process path-derivation.
 
 ### Phase 7
 
