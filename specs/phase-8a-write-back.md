@@ -360,9 +360,9 @@ promoted into the block, a refusal is recorded):
       (`'v10' < 'v2'`), trigger Phase 10's first version bump; count 10 → 11
 - [ ] Spec amendments — none (8b's spec does not exist yet; it will reconcile
       against a main including 8a)
-- [ ] `docs/RESULTS.md` / `docs/AB_DESIGN.md` / `docs/METRICS.md` — none
-      (`send_schedule` is defined in §2.9; `dim_user_current` is a passthrough of
-      the open `dim_user` row, described in `schema.yml`; no block regenerates)
+- [ ] docs/RESULTS.md, docs/AB_DESIGN.md, docs/METRICS.md — none
+      (send_schedule is defined in §2.9; dim_user_current is a passthrough of the
+      open dim_user row, described in schema.yml; no block regenerates)
 - [ ] README — none (no README in the repo)
 
 ## Threat model (REQUIRED)
