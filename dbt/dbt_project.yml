@@ -39,6 +39,10 @@ vars:
 
 models:
   ontime:
+    # The folder default is `table`; the three EVENT-LEVEL models override it to
+    # `incremental` in their own config() (Phase 7 — stg_events, stg_prompts,
+    # attribution), where the incremental_strategy and partition_by live. The
+    # default still applies to any future non-incremental model in these folders.
     staging:
       +materialized: table
       +schema: staging

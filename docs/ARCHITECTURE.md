@@ -152,11 +152,16 @@ null policy, pinning test); the marts' `schema.yml` links there.
 
 Upload-fault events arrive hours or days after the prompt — the events the
 project is about. Every event-level model is incremental with a **reprocessing
-lookback window** of `LOOKBACK_DAYS` (spec-pinned, 3–7) partitioned by
-`prompt_date`: BigQuery `insert_overwrite`, DuckDB delete-and-insert per
-partition, both behind one macro. Running the lookback twice over the same raw
-converges (idempotent). Loads are driven by the partitions a landing touched,
-never by the wall clock.
+lookback window** of `LOOKBACK_DAYS` (spec-pinned, 3–7; 5 in Phase 7) partitioned
+by the local event date: `prompt_date` (the local send date) for `stg_prompts`
+and `attribution`, and `event_date` (the local `client_event_time` date) for
+`stg_events`, whose `app_opened` rows carry no `prompt_id`. BigQuery
+`insert_overwrite`, DuckDB delete-and-insert per partition, both behind one
+macro. The horizon is data-derived (`max(server_upload_time)`), never the clock;
+`final` once a partition is ≥ `LOOKBACK_DAYS` behind it, and
+`LOOKBACK_DAYS · 24 > late_arrival_max_hours` keeps a late event off a closed
+partition. Running the lookback twice over the same raw converges (idempotent).
+Loads are driven by the partitions a landing touched, never by the wall clock.
 
 ### 2.8 Features and scores *(Phase 5)*
 
