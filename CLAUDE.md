@@ -465,6 +465,6 @@ against the frozen `expected/ontime_rate_daily.csv`, overall rate 75 / 123 =
 `docs/METRICS.md` defines every metric once; `ontime_retention` is all-NULL on
 tiny by design (7 days < `retention_days` 28). Next: review rounds, then
 Phase 5 (send-time model).
-Open BACKLOG rows: **8**.
+Open BACKLOG rows: **9**.
 
 (Update this section at the end of every working day.)
