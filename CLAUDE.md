@@ -223,7 +223,8 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   (`μ_c`, `R̄_c`); `center_hour_local` = direction of `user vector +
   k·R̄_c·(cos μ_c, sin μ_c)`, `confidence = |combined| / (n + k)` — zero
   opens give `μ_c` and `R̄_c` exactly; `cohort_hour_local` = the hour whose
-  `[h, h + window_minutes)` holds the most pooled opens, ties → smaller hour;
+  `[h, h + window_minutes)` holds the most pooled opens (`h` over opened
+  bins), ties → smaller opened hour;
   the served `send_hour_local:send_minute_local` is the centre clamped to
   `±max_user_shift_min` of it. Circular arithmetic is ANSI `floor`/`atan2`
   — no `%` (denylisted), no `mod` on floats, no sixth macro.
@@ -505,6 +506,6 @@ coverage 0.6; `make eval PROFILE=medium` (seeded, unfrozen: 2,000 users ×
 30 days, 5 s to seed, 5 s to build) → MAE 0.352354 h, coverage 0.7345 —
 the recovery proof. `report` and `attribution-golden` unchanged. Next:
 review rounds, then Phase 6 (counterfactual simulation).
-Open BACKLOG rows: **9**.
+Open BACKLOG rows: **10**.
 
 (Update this section at the end of every working day.)

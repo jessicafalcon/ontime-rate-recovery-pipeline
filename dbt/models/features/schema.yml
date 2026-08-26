@@ -64,7 +64,9 @@ unit_tests:
     description: >
       Invariant 3 at feature_window_days = 30. The horizon is the max
       client_event_time over ALL events (a prompt_sent on 03-01 12:00); an
-      open 31 days before it is excluded, one 28 days before is counted.
+      open 31 days before it is excluded, one 28 days before is counted, and
+      one at EXACTLY 30 days before (01-30 12:00) is excluded — the window is
+      half-open (horizon − 30 d, horizon] (review round 1: `<` vs `<=`).
     model: features_user_hour
     given:
       - input: ref('stg_events')
@@ -72,6 +74,7 @@ unit_tests:
         rows: |
           select 'u-1' as user_id, 'prompt_sent' as event_type, timestamp '2026-03-01 12:00:00' as client_event_time, timestamp '2026-03-01 12:00:00' as client_event_time_local
           union all select 'u-1', 'app_opened', timestamp '2026-01-29 09:00:00', timestamp '2026-01-29 09:00:00'
+          union all select 'u-1', 'app_opened', timestamp '2026-01-30 12:00:00', timestamp '2026-01-30 12:00:00'
           union all select 'u-1', 'app_opened', timestamp '2026-02-01 09:00:00', timestamp '2026-02-01 09:00:00'
     expect:
       rows:

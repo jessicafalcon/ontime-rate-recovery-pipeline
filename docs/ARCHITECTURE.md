@@ -170,14 +170,17 @@ never by the wall clock.
   (DECISIONS Phase 5). Sparse: no row for an empty bin.
 - `scores_send_time`: per `cohort_id`, the send window maximizing P(open within
   `window_minutes`) — the hour `h` whose `[h, h + window_minutes)` holds the
-  most pooled opens, ties to the smaller hour; per user, a bounded shift
+  most pooled opens, `h` over the cohort's opened bins, ties to the smaller
+  opened hour (BACKLOG: a wider window may prefer an empty earlier start);
+  per user, a bounded shift
   within `MAX_USER_SHIFT_MIN` of the cohort moment. Bayesian shrinkage toward
   the cohort prior for sparse users: hours are angles at bin centres, the
   prior is the cohort's pooled resultant vector weighted as
   `SHRINKAGE_PSEUDO_COUNT` opens, the centre is the combined direction and
   `confidence` its mean resultant length (`[0, 1]`; a zero-open user gets the
   prior's exactly). Circular hour arithmetic (23:00 and 01:00 are 2 h apart)
-  in plain ANSI `floor`/`atan2` — not a dispatch macro (nothing diverges).
+  in plain ANSI `floor`/`atan2`, plus integer `mod` on hour bins only — not a
+  dispatch macro (nothing diverges).
   Ties broken by explicit key order, never by insertion order.
 - Columns: `user_id`, `cohort_id`, `send_hour_local`, `send_minute_local`,
   `cohort_hour_local` (the band's anchor), `center_hour_local` (the unclamped

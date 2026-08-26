@@ -219,7 +219,9 @@ no `%`, no `mod` on floats.
 - **Numerator:** the integer local hour `h` whose window
   `[h, h + window_minutes)` (circular; `window_minutes` = the cohort's
   prompts' value, `max` over `stg_prompts`) holds the most pooled organic
-  opens of the cohort's users; ties → the smaller `h` (`order by mass desc,
+  opens of the cohort's users, `h` ranging over the cohort's OPENED bins (an
+  optimal window can always start at an opened bin); ties → the smaller
+  opened `h` (`order by mass desc,
   hour_local asc`, never insertion order).
 - **Denominator:** n/a.
 - **Null policy:** never NULL; a cohort with no opens at all cannot be scored

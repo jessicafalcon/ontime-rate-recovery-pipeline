@@ -113,7 +113,8 @@ seed PROFILE=medium && make dbt-build PROFILE=medium` (unfrozen, from
    within window_minutes)") is the integer local hour `h` whose
    `[h, h + window_minutes)` (circular; `window_minutes` read from the
    cohort's prompts, `max` over `stg_prompts` — one value per cohort on
-   both profiles) holds the most pooled opens; ties → the smallest `h`
+   both profiles) holds the most pooled opens, `h` over the cohort's opened
+   bins; ties → the smallest opened `h`
    (item 6 of the invariants, a two-way-tie unit test). The served time is
    the posterior centre clamped to `±max_user_shift_min` of the cohort
    moment (circular), split into `send_hour_local` (integer) and
@@ -322,7 +323,7 @@ make review-gate SPEC=specs/phase-5-send-time.md && make dbt-build PROFILE=tiny 
 5. **Band, circle, tie.** Every served time is within `max_user_shift_min`
    (circular) of its cohort moment (dbt singular test); a user opening at
    23:00 and 01:00 is centred at 00:30, never 12:30; a two-way tie for the
-   cohort window resolves to the smaller hour. *Evidence: row 5.*
+   cohort window resolves to the smaller opened hour. *Evidence: row 5.*
 6. **Truth isolation and conventions.** `dbt/models/features` and
    `dbt/models/scores` never mention truth; no clock call, no `%`/`::`/
    dialect form inline, five macros, every model described and tested; the
@@ -336,7 +337,7 @@ make review-gate SPEC=specs/phase-5-send-time.md && make dbt-build PROFILE=tiny 
 | 1 | `make eval PROFILE=medium` → `eval OK: medium, mae … (pin …), coverage … (pin …), 2000 users`; `tests/test_scores.py::test_medium_mae_and_coverage_match_pins` (seeds medium in-process to `data/out/medium/`, builds into a tmp DuckDB, asserts both pins — the +10 s test); `tests/test_scores.py::test_tiny_mae_and_coverage_match_pins`; `tests/test_eval.py::test_planted_center_shift_raises_mae` (truth copy in tmp, every centre + 3 h → MAE > pin, exit 1); `tests/test_eval.py::test_eval_reads_unfrozen_truth_and_says_so` (`(unfrozen)` in the output for a `data/out/` profile) |
 | 2 | unit tests `scores_send_time_zero_opens_is_the_prior` (a `dim_user` row with no opens → `center_hour_local = μ_c`, `confidence = R̄_c` of the cohort's pooled opens, both to 6 places), `scores_send_time_shrinks_monotonically` (three users in one cohort: 0, 1, 30 opens at one hour → centres ordered `μ_c`, between, at the hour; `confidence` rises) in `dbt/models/scores/schema.yml` |
 | 3 | `tests/test_scores.py::test_two_builds_give_the_same_features_and_scores`; `::test_scores_under_a_non_utc_host_zone_are_identical`; `::test_computed_as_of_is_the_window_max` (equals `max(client_event_time)` of `app_opened` in the window on tiny: `2026-01-12 00:47:00`, earlier than the all-events horizon); `::test_model_version_is_the_var`; `::test_scores_golden_matches_fixture` (byte-identical render); `tests/test_dbt_conventions.py::test_no_clock_call_in_any_model_or_macro` |
-| 4 | unit tests `features_user_hour_is_organic_only` (a user with `response_recorded`/`prompt_opened`/`capture_started` at hour H and `app_opened` at hour K → one row, hour K), `features_user_hour_pools_a_tz_change` (reconciliation item 2), `features_user_hour_respects_the_window` (an open older than `feature_window_days` before the horizon is excluded); `schema.yml` `unique` on the combination via singular-free `unique` on `user_id` in `scores_send_time` + `not_null`; `tests/test_scores.py::test_tiny_features_match_organic_open_pin` (`sum(n_opens)` = `ORGANIC_OPEN_ROWS` 211, 20 users) |
+| 4 | unit tests `features_user_hour_is_organic_only` (a user with `response_recorded`/`prompt_opened`/`capture_started` at hour H and `app_opened` at hour K → one row, hour K), `features_user_hour_pools_a_tz_change` (reconciliation item 2), `features_user_hour_respects_the_window` (an open older than `feature_window_days` before the horizon is excluded; one at exactly the boundary is excluded — half-open, review round 1); `schema.yml` `unique` on the combination via singular-free `unique` on `user_id` in `scores_send_time` + `not_null`; `tests/test_scores.py::test_tiny_features_match_organic_open_pin` (`sum(n_opens)` = `ORGANIC_OPEN_ROWS` 211, 20 users) |
 | 5 | `dbt/tests/assert_send_time_within_band.sql` (zero rows beyond the band; also `send_hour_local` in 0–23, `send_minute_local` in 0–59); unit tests `scores_send_time_clamps_to_the_band_edge` (one user far ahead of the cohort moment, one far behind → `moment + max`, `moment − max`, both sides), `scores_send_time_is_circular` (opens at 23:00 and 01:00 → `center_hour_local = 0.5`), `scores_send_time_breaks_a_window_tie_by_smaller_hour` (two hours with equal pooled mass → the smaller); `tests/test_scores.py::test_cohort_moments_and_as_of_match_pins` (tiny's own tie: `c-morning` bins 3 and 10 at 12 → 3), `::test_every_served_time_is_inside_the_band_and_in_range`; mutations `drop-arm:1`, `drop-arm:2` on `scores_send_time.sql::send_hour_frac` |
 | 6 | `tests/test_truth_isolation.py::test_pipeline_dirs_never_mention_truth` (derived dirs — `dbt/` already covered); `tests/test_dbt_conventions.py::test_no_dialect_function_in_any_model` (gains `%`), `::test_exactly_five_dispatch_macros`, `::test_every_model_has_description_and_a_test` (folders gain `features`, `scores`), `::test_singular_tests_exist_and_target_their_relation`; `tests/test_fixture.py::test_raw_dims_truth_hashes_are_the_phase_1_hashes` + `::test_phase_3_and_4_expected_hashes_are_unchanged`; `tests/test_eval.py::test_scores_golden_write_only_on_literal_yes`; review-gate `PASS fixtures` |
 
@@ -350,7 +351,7 @@ make review-gate SPEC=specs/phase-5-send-time.md && make dbt-build PROFILE=tiny 
 | 4. **Shrinkage.** For all users, `center_hour_local` is the direction of `user vector + k·R̄_c·(cos μ_c, sin μ_c)` and `confidence = |combined| / (n + k)`; at `n = 0` they equal `μ_c` and `R̄_c` exactly; the centre moves monotonically toward the user's opens as `n` grows. | unit `scores_send_time_zero_opens_is_the_prior`; unit `scores_send_time_shrinks_monotonically` |
 | 5. **Band.** For all users, the circular distance from the served time to the cohort moment is `≤ max_user_shift_min`; a centre beyond the band is served at the nearer edge. | `assert_send_time_within_band.sql`; unit `scores_send_time_clamps_to_the_band_edge`; mutations `drop-arm:1`, `drop-arm:2` on `send_hour_frac` |
 | 6. **Circular.** For all users, the centre is the short-arc mean: opens at 23:00 and 01:00 centre at 00:30, never 12:30; distances never exceed 12 h. | unit `scores_send_time_is_circular`; `assert_send_time_within_band.sql` (a long-arc distance would exceed the band) |
-| 7. **Tie-break.** For all cohorts, the cohort moment is the smallest hour among those with maximal pooled mass in `[h, h + window_minutes)` — declared key order `(mass desc, hour asc)`, never insertion order. | unit `scores_send_time_breaks_a_window_tie_by_smaller_hour`. **Gap:** the key is an `order by` in a window function, not a `case` arm and not Python — no mutation operator can express it; the unit test is the only pin (named, BACKLOG-style note in Out of scope) |
+| 7. **Tie-break.** For all cohorts, the cohort moment is the smallest OPENED hour among those with maximal pooled mass in `[h, h + window_minutes)` — declared key order `(mass desc, hour asc)`, never insertion order. | unit `scores_send_time_breaks_a_window_tie_by_smaller_hour`. **Gap:** the key is an `order by` in a window function, not a `case` arm and not Python — no mutation operator can express it; the unit test is the only pin (named, BACKLOG-style note in Out of scope) |
 | 8. **Determinism.** For all builds on the same raw + dims + vars, `features_user_hour` and `scores_send_time` are byte-identical, on any host zone; `model_version` is the var; on tiny the table equals the frozen golden. | `test_two_builds_give_the_same_features_and_scores`; `test_scores_under_a_non_utc_host_zone_are_identical`; `test_model_version_is_the_var`; `test_scores_golden_matches_fixture`; mutations `eval/golden.py::diff_rows constant-return:[]` (Phase 4, kept) |
 | 9. **Measurement, not modelling.** For all profiles, `eval` reports MAE off `center_hour_local` and coverage off the served time vs `truth/users.jsonl`, circular, exits 1 off the pin, and computes no centre of its own; a shifted truth raises MAE. | `test_medium_mae_and_coverage_match_pins`; `test_tiny_mae_and_coverage_match_pins`; `test_planted_center_shift_raises_mae`; mutations `eval/score.py::reachable_center_mae constant-return:0.0`, `eval/score.py::coverage constant-return:1.0`, `eval/score.py::circular_abs_diff_hours constant-return:0.0` (every distance 0 → MAE 0 and coverage 1 miss both pins; `delete-call` was refused — the function is called inside expressions, never as a statement), `eval/score.py::coverage invert-guard` |
 | 10. **Unfrozen truth is named.** For all profiles, `eval` reads `fixtures/<p>/truth/` when it exists, else `data/out/<p>/truth/` and prints `(unfrozen)`; never any other path. | `test_eval_reads_unfrozen_truth_and_says_so`; `tests/test_eval.py::test_cli_refuses_bad_profile_before_any_path` (existing); mutation `eval/cli.py::truth_dir swap-sort-key` (the `(fixtures, data/out)` preference tuple — if the operator addresses it; else `invert-guard` on the `is_file()` check) |
@@ -400,6 +401,18 @@ refused — no statement-level call — and became `constant-return:0.0`):
   as in the unit test (`test_cohort_moments_and_as_of_match_pins`).
 - `tests/test_attribution.py::project_vars` tolerates a string var
   (`model_version: v1`) and its var-set pin lists the four new vars.
+
+## Review round 1 fixes (2026-08-25)
+
+Test-only: `features_user_hour_respects_the_window` gained an open at
+exactly `horizon − feature_window_days` (excluded), so the hand mutation
+`<` → `<=` on the window guard dies. Wording amendment: invariant 7, §2.8,
+METRICS and CLAUDE.md now say the cohort moment ranges over the cohort's
+OPENED bins (an optimal window can always start at one; the only divergence
+from "all 24 hours" is which equal-mass start wins a tie inside a window
+wider than one bin — unreachable at `window_minutes` 60 on every profile);
+accepted to BACKLOG with trigger "a profile ships `window_minutes > 60`".
+§2.8 names the integer `mod` beside `floor`/`atan2`.
 
 ## Pinned decisions (do not re-litigate)
 
