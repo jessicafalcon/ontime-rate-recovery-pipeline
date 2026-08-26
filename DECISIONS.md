@@ -42,7 +42,10 @@ annotated **Superseded by …** in place and never deleted.
   gives. ([Phase 5](#phase-5))
 - **Counterfactual simulation, not "offline A/B".** Re-simulating outcomes from
   the latent that generated the data is not an experiment; it is named as a
-  simulation, and the production A/B is shipped as a spec. ([Phase 0](#phase-0))
+  simulation, and the production A/B is shipped as a spec. Phase 6 runs it
+  under common random numbers, per cause, off the SERVED schedule, and
+  writes it as generated blocks in committed docs. ([Phase 0](#phase-0),
+  [Phase 6](#phase-6))
 
 **Infra**
 
@@ -90,6 +93,81 @@ annotated **Superseded by …** in place and never deleted.
   anyone opening the repo in Claude Code.
 
 ## Appendix — by phase
+
+### Phase 6
+
+*Counterfactual simulation and A/B spec (`phase-6-simulation`).*
+
+- **Common random numbers: four uniforms per prompt, one seeded stream in
+  `prompt_id` order, thresholds in the generator's draw order (delivery →
+  skew → respond → upload) through `open_probability`.** The generator's
+  `assign_cause` early-returns and `_prompt` then draws event timings from
+  the same `Random`, so its stream cannot be replayed and two arms calling
+  `responds` (which draws inside) would desynchronise at the first prompt
+  whose cause differs — on 140 prompts the draw noise is the size of the
+  effect. With fixed uniforms every arm compares the same numbers against
+  its own thresholds: `delivery_fault` and `unattributed` are identical by
+  construction, a prompt's label differs only as `timing_gap` ↔
+  {`on_time`, `upload_fault`}, and the lift is the schedules' alone. The
+  reused symbol is `open_probability` (pure); `responds` stays the
+  generator's; `generator/response.py` is imported, not edited. Rejected:
+  independent streams per arm with a confidence interval (reports noise a
+  pairing removes; tiny is never large enough); refactoring `assign_cause`
+  to take the uniforms (a generator change — the rule exists so no
+  downstream phase ever opens a re-freeze question).
+- **Both arms simulated, the data's counts printed beside.** A baseline
+  read off `attribution` is one realisation of the generator's interleaved
+  stream and a simulated arm is another; subtracting them would report two
+  RNG histories on top of the schedule effect. Under CRN the simulated
+  baseline and every other arm share their draws; the `data` row (built
+  `attribution` counts, equal to truth at accuracy 1.000) is the anchor the
+  simulated baseline sits near (medium: 0.461143 vs 0.460920).
+- **A third arm, `cohort`, off `cohort_hour_local` (the band anchor, no
+  per-user shift).** It decomposes the lift into the band move and the
+  per-user shift — the number the A/B design needs to justify per-user
+  shifts at all; one more schedule through the same function. Rejected: a
+  `center` arm (the unclamped centre is not a schedule the product sends;
+  the served-only invariant plants it only to prove it is never read).
+- **The simulated arms send every prompt of a user at the user's schedule
+  hour and do not re-create the tz-change send instant** — six of medium's
+  60,000 prompts sit at odd local hours in the baseline because the send
+  fell on a tz-change day; the baseline keeps them, the other arms use the
+  schedule hour. An assumption (≤ 0.01 %, zero on tiny), not a BACKLOG row.
+- **Generated blocks in committed LIVING docs, one write path.** The block
+  between `<!-- simulate:begin <p> -->` / `<!-- simulate:end <p> -->` (and
+  `<!-- power:begin -->` / `<!-- power:end -->`) belongs to the program;
+  the prose around it to the author. Check mode diffs byte-for-byte and
+  exits 1 (the CI proof), `WRITE=yes` (the literal only) replaces the
+  marked bytes and nothing else, a missing pair refuses (the writer never
+  creates a file, never appends). Both tiny and medium blocks are
+  committed: tiny is the regression pin the offline suite reproduces from
+  the fixture, medium the proof regenerated from `data/out/medium/`
+  (pins-as-manifest, Phase 5). The seed is `tests/pins.py::SIMULATE_SEED`
+  passed as a parameter — no Makefile knob (a re-seed is a code change
+  with an entry here). The `(unfrozen)` tag is printed, never written into
+  the block. Rejected: a seed variable; a RESULTS file per profile; a
+  simulate that also renders the power block (two targets, one writer —
+  `eval/blocks.py`).
+- **The power table is computed (`eval/power.py`), not hand-written.**
+  Two-proportion normal approximation, the quantile by bisection on
+  `math.erf` (no scipy — Phase 6 has no allowlist entry); rows `(tiny,
+  medium) × MDE {1, 2, 5} pp` at α 0.05 / power 0.8, days at half the
+  profile's users per arm and the profile's delivered share. Baseline
+  rates are pins (`ONTIME_RATE`, `ONTIME_RATE_MEDIUM` 0.461143 off the
+  medium mart). Rejected: prose numbers (no test catches a typo; the doc
+  drifts the day a rate moves).
+- **tiny's negative lift is recorded, not hidden.** tiny's `c-morning` band
+  anchor is hour 3 (the bin-3/bin-10 tie of ~10 opens per user, Phase 5)
+  while the data was sent at 8, so the recommended arm scores below
+  baseline (0.516667 vs 0.550000). Twenty users prove nothing about
+  recovery; the block pins the code path and says so. medium is the proof
+  (+0.162371).
+- **`eval/` stays one package; it now imports `generator.response` and
+  `generator.profiles`.** Both are inside its boundary (eval may read
+  anything; the generator is not pipeline code — both in
+  `test_truth_isolation.EXEMPT`, unchanged); the profile JSON is the
+  generator's input, not its output. Rejected: a top-level `simulation/`
+  package (a new boundary for one reader).
 
 ### Phase 5
 

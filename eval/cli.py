@@ -14,7 +14,13 @@ scores-golden — the golden shape over scores_send_time
          (expected/scores_send_time.csv).
 report — the same golden shape over ontime_rate_daily
          (expected/ontime_rate_daily.csv) plus the overall on-time rate vs
-         tests/pins.py::ONTIME_RATE; console only."""
+         tests/pins.py::ONTIME_RATE; console only.
+simulate — Phase 6: the counterfactual simulation (eval/simulate.py) rendered
+         as the <profile> block of docs/RESULTS.md; check mode diffs the
+         block byte-for-byte (exit 1 on drift); --write yes replaces only
+         the bytes between the profile's markers (a missing pair refuses).
+power  — Phase 6: the A/B power table (eval/power.py) as the block of
+         docs/AB_DESIGN.md, same check / --write yes shape."""
 
 from __future__ import annotations
 
@@ -22,13 +28,15 @@ import argparse
 import sys
 from pathlib import Path
 
-from eval import golden, report, score
+from eval import blocks, golden, power, report, score, simulate
 from loader import load as loader
 from loader.cli import die, validate_name
 
 DATA_OUT = loader.ROOT / "data" / "out"
 FIXTURES = loader.ROOT / "fixtures"
 EXPECTED = golden.ATTRIBUTION.file
+RESULTS = loader.ROOT / "docs" / "RESULTS.md"
+AB_DESIGN = loader.ROOT / "docs" / "AB_DESIGN.md"
 
 
 def _rel(path) -> str:
@@ -159,6 +167,71 @@ def score_cmd(profile: str) -> int:
     return 0 if verdict == "OK" and verdict2 == "OK" else 1
 
 
+def _block_cmd(
+    name: str, write: str, path, begin: str, end: str, rendered: str, what: str
+) -> int:
+    """Check mode: diff the committed block vs `rendered`, exit 1 on drift;
+    `--write yes`: replace exactly the marked bytes of `path`."""
+    if write not in ("", "yes"):
+        die(f"{name}: refused — WRITE takes only the literal `yes`")
+    if not path.is_file():
+        die(f"{name}: refused — no {_rel(path)}")
+    current = blocks.find_block(path.read_text(), begin, end)
+    if current is None:
+        die(f"{name}: refused — no marker pair for {what} in {_rel(path)}")
+    if write == "yes":
+        blocks.write_block(path, begin, end, rendered)
+        print(f"{name} WROTE: {_rel(path)}, {what} block")
+        return 0
+    diff = blocks.diff_block(current, rendered)
+    for line in diff[:40]:
+        print(f"    {line}")
+    verdict = "FAIL" if diff else "OK"
+    print(f"{name} {verdict}: {what}, block {'differs' if diff else 'matches'}")
+    return 1 if diff else 0
+
+
+def simulate_cmd(profile: str, write: str = "") -> int:
+    validate_name("PROFILE", profile)
+    if write not in ("", "yes"):
+        die("simulate: refused — WRITE takes only the literal `yes`")
+    from tests.pins import SIMULATE_SEED  # the seed is a pin, not a knob
+
+    truth = truth_dir(profile)
+    tag = "" if truth.is_relative_to(FIXTURES) else " (unfrozen)"
+    for fname in ("prompts.jsonl", "users.jsonl"):
+        if not (truth / fname).is_file():
+            die(f"simulate: refused — no {_rel(truth / fname)}")
+    db = _db(profile)
+    rows = simulate.arm_rows(db, truth, profile, SIMULATE_SEED)
+    rendered = simulate.render_block(profile, rows)
+    n = sum(rows[0][1].values())
+    print(f"simulate truth: {_rel(truth)}{tag}")
+    what = f"{profile}, {n} prompts, {len(simulate.ARMS)} arms"
+    return _block_cmd(
+        "simulate",
+        write,
+        RESULTS,
+        simulate.BEGIN.format(profile=profile),
+        simulate.END.format(profile=profile),
+        rendered,
+        what,
+    )
+
+
+def power_cmd(write: str = "") -> int:
+    rows = power.table_rows()
+    return _block_cmd(
+        "power",
+        write,
+        AB_DESIGN,
+        power.BEGIN,
+        power.END,
+        power.render_block(rows),
+        f"{len(rows)} rows",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -172,7 +245,15 @@ def main(argv: list[str] | None = None) -> int:
     sg = sub.add_parser("scores-golden")
     sg.add_argument("profile")
     sg.add_argument("--write", default="")
+    sm = sub.add_parser("simulate")
+    sm.add_argument("profile")
+    sm.add_argument("--write", default="")
+    sub.add_parser("power").add_argument("--write", default="")
     a = ap.parse_args(argv)
+    if a.cmd == "simulate":
+        return simulate_cmd(a.profile, a.write)
+    if a.cmd == "power":
+        return power_cmd(a.write)
     if a.cmd == "golden":
         return golden_cmd(a.profile, a.write)
     if a.cmd == "report":

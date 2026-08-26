@@ -92,6 +92,7 @@ def test_cli_refuses_bad_profile_before_any_path(monkeypatch) -> None:
             cli.score_cmd,
             cli.report_cmd,
             cli.scores_golden_cmd,
+            cli.simulate_cmd,
         ):
             with pytest.raises(SystemExit) as e:
                 fn(name)
@@ -285,3 +286,147 @@ def test_scores_golden_write_only_on_literal_yes(
     out = tmp_path / "out" / "tiny" / "expected" / "scores_send_time.csv"
     assert out.read_text() == golden.render(golden.export_rows(built, SCORES), SCORES)
     assert not (tmp_path / "fix").exists()  # never fixtures/
+
+
+# ------------------------------------------------- Phase 6: the generated blocks
+
+
+def _tmp_docs(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
+    """Copies of the two docs the block writers may touch, redirected."""
+    res = tmp_path / "docs" / "RESULTS.md"
+    ab = tmp_path / "docs" / "AB_DESIGN.md"
+    res.parent.mkdir()
+    res.write_text(cli.RESULTS.read_text())
+    ab.write_text(cli.AB_DESIGN.read_text())
+    monkeypatch.setattr(cli, "RESULTS", res)
+    monkeypatch.setattr(cli, "AB_DESIGN", ab)
+    return res, ab
+
+
+def _snapshot(root: Path) -> dict[str, bytes]:
+    return {
+        str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()
+    }
+
+
+def test_simulate_check_mode_matches_and_exits_1_on_drift(
+    built: Path, tmp_path: Path, monkeypatch, capsys
+) -> None:  # noqa: F811
+    res, _ = _tmp_docs(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    assert cli.simulate_cmd("tiny") == 0
+    out = capsys.readouterr().out
+    assert "simulate truth: fixtures/tiny/truth\n" in out
+    assert "simulate OK: tiny, 140 prompts, 3 arms, block matches" in out
+    text = res.read_text()
+    res.write_text(text.replace("| data | 75 |", "| data | 74 |"))  # inside the markers
+    assert cli.simulate_cmd("tiny") == 1
+    out = capsys.readouterr().out
+    assert "simulate FAIL: tiny, 140 prompts, 3 arms, block differs" in out
+    assert "-| data | 74 |" in out and "+| data | 75 |" in out
+    res.write_text(text.replace("## How to read a block", "## How to read"))  # outside
+    assert cli.simulate_cmd("tiny") == 0
+
+
+def test_simulate_write_only_on_literal_yes(
+    built: Path, tmp_path: Path, monkeypatch, capsys
+) -> None:  # noqa: F811
+    res, ab = _tmp_docs(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    original = res.read_text()
+    text = original.replace("| data | 75 |", "| data | 0 |")
+    res.write_text(text)
+    for bad in ("YES", "true", "1", " yes"):
+        with pytest.raises(SystemExit) as e:
+            cli.simulate_cmd("tiny", bad)
+        assert e.value.code == 2
+    assert res.read_text() == text  # nothing written
+    before = _snapshot(tmp_path)
+    assert cli.simulate_cmd("tiny", "yes") == 0
+    assert "simulate WROTE: " in capsys.readouterr().out
+    after = _snapshot(tmp_path)
+    assert set(after) == set(before)
+    assert [k for k in after if after[k] != before[k]] == ["docs/RESULTS.md"]
+    assert res.read_text() == original  # the block is back; prose and medium untouched
+    assert ab.read_text() == cli.AB_DESIGN.read_text()
+
+
+def test_simulate_refuses_a_missing_marker_pair(
+    built: Path, tmp_path: Path, monkeypatch, capsys
+) -> None:  # noqa: F811
+    res, _ = _tmp_docs(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    text = res.read_text().replace("<!-- simulate:end tiny -->", "")
+    res.write_text(text)
+    for write in ("", "yes"):
+        with pytest.raises(SystemExit) as e:
+            cli.simulate_cmd("tiny", write)
+        assert e.value.code == 2
+        assert "no marker pair for tiny" in capsys.readouterr().out
+    assert res.read_text() == text
+    res.unlink()
+    with pytest.raises(SystemExit) as e:
+        cli.simulate_cmd("tiny", "yes")
+    assert e.value.code == 2
+    assert not res.exists()  # never created
+
+
+def test_simulate_says_unfrozen_for_a_data_out_profile(
+    built: Path, tmp_path: Path, monkeypatch, capsys
+) -> None:  # noqa: F811
+    _tmp_docs(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "FIXTURES", tmp_path / "nofix")
+    monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
+    out_truth = tmp_path / "out" / "tiny" / "truth"
+    out_truth.mkdir(parents=True)
+    for f in ("prompts.jsonl", "users.jsonl"):
+        out_truth.joinpath(f).write_bytes(
+            (cli.loader.ROOT / "fixtures" / "tiny" / "truth" / f).read_bytes()
+        )
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    assert cli.simulate_cmd("tiny") == 0
+    assert "(unfrozen)" in capsys.readouterr().out
+
+
+def test_power_write_only_on_literal_yes(tmp_path: Path, monkeypatch, capsys) -> None:
+    res, ab = _tmp_docs(tmp_path, monkeypatch)
+    original = ab.read_text()
+    assert cli.power_cmd("") == 0
+    assert "power OK: 6 rows, block matches" in capsys.readouterr().out
+    planted = original.replace("| tiny | 0.609756 | 1 |", "| tiny | 0.609756 | 9 |")
+    ab.write_text(planted)
+    assert cli.power_cmd("") == 1
+    for bad in ("YES", "true", "1", " yes"):
+        with pytest.raises(SystemExit) as e:
+            cli.power_cmd(bad)
+        assert e.value.code == 2
+    assert ab.read_text() == planted
+    before = _snapshot(tmp_path)
+    assert cli.power_cmd("yes") == 0
+    after = _snapshot(tmp_path)
+    assert [k for k in after if after[k] != before[k]] == ["docs/AB_DESIGN.md"]
+    assert ab.read_text() == original
+    ab.write_text(original.replace("<!-- power:begin -->", ""))
+    with pytest.raises(SystemExit) as e:
+        cli.power_cmd("yes")
+    assert e.value.code == 2
+
+
+def test_blocks_replace_only_the_marked_bytes() -> None:
+    from eval import blocks
+
+    text = "head\n<!-- x:begin -->\nold\n<!-- x:end -->\ntail\n"
+    assert blocks.find_block(text, "<!-- x:begin -->", "<!-- x:end -->") == "old\n"
+    new = blocks.replace_block(text, "<!-- x:begin -->", "<!-- x:end -->", "new\n")
+    assert new == "head\n<!-- x:begin -->\nnew\n<!-- x:end -->\ntail\n"
+    assert blocks.find_block(text, "<!-- y:begin -->", "<!-- x:end -->") is None
+    assert (
+        blocks.find_block(
+            "<!-- x:end -->\n<!-- x:begin -->\n", "<!-- x:begin -->", "<!-- x:end -->"
+        )
+        is None
+    )
+    with pytest.raises(ValueError):
+        blocks.replace_block("no markers", "<!-- x:begin -->", "<!-- x:end -->", "z")
+    assert blocks.diff_block("a\n", "a\n") == []
+    assert blocks.diff_block("a\n", "b\n")
