@@ -192,8 +192,9 @@ seed PROFILE=medium && make dbt-build PROFILE=medium` (unfrozen, from
    the folders tuple `("staging", "attribution", "marts")` gains
    `"features", "scores"`; `SINGULAR` gains
    `assert_send_time_within_band.sql` (`ref('scores_send_time')`: every row's
-   circular distance to its cohort moment ≤ `max_user_shift_min`) and
-   `assert_one_score_per_user.sql`; the dialect denylist gains `%`.
+   circular distance to its cohort moment ≤ `max_user_shift_min`; one score
+   per user is a `schema.yml` `unique` test, not a singular); the dialect
+   denylist gains `%`.
    (c) PHASES Phase 5: Goal's "on tiny and medium" stands (item 1); Done-when
    1 gains "(unfrozen, seeded; tiny as the regression pin)"; the `Delivered`
    paragraph at exit. (d) ARCHITECTURE §2.8: the column list gains
@@ -211,3 +212,311 @@ change), **item 6** (`center_hour_local` as a column — design change; the
 re-freeze adding `expected/scores_send_time.csv`). Items 2–5 and 7 are
 facts. STOP here; the spec body (Invariants, Evidence, Pinned decisions,
 Threat model, teaching notes) follows in the next commit.
+
+## Teaching notes (first appearance in this project)
+
+- **Exposure bias — why responses are not a feature.** A prompt response can
+  only be observed at the hour the prompt was sent, so a histogram of
+  response times is a histogram of the *schedule*, not of the user: a user
+  prompted at 08:00 who answers at 08:10 looks like a morning person even
+  if they are awake at 23:00. Organic `app_opened` is the only event whose
+  timing the product did not choose, so it is the only signal that says
+  where the user actually is (§2.8, DECISIONS "still in force").
+- **Bayesian shrinkage / pseudo-counts.** With ten opens a per-user estimate
+  is mostly noise. Shrinkage treats the cohort's pooled behaviour as if it
+  were `k` extra observations of every user ("pseudo-counts"): a user with
+  few opens is pulled toward the cohort, a user with many is barely moved,
+  and a user with none *is* the cohort. `k` is a dial between "trust the
+  cohort" and "trust the user"; it is a dbt var so a re-tune is a config
+  diff, not a model rewrite.
+- **Circular statistics — circular mean vs argmax.** Hours live on a circle:
+  23:00 and 01:00 are two hours apart, and their ordinary mean (12:00) is
+  the worst possible answer. Mapping each hour to a point on the unit circle
+  and averaging the points gives the circular mean (via `atan2`), and the
+  length of that average — the resultant length, 0 to 1 — says how
+  concentrated the opens are. The argmax of a 24-bin histogram is also
+  circular-safe but throws away every open outside the winning bin; with
+  ten samples that is most of them.
+- **The cohort-band constraint — why not per-user send times.** The daily
+  prompt is a shared moment (everyone in `c-morning` is asked at the same
+  local hour); fully personal send times dissolve that product and make
+  every downstream comparison a comparison of schedules. The model picks the
+  cohort's best window from pooled opens and lets each user drift at most
+  `max_user_shift_min` from it (§5 non-goal: per-user times outside the
+  band). Coverage (item 6) measures what the band costs.
+- **dbt vars as model hyper-parameters.** `feature_window_days`,
+  `max_user_shift_min`, `shrinkage_pseudo_count` and `model_version` are
+  dbt vars with defaults in `dbt_project.yml`: the model reads them with
+  `var(...)` at compile time, a unit test can override them per case, and
+  `--vars` on the command line re-tunes a build without editing SQL. They
+  are part of the determinism claim (§4.2: output is a function of raw +
+  dims + vars) — change a var and `computed_as_of`/the scores may move; that
+  is a different build, not non-determinism.
+
+## Why
+
+Phases 3–4 say how the product is doing; nothing yet says what to do about
+it. The model turns organic opens into a send time per user that a
+notification service can act on, inside the product's shared moment, and
+`eval` says how close that time is to the latent window that generated the
+data — §7's second reported number and the input to Phase 6's simulation
+and Phase 8's write-back. It is a phase, not a fix PR: two dbt layers, a
+third golden, the first read of an unfrozen profile, and four vars every
+later phase tunes.
+
+## The central constraint
+
+**`fixtures/tiny/{raw,dims,truth,expected/*.csv}` do not move;
+`expected/scores_send_time.csv` is added once; Python never computes a
+score.** `Freeze: fixtures/tiny/MANIFEST.sha256` — 15 → 16 lines, the
+fifteen existing byte-identical (a moved hash is a STOP). `eval/` measures
+the columns the model built (`center_hour_local`, the served time); it never
+re-derives a centre from the features.
+
+## DONE command
+
+```
+make review-gate SPEC=specs/phase-5-send-time.md && make dbt-build PROFILE=tiny && make scores-golden PROFILE=tiny && make eval PROFILE=tiny && make seed PROFILE=medium && make dbt-build PROFILE=medium && make eval PROFILE=medium
+```
+
+- `make review-gate SPEC=…` — offline suite (features/scores unit, data and
+  singular tests through the in-process `dbt build`; the tiny golden; the
+  two-build and Tokyo identities; the medium seed + build + pins; eval's
+  negative tests; conventions incl. the `%` denylist; truth isolation over
+  the two new folders), ruff, check-docs, Evidence ids, Record-updates
+  files, the `Freeze:` declaration.
+- `make dbt-build PROFILE=tiny` — the live gate: 7 models; prints
+  `dbt-build OK: tiny/duckdb`.
+- `make scores-golden PROFILE=tiny` — `scores_send_time` vs
+  `fixtures/tiny/expected/scores_send_time.csv`; prints `scores-golden OK:
+  tiny, 20 rows, 0 differ`.
+- `make eval PROFILE=tiny` — label accuracy as before, plus `eval OK: tiny,
+  mae <MAE_TINY> h (pin …), coverage <COVERAGE_TINY> (pin …), 20 users`.
+- `make seed PROFILE=medium && make dbt-build PROFILE=medium && make eval
+  PROFILE=medium` — the proof profile, unfrozen (reconciliation item 1):
+  `load: source=data/out/medium (unfrozen)`, `eval OK: medium, mae
+  <MAE_MEDIUM> h …, 2000 users`.
+
+## Done-when
+
+1. **Recovery.** On medium, reachable-centre MAE (circular hours, off
+   `center_hour_local`) `≤ tests/pins.py::MAE_MEDIUM` and coverage (served
+   time inside `centre ± width/2`) `= COVERAGE_MEDIUM`; tiny reproduces
+   `MAE_TINY` / `COVERAGE_TINY`; a planted +3 h shift of every truth centre
+   raises MAE. *Evidence: row 1.*
+2. **Sparse users.** A user with zero organic opens in the window is served
+   `center_hour_local = μ_c`, the cohort default, with `confidence = R̄_c`
+   exactly; with 1 open the centre lies strictly between `μ_c` and the
+   open; with many it is at the open (reconciliation item 4). *Evidence:
+   row 2.*
+3. **Determinism.** Two `make dbt-build` runs, and a build under
+   `TZ=Asia/Tokyo`, give byte-identical `features_user_hour` and
+   `scores_send_time`; `computed_as_of` is the data-derived window
+   maximum; `model_version` is the var. The tiny table equals the frozen
+   golden row for row. *Evidence: row 3.*
+4. **Organic-only, per user.** No prompt-linked event contributes to
+   `features_user_hour`; a user whose tz changes mid-window has ONE
+   histogram on their own local clock (BACKLOG row closed). *Evidence:
+   row 4.*
+5. **Band, circle, tie.** Every served time is within `max_user_shift_min`
+   (circular) of its cohort moment (dbt singular test); a user opening at
+   23:00 and 01:00 is centred at 00:30, never 12:30; a two-way tie for the
+   cohort window resolves to the smaller hour. *Evidence: row 5.*
+6. **Truth isolation and conventions.** `dbt/models/features` and
+   `dbt/models/scores` never mention truth; no clock call, no `%`/`::`/
+   dialect form inline, five macros, every model described and tested; the
+   golden and the pins reach `fixtures/` through `make freeze` alone.
+   *Evidence: row 6.*
+
+## Evidence (REQUIRED)
+
+| Done-when | Proof (test file / `make` target / command output) |
+|---|---|
+| 1 | `make eval PROFILE=medium` → `eval OK: medium, mae … (pin …), coverage … (pin …), 2000 users`; `tests/test_scores.py::test_medium_mae_and_coverage_match_pins` (seeds medium in-process to `data/out/medium/`, builds into a tmp DuckDB, asserts both pins — the +10 s test); `tests/test_scores.py::test_tiny_mae_and_coverage_match_pins`; `tests/test_eval.py::test_planted_center_shift_raises_mae` (truth copy in tmp, every centre + 3 h → MAE > pin, exit 1); `tests/test_eval.py::test_eval_reads_unfrozen_truth_and_says_so` (`(unfrozen)` in the output for a `data/out/` profile) |
+| 2 | unit tests `scores_send_time_zero_opens_is_the_prior` (a `dim_user` row with no opens → `center_hour_local = μ_c`, `confidence = R̄_c` of the cohort's pooled opens, both to 6 places), `scores_send_time_shrinks_monotonically` (three users in one cohort: 0, 1, 30 opens at one hour → centres ordered `μ_c`, between, at the hour; `confidence` rises) in `dbt/models/scores/schema.yml` |
+| 3 | `tests/test_scores.py::test_two_builds_give_the_same_features_and_scores`; `::test_scores_under_a_non_utc_host_zone_are_identical`; `::test_computed_as_of_is_the_window_max` (equals `max(client_event_time)` of `app_opened` in the window on tiny: `2026-01-12 02:31:53`); `::test_model_version_is_the_var`; `::test_scores_golden_matches_fixture` (byte-identical render); `tests/test_dbt_conventions.py::test_no_clock_call_in_any_model_or_macro` |
+| 4 | unit tests `features_user_hour_is_organic_only` (a user with `response_recorded`/`prompt_opened`/`capture_started` at hour H and `app_opened` at hour K → one row, hour K), `features_user_hour_pools_a_tz_change` (reconciliation item 2), `features_user_hour_respects_the_window` (an open older than `feature_window_days` before the horizon is excluded); `schema.yml` `unique` on the combination via singular-free `unique` on `user_id` in `scores_send_time` + `not_null`; `tests/test_scores.py::test_tiny_features_match_organic_open_pin` (`sum(n_opens)` = `ORGANIC_OPEN_ROWS` 211, 20 users) |
+| 5 | `dbt/tests/assert_send_time_within_band.sql` (zero rows beyond the band; also `send_hour_local` in 0–23, `send_minute_local` in 0–59); unit tests `scores_send_time_clamps_to_the_band_edge` (one user far ahead of the cohort moment, one far behind → `moment + max`, `moment − max`, both sides), `scores_send_time_is_circular` (opens at 23:00 and 01:00 → `center_hour_local = 0.5`), `scores_send_time_breaks_a_window_tie_by_smaller_hour` (two hours with equal pooled mass → the smaller); mutations `drop-arm:1`, `drop-arm:2` on `scores_send_time.sql::send_hour_frac` |
+| 6 | `tests/test_truth_isolation.py::test_pipeline_dirs_never_mention_truth` (derived dirs — `dbt/` already covered); `tests/test_dbt_conventions.py::test_no_dialect_function_in_any_model` (gains `%`), `::test_exactly_five_dispatch_macros`, `::test_every_model_has_description_and_a_test` (folders gain `features`, `scores`), `::test_singular_tests_exist_and_target_their_relation`; `tests/test_fixture.py::test_raw_dims_truth_hashes_are_the_phase_1_hashes` + `::test_phase_3_and_4_expected_hashes_are_unchanged`; `tests/test_eval.py::test_scores_golden_write_only_on_literal_yes`; review-gate `PASS fixtures` |
+
+## Invariants (REQUIRED)
+
+| Invariant ("for all …, … holds") | Falsified by (scenario test) |
+|---|---|
+| 1. **Organic-only.** For all `features_user_hour` rows, every counted event is `app_opened` (the event with no `prompt_id`); a user's responses at hour H and opens at hour K yield a histogram at K only. | unit `features_user_hour_is_organic_only`; `test_tiny_features_match_organic_open_pin` |
+| 2. **Per-user local clock.** For all users, one histogram keyed `user_id`, each open at its own `client_event_time_local` hour; a tz change mid-window neither splits nor shifts it. | unit `features_user_hour_pools_a_tz_change`; `test_scores_under_a_non_utc_host_zone_are_identical` |
+| 3. **Window.** For all opens, counted iff `client_event_time` is in `(horizon − feature_window_days, horizon]`, `horizon = max(client_event_time)` over staged events; `computed_as_of = max(client_event_time)` of the counted opens. | unit `features_user_hour_respects_the_window`; `test_computed_as_of_is_the_window_max` |
+| 4. **Shrinkage.** For all users, `center_hour_local` is the direction of `user vector + k·R̄_c·(cos μ_c, sin μ_c)` and `confidence = |combined| / (n + k)`; at `n = 0` they equal `μ_c` and `R̄_c` exactly; the centre moves monotonically toward the user's opens as `n` grows. | unit `scores_send_time_zero_opens_is_the_prior`; unit `scores_send_time_shrinks_monotonically` |
+| 5. **Band.** For all users, the circular distance from the served time to the cohort moment is `≤ max_user_shift_min`; a centre beyond the band is served at the nearer edge. | `assert_send_time_within_band.sql`; unit `scores_send_time_clamps_to_the_band_edge`; mutations `drop-arm:1`, `drop-arm:2` on `send_hour_frac` |
+| 6. **Circular.** For all users, the centre is the short-arc mean: opens at 23:00 and 01:00 centre at 00:30, never 12:30; distances never exceed 12 h. | unit `scores_send_time_is_circular`; `assert_send_time_within_band.sql` (a long-arc distance would exceed the band) |
+| 7. **Tie-break.** For all cohorts, the cohort moment is the smallest hour among those with maximal pooled mass in `[h, h + window_minutes)` — declared key order `(mass desc, hour asc)`, never insertion order. | unit `scores_send_time_breaks_a_window_tie_by_smaller_hour`. **Gap:** the key is an `order by` in a window function, not a `case` arm and not Python — no mutation operator can express it; the unit test is the only pin (named, BACKLOG-style note in Out of scope) |
+| 8. **Determinism.** For all builds on the same raw + dims + vars, `features_user_hour` and `scores_send_time` are byte-identical, on any host zone; `model_version` is the var; on tiny the table equals the frozen golden. | `test_two_builds_give_the_same_features_and_scores`; `test_scores_under_a_non_utc_host_zone_are_identical`; `test_model_version_is_the_var`; `test_scores_golden_matches_fixture`; mutations `eval/golden.py::diff_rows constant-return:[]` (Phase 4, kept) |
+| 9. **Measurement, not modelling.** For all profiles, `eval` reports MAE off `center_hour_local` and coverage off the served time vs `truth/users.jsonl`, circular, exits 1 off the pin, and computes no centre of its own; a shifted truth raises MAE. | `test_medium_mae_and_coverage_match_pins`; `test_tiny_mae_and_coverage_match_pins`; `test_planted_center_shift_raises_mae`; mutations `eval/score.py::reachable_center_mae constant-return:0.0`, `eval/score.py::coverage constant-return:1.0`, `eval/score.py::circular_abs_diff_hours delete-call` (the wrap; 23 vs 1 becomes 22), `eval/score.py::coverage invert-guard` |
+| 10. **Unfrozen truth is named.** For all profiles, `eval` reads `fixtures/<p>/truth/` when it exists, else `data/out/<p>/truth/` and prints `(unfrozen)`; never any other path. | `test_eval_reads_unfrozen_truth_and_says_so`; `tests/test_eval.py::test_cli_refuses_bad_profile_before_any_path` (existing); mutation `eval/cli.py::truth_dir swap-sort-key` (the `(fixtures, data/out)` preference tuple — if the operator addresses it; else `invert-guard` on the `is_file()` check) |
+| 11. **Freeze scope.** For all freezes, `expected/scores_send_time.csv` enters `fixtures/` only via `make freeze`; the fifteen existing manifest lines do not move. | `test_raw_dims_truth_hashes_are_the_phase_1_hashes`; `test_phase_3_and_4_expected_hashes_are_unchanged`; `test_scores_golden_write_only_on_literal_yes`; review-gate `PASS fixtures` |
+| 12. **Carried forward.** For all models under `features/` and `scores/`: no clock, no inline dialect form (`%` included), no truth, five macros and no sixth, a description and a test each. | `test_no_clock_call_in_any_model_or_macro`; `test_no_dialect_function_in_any_model`; `test_pipeline_dirs_never_mention_truth`; `test_exactly_five_dispatch_macros`; `test_every_model_has_description_and_a_test` |
+
+```mutations
+eval/score.py::reachable_center_mae                              constant-return:0.0
+eval/score.py::coverage                                          constant-return:1.0
+eval/score.py::coverage                                          invert-guard
+eval/score.py::circular_abs_diff_hours                           delete-call
+eval/cli.py::truth_dir                                           invert-guard
+dbt/models/scores/scores_send_time.sql::send_hour_frac           drop-arm:1
+dbt/models/scores/scores_send_time.sql::send_hour_frac           drop-arm:2
+```
+
+Equivalent-mutant exclusions, named up front (each to be run once through
+`make mutate` on a scratch copy of the block at implementation, the verdict
+recorded here):
+
+- `scores_send_time.sql::send_hour_frac swap-arms:1,2` — arm 1 is "shift
+  beyond +band → moment + max", arm 2 "shift beyond −band → moment − max";
+  the conditions are disjoint (a signed circular shift is on one side), so
+  their order is unobservable.
+- The zero-open fallback is an identity of the shrinkage formula, not a
+  `case` (reconciliation item 4) — there is no arm to drop; the unit test
+  pins it.
+- The cohort-window argmax and its tie-break are an `order by` inside a
+  window function — outside every operator (invariant 7's named gap).
+- `features_user_hour` has no multi-arm `case`: the organic filter is a
+  `where`, the window a `where` — pinned by the three feature unit tests
+  and `ORGANIC_OPEN_ROWS`.
+
+## Pinned decisions (do not re-litigate)
+
+- **`features_user_hour` = one row per `(user_id, hour_local)` with
+  `n_opens`, over organic `app_opened` in the feature window, from
+  `stg_events` alone** — satisfies invariants 1–3. Sparse (no row for an
+  empty bin; the score's left join and `coalesce` supply zero), `hour_local
+  = extract(hour from client_event_time_local)` — the ANSI form on both
+  engines. Rejected: dense 24 × users rows (a cross join for zeros the
+  vector sum never needs); reading `attribution` or `stg_prompts` (no
+  prompt-linked signal, invariant 1).
+- **`scores_send_time` = `dim_user` (open row, one per user) left-joined to
+  the user's resultant vector and the cohort's pooled prior, the shrinkage
+  of reconciliation item 4, the cohort moment as the argmax window over the
+  pooled bins with `order by mass desc, hour asc`, the clamp as a
+  three-arm `case … end as send_hour_frac`, split into hour/minute** —
+  satisfies invariants 4–8. Angles use bin centres `h + 0.5` (an unbiased
+  centre; the 23:00/01:00 case reads 00:30). Rejected: argmax of the user's
+  own histogram (noise at n ≈ 10); a two-arm `least/greatest` clamp (not
+  addressable by the arm operators); per-user-tz rows (item 2).
+- **Vars `feature_window_days: 30`, `max_user_shift_min: 120`,
+  `shrinkage_pseudo_count: 5`, `model_version: v1`, defaulted in
+  `dbt_project.yml`** — satisfies invariants 3, 4, 5, 8. `window_minutes`
+  is read from the cohort's prompts (`max` over `stg_prompts`), not a var
+  — one knob, in the data. Rejected: a `window_minutes` var duplicating a
+  staged column.
+- **`eval/score.py` gains `circular_abs_diff_hours`, `reachable_center_mae`,
+  `coverage`; `eval/cli.py` `score` prints the second line and `truth_dir`
+  resolves fixtures-then-`data/out` with `(unfrozen)`; the pins are
+  `MAE_TINY`, `COVERAGE_TINY`, `MAE_MEDIUM`, `COVERAGE_MEDIUM` in
+  `tests/pins.py`** — satisfies invariants 9, 10. Console only. Rejected:
+  MAE off the served time; a Python re-derivation; a `fixtures/medium/`.
+- **Third `Golden` spec `SCORES_SEND_TIME` (`main_scores.scores_send_time`,
+  eight columns, `key_width 1`, `expected/scores_send_time.csv`), `make
+  scores-golden PROFILE=<p> [WRITE=yes]` in the `report` shape;
+  `center_hour_local` and `confidence` rounded to 6 places in the model** —
+  satisfies invariants 8, 11. One `Freeze:` line; 15 → 16. Rejected: no
+  golden; a wider sort key (the BACKLOG row's trigger is not pulled).
+- **The medium test seeds into `data/out/medium/` in-process and builds into
+  a tmp DuckDB** — satisfies invariant 9 under `make test`. `data/out/` is
+  the generator's sanctioned, gitignored output; the seed is idempotent
+  (byte-identical). Rejected: an `OTR_INT`-gated integration test (it is
+  offline and in-process — the marker is for services); a tmp output root
+  (the loader derives every path from the profile name by design).
+
+## Scope (files)
+
+- `dbt/models/features/features_user_hour.sql`, `schema.yml`;
+  `dbt/models/scores/scores_send_time.sql`, `schema.yml`;
+  `dbt/dbt_project.yml` (two folder configs, four vars)
+- `dbt/tests/assert_send_time_within_band.sql`
+- `eval/score.py` (MAE, coverage), `eval/golden.py` (`SCORES_SEND_TIME`),
+  `eval/cli.py` (`scores-golden`, `truth_dir`, the eval line); `Makefile`
+  (`scores-golden`)
+- `fixtures/tiny/expected/scores_send_time.csv`,
+  `fixtures/tiny/MANIFEST.sha256`
+- `tests/pins.py`, `tests/test_scores.py` (new), `tests/test_eval.py`,
+  `tests/test_fixture.py`, `tests/test_makefile.py`,
+  `tests/test_dbt_conventions.py`
+- `docs/METRICS.md` (blocks for `center_hour_local`, `confidence`, the
+  served time — a `### ` block each, the Phase 4 test extended to the
+  scores folder); records below
+
+## Record updates (REQUIRED)
+
+- [ ] `DECISIONS.md` — Phase 5 appendix (medium unfrozen; per-user pooling;
+      circular hours as ANSI, no sixth macro; shrinkage + confidence
+      formula; `center_hour_local`; the third golden; the tie-break gap)
+- [ ] `docs/PHASES.md` — Phase 5 Done-when as landed ("unfrozen, seeded";
+      tiny as regression pin); "Delivered" paragraph
+- [ ] `CLAUDE.md` — Current status; Commands (`scores-golden`, `eval`'s
+      new line, `seed`/`dbt-build` on an unfrozen profile); Repo map
+      (`dbt/models/features`, `dbt/models/scores`, `eval/score.py`); Event
+      model facts (four vars, the aggregation unit); BACKLOG count
+- [ ] `docs/ARCHITECTURE.md` — §2.8 `center_hour_local`, bin centres, the
+      per-user unit, the vars; §8 if a surprise lands
+- [ ] `BACKLOG.md` — close "A user whose `tz` changes mid-window …";
+      re-defer "ontime_retention has no frozen golden" (note: medium closes
+      every window when frozen) and "Every golden's sort key …" (not
+      pulled); open "tie-break in a window `order by` has no mutation
+      operator"
+- [ ] Spec amendments — none (no later spec exists)
+- [ ] `docs/METRICS.md` — new blocks: `center_hour_local`, `confidence`,
+      `send_hour_local`/`send_minute_local`
+- [ ] README — none (no README yet)
+
+## Threat model (REQUIRED)
+
+`scores-golden` takes `PROFILE` and `WRITE` in the settled shape (one Python
+process, `[a-z0-9_]+`, every path derived, `$(call _Q,$(value VAR))`, both
+already `unexport`ed). Only the literal `yes` writes
+`data/out/<p>/expected/scores_send_time.csv` (never `fixtures/`). `eval`
+gains no variable; its new `truth_dir` derives both candidates from the
+validated name. No delete, no cloud, no input. Residual: `WRITE=yes` from
+the environment writes `data/out/` — the stated Phase 3 class.
+
+| Target | empty | `../x` | `"; ` | env-exported | `$(origin)` on CONFIRM | Pinned by |
+|---|---|---|---|---|---|---|
+| `make scores-golden PROFILE= [WRITE=yes]` | refused (`scores-golden: refused — bad profile name`) | refused, no path derived | one literal, refused | reaches Python, validated the same; `WRITE` from env honoured (residual, stated) | n/a — no CONFIRM; `WRITE` must equal `yes` | `tests/test_makefile.py::test_scores_golden_passes_profile_as_one_literal`; `tests/test_eval.py::test_scores_golden_write_only_on_literal_yes`; `tests/test_eval.py::test_cli_refuses_bad_profile_before_any_path` |
+
+## Review & stack risk
+
+- **code-reviewer** (triggered — dbt models/tests, `eval/`, Makefile,
+  tests): organic-only source, per-user unit, the window on
+  `client_event_time` with a data-derived horizon, `floor`-based circular
+  arithmetic with no `%`/`mod` on floats, the shrinkage identity at n = 0,
+  `order by mass desc, hour asc`, no clock, five macros, no truth under
+  `dbt/`, eval computes no centre, `truth_dir` never leaves the two roots.
+- **security-reviewer** (triggered — a Makefile target taking a variable
+  and a `WRITE` knob): the `WRITE` residual; no write under `fixtures/`
+  outside `freeze`; the medium test writes only `data/out/medium/`.
+- **functionality-tester** (triggered): DONE command; the planted truth
+  shift; a planted golden difference; each mutation line KILLED and the
+  four named exclusions reasoned; `make seed PROFILE=tiny` still
+  `manifest match` with three `expected/` files; medium build byte-identical
+  across two runs.
+- **coherence-auditor** at exit: CLAUDE.md Repo map no longer says "later
+  features, scores"; PHASES Phase 5 wording; §2.8 column list; METRICS has
+  one block per score column; one BACKLOG row struck, two re-deferred, one
+  opened; count.
+- Stack risk (first hour, STOP on any surprise, §8): `extract(hour from
+  timestamp)` and `atan2`/`acos(-1)` on DuckDB; a dbt unit test overriding
+  vars per case (`overrides: vars:`); a unit test over a model with three
+  `given` inputs (`stg_events`, `stg_prompts`, `dim_user` source) — the
+  Phase 4 shape had two; `round()` on the atan2 result at exactly 6 places
+  for the golden. `%` in DuckDB's compiled SQL from a macro body is fine —
+  the denylist reads models only.
+
+## Out of scope (deferred, recorded)
+
+- The write-back of `scores_send_time` to `send_schedule` and its `tz`
+  join — Phase 8 (§2.9).
+- Simulation under the recommended schedule, `docs/RESULTS.md` — Phase 6.
+- A frozen `medium` — not planned; BACKLOG rows keep "first frozen profile"
+  triggers.
+- A mutation operator for `order by` keys in SQL window functions —
+  BACKLOG row opened this phase (invariant 7's gap).
+- Per-user send times outside the band — §5 non-goal.
