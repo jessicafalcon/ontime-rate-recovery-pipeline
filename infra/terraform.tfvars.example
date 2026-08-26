@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (gitignored) and set your project. `project_id` is the
+# only required value; every other input has a default (region us-central1, both
+# enable_* toggles false, budget alerts at $50/$150). Never commit terraform.tfvars.
+project_id = "your-gcp-project-id"
+
+# region          = "us-central1"
+# enable_composer = false
+# enable_spanner  = false

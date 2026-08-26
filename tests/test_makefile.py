@@ -22,6 +22,7 @@ SCRUB = (
     "WRITE",
     "THROUGH",
     "FULL",
+    "PROJECT",
     "MAKEFLAGS",
     "MFLAGS",
 )
@@ -366,3 +367,59 @@ def test_test_int_airflow_takes_no_variable_and_exports_otr_int() -> None:
         out = _make_n("test-int-airflow", cmdline, env)
         assert expected in out, out
         assert "../x" not in out  # no variable interpolation at all
+
+
+# ------------------------------------------------- Phase 9a: tf-plan/apply/destroy
+
+
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_tf_targets_pass_project_as_one_literal(value: str) -> None:
+    """PROJECT reaches infra.cli as one single-quoted token from either origin;
+    Python validates it as a GCP project-id and never derives a path."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for target in ("tf-plan", "tf-apply", "tf-destroy"):
+        for origin in ("cmdline", "env"):
+            out = _make_n(
+                target,
+                {"PROJECT": value} if origin == "cmdline" else {},
+                {"PROJECT": value} if origin == "env" else {},
+            )
+            assert f"infra.cli {target[len('tf-') :]} --project {quoted}" in out, (
+                target,
+                origin,
+                out,
+            )
+            assert "pwned" not in out.replace(value, "")
+
+
+def test_tf_validate_takes_no_project() -> None:
+    out = _make_n("tf-validate", {}, {})
+    assert "infra.cli validate" in out
+    assert "--project" not in out
+
+
+def test_tf_apply_and_destroy_confirm_from_command_line_only() -> None:
+    """tf-apply/tf-destroy pass $(origin CONFIRM) verbatim; Python accepts only
+    `command line` + `yes`. An exported CONFIRM=yes is refused, nothing created."""
+    from infra import cli
+
+    for target in ("tf-apply", "tf-destroy"):
+        out = _make_n(target, {"PROJECT": "my-proj", "CONFIRM": "yes"}, {})
+        assert "--confirm 'yes' --confirm-origin 'command line'" in out
+        out = _make_n(target, {"PROJECT": "my-proj"}, {"CONFIRM": "yes"})
+        assert "--confirm 'yes' --confirm-origin 'environment'" in out
+        out = _make_n(target, {"PROJECT": "my-proj"}, {})
+        # Gotcha (ARCHITECTURE §8): `unexport CONFIRM` makes an unset CONFIRM
+        # origin `file`, not `undefined`. Refused either way.
+        assert "--confirm '' --confirm-origin 'file'" in out
+    for confirm, origin in (
+        ("yes", "environment"),
+        ("", "undefined"),
+        ("no", "command line"),
+    ):
+        for cmd in ("apply", "destroy"):
+            with pytest.raises(SystemExit) as e:
+                cli.tf(cmd, "my-proj", confirm, origin)
+            assert e.value.code == 2

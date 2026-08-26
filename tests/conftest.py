@@ -45,6 +45,7 @@ def _scrub_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "THROUGH",
         "WRITE",
         "FULL",
+        "PROJECT",
     ):
         monkeypatch.delenv(var, raising=False)
     yield
