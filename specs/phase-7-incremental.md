@@ -381,8 +381,8 @@ promoted into the block, a refusal is recorded):
 - [ ] `BACKLOG.md` — `partition_overwrite` struck (`DONE Phase 7`); the `order
       by` tie-break row re-deferred unchanged; count 10 → 9
 - [ ] Spec amendments — none (no later spec exists)
-- [ ] `docs/RESULTS.md` / `docs/AB_DESIGN.md` / `docs/METRICS.md` — none (no
-      block regenerates; a drift here would be a Phase 7 bug, not an edit)
+- [ ] docs/RESULTS.md, AB_DESIGN.md, METRICS.md — none (no block regenerates;
+      a drift here would be a Phase 7 bug, not an edit)
 - [ ] README — none (no README in the repo)
 
 ## Threat model (REQUIRED)
