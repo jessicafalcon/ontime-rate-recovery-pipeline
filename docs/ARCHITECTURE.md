@@ -235,7 +235,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | component | reads | writes | may NOT |
 |---|---|---|---|
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
-| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked) | `raw.events`, `raw.dim_user` | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
+| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
 | eval | dbt outputs, truth, the profile JSON (the generator's input) | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), the marker-confined blocks of `docs/RESULTS.md` and `docs/AB_DESIGN.md` *(Phase 6; `WRITE=yes` only)* | write any table the pipeline reads; write under `fixtures/`; create or append to a doc |
 | write-back | `scores_send_time` | `send_schedule` | read truth; read raw |
@@ -339,3 +339,16 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
 - **`dbt/target/` compiles `schema.yml` into a directory named `schema.yml`**
   (Phase 2). A grep that treats every `.yml` path as a file raises
   `IsADirectoryError`; `test_truth_isolation.py` now checks `is_file()`.
+- **A model turning `table` → `incremental` (or gaining a column) needs a
+  full-refresh against a pre-existing DuckDB file** (Phase 7). The first Phase 7
+  `dbt build` on a db left by an earlier phase runs `is_incremental()` = true
+  against the old-schema table and fails — `Binder Error: Referenced column
+  "event_date" not found`. A fresh checkout / CI is unaffected (no db yet, so
+  the first run is a full build); the remedy on an existing db is `make dbt-build
+  … FULL=yes` (or `make drop-db … CONFIRM=yes`) once. dbt unit tests on an
+  incremental model must also pin `overrides: {macros: {is_incremental: false}}`
+  (dbt-core 1.12 refuses to parse them otherwise).
+- **A `%` in a Jinja `{% … %}` block trips a naive SQL-modulo denylist**
+  (Phase 7). `tests/test_dbt_conventions.py`'s dialect check flagged the
+  incremental models' statement blocks; the `%` alternative now excludes a `%`
+  adjacent to a brace (`(?<!\{)%(?!\})`), keeping the `x % 24` control.

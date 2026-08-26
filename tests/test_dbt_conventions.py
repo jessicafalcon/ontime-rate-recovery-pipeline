@@ -115,7 +115,7 @@ def test_no_default_dispatch_body() -> None:
         assert f"default__{name}" not in (DBT / "macros" / f"{name}.sql").read_text()
 
 
-def test_partition_overwrite_is_delete_and_insert_on_duckdb() -> None:
+def test_partition_overwrite_renders_delete_and_insert_on_duckdb() -> None:
     """Phase 7 (closes the BACKLOG row): the DuckDB body is delete-AND-insert (the
     name's promise), and the custom incremental strategy routes through the one
     dispatched seam — no second dispatch macro, so the count stays five."""
@@ -129,6 +129,17 @@ def test_partition_overwrite_is_delete_and_insert_on_duckdb() -> None:
     assert "get_incremental_partition_overwrite_sql" in text
     assert "partition_overwrite(" in text
     assert text.count("adapter.dispatch('partition_overwrite', 'ontime')") == 1
+
+
+def test_partition_overwrite_raises_on_bigquery() -> None:
+    """The BigQuery body raises until Phase 9 — no default__ fallback that could
+    build and be silently wrong (the seam contract)."""
+    text = (DBT / "macros" / "partition_overwrite.sql").read_text()
+    stub = re.search(
+        r"{% macro bigquery__partition_overwrite\(.*?%}(.*?){% endmacro %}", text, re.S
+    ).group(1)
+    assert "exceptions.raise_compiler_error" in stub
+    assert "default__partition_overwrite" not in text
 
 
 def test_incremental_models_use_the_partition_overwrite_strategy() -> None:

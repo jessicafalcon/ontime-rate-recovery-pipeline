@@ -42,13 +42,22 @@ def test_through_loads_only_files_on_or_before(tmp_path: Path) -> None:
     assert [f.name for f in kept] == [
         f"events_{d}.jsonl"
         for d in (
-            "2026-01-04", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08",
-            "2026-01-09", "2026-01-10", "2026-01-11", "2026-01-12",
+            "2026-01-04",
+            "2026-01-05",
+            "2026-01-06",
+            "2026-01-07",
+            "2026-01-08",
+            "2026-01-09",
+            "2026-01-10",
+            "2026-01-11",
+            "2026-01-12",
         )
     ]
     assert loader.event_files(TINY, through="2025-12-31") == []  # before every file
     assert loader.event_files(TINY, through=None) == loader.event_files(TINY)
-    n_files, _, _ = loader.load("tiny", tmp_path / "t.duckdb", through=pins.LANDING_SPLIT_TINY)
+    n_files, _, _ = loader.load(
+        "tiny", tmp_path / "t.duckdb", through=pins.LANDING_SPLIT_TINY
+    )
     assert n_files == pins.RAW_FILES - 1  # the late file (01-13) is not landed
 
 

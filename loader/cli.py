@@ -36,7 +36,7 @@ def validate_through(value: str) -> str:
     """A landing cut-off is an upload date; it filters file names already under
     fixtures/<p>/raw/ and never becomes a path (Phase 7 threat model)."""
     if not THROUGH_RE.match(value):
-        die(f"THROUGH: refused — THROUGH must be an upload date YYYY-MM-DD, got {value!r}")
+        die(f"THROUGH: refused — want an upload date YYYY-MM-DD, got {value!r}")
     return value
 
 

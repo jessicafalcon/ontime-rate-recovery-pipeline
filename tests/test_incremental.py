@@ -22,7 +22,11 @@ from tests import pins
 
 ROOT = Path(__file__).parent.parent
 DBT = ROOT / "dbt"
-MODELS = ("main_staging.stg_events", "main_staging.stg_prompts", "main_attribution.attribution")
+MODELS = (
+    "main_staging.stg_events",
+    "main_staging.stg_prompts",
+    "main_attribution.attribution",
+)
 
 
 def run_landing(db: Path, through: str | None = None) -> None:
@@ -75,11 +79,18 @@ def hashes(db: Path) -> dict[str, str]:
 
 def labels(db: Path, status: str | None = None) -> dict[str, str]:
     where = f" where status = '{status}'" if status else ""
-    return dict(q(db, f"select prompt_id, label from main_attribution.attribution{where}"))
+    return dict(
+        q(db, f"select prompt_id, label from main_attribution.attribution{where}")
+    )
 
 
 def status_counts(db: Path) -> dict[str, int]:
-    return dict(q(db, "select status, count(*) from main_attribution.attribution group by status"))
+    return dict(
+        q(
+            db,
+            "select status, count(*) from main_attribution.attribution group by status",
+        )
+    )
 
 
 @dataclass
@@ -127,7 +138,9 @@ def test_two_landings_equal_one_landing(landings: TwoLanding) -> None:
     assert landings.h_two == landings.h_one
 
 
-def test_two_landing_attribution_matches_the_frozen_golden(landings: TwoLanding) -> None:
+def test_two_landing_attribution_matches_the_frozen_golden(
+    landings: TwoLanding,
+) -> None:
     """The frozen expected/attribution.csv (four columns) is byte-identical after
     the two-landing build — the convergence golden (status is not exported)."""
     from eval import golden
@@ -174,10 +187,15 @@ def test_single_landing_final_count_matches_pin(landings: TwoLanding) -> None:
     }
     finals = q(
         landings.one,
-        "select distinct cast(prompt_date as varchar) from main_attribution.attribution "
-        "where status = 'final' order by 1",
+        "select distinct cast(prompt_date as varchar) "
+        "from main_attribution.attribution where status = 'final' order by 1",
     )
-    assert [r[0] for r in finals] == ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08"]
+    assert [r[0] for r in finals] == [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+    ]
 
 
 def test_identity_lookback_exceeds_late_arrival() -> None:
@@ -200,7 +218,8 @@ def test_duplicate_straddling_a_landing_dedupes_to_one(
     rows = q(
         db,
         "select count(*), min(cast(server_upload_time as varchar)) "
-        f"from main_staging.stg_events where insert_id = '{pins.STRADDLING_DUPLICATE_TINY}'",
+        "from main_staging.stg_events "
+        f"where insert_id = '{pins.STRADDLING_DUPLICATE_TINY}'",
     )
     raw_min = q(
         db,
@@ -222,8 +241,8 @@ def test_planted_row_in_a_closed_partition_survives_a_landing(tmp_path: Path) ->
             r[0]
             for r in con.execute(
                 "select column_name from information_schema.columns "
-                "where table_schema = 'main_attribution' and table_name = 'attribution' "
-                "order by ordinal_position"
+                "where table_schema = 'main_attribution' "
+                "and table_name = 'attribution' order by ordinal_position"
             ).fetchall()
         ]
         vals = []
@@ -247,7 +266,8 @@ def test_planted_row_in_a_closed_partition_survives_a_landing(tmp_path: Path) ->
     run_landing(db)  # the late tail — must not touch the closed 2026-01-05 partition
     got = q(
         db,
-        "select label, status from main_attribution.attribution where prompt_id = 'planted-1'",
+        "select label, status from main_attribution.attribution "
+        "where prompt_id = 'planted-1'",
     )
     assert got == [("on_time", "final")], "a closed partition was rewritten"
 
