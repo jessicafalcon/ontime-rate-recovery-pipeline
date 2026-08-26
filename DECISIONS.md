@@ -84,6 +84,70 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### Phase 5
+
+*Send-time model (`phase-5-send-time`).*
+
+- **`medium` runs unfrozen; its pins are its manifest (reconciliation,
+  approved 2026-08-25).** The Done-when pins MAE on a profile that had never
+  been built. Seeding (4.8 s, 418k records, 109 MB) and building (5.0 s) are
+  deterministic (`seed: 2`, one `Random`, fixed `SIM_START`), so
+  `tests/pins.py::MAE_MEDIUM` / `COVERAGE_MEDIUM` pin the built result
+  without a fixture; `eval/cli.py::truth_dir` resolves
+  `fixtures/<p>/truth` then `data/out/<p>/truth` (printed `(unfrozen)`),
+  the way the loader already resolves `raw/`. Rejected: tiny-only (20 users
+  × ~10 opens proves nothing about recovery — it is the regression pin);
+  `fixtures/medium/` (the project's largest diff for a number a 10-second
+  command reproduces, bound read-only forever).
+- **Organic opens are pooled per `user_id` on each event's own local hour**
+  (closes BACKLOG "A user whose `tz` changes mid-window …"). The generator
+  draws ONE latent centre per user in local hours and converts through the tz
+  valid that day, so u-000008's 9 Tokyo + 2 London opens are samples of one
+  clock; `stg_events.client_event_time_local` already lands them there. A
+  per-(user, tz) histogram thins a sparse sample and forces a row choice;
+  pooling in UTC would be the bug the row warned about. The serving `tz`
+  (§2.9) is Phase 8's join to the open `dim_user` row, not a score column.
+- **Circular hours are plain ANSI SQL, not a sixth macro.** Wrap is `x −
+  24·floor(x/24)`, the signed short-arc difference `d − 24·floor((d+12)/24)`,
+  the circular mean `atan2(Σ sin θ, Σ cos θ)` with `π = acos(−1)`; `floor`,
+  `atan2`, `sin`, `cos`, `sqrt`, `acos` have one spelling on both engines —
+  nothing diverges, which is the test for a macro (§3.2). `%` joined the
+  dialect denylist and `mod` is used on integer bins only (BigQuery's `MOD`
+  is integer-only). Rejected: a `circular_diff` dispatch macro (a sixth with
+  no divergence to dispatch on).
+- **Shrinkage is a vector sum, and `confidence` is the combined mean
+  resultant length.** Hours are angles at bin centres (`h + 0.5` — unbiased;
+  23:xx and 01:xx centre at 0.5); the cohort prior is the pooled direction
+  `μ_c` and mean resultant length `R̄_c`; the posterior direction is the
+  angle of `user vector + k·R̄_c·(cos μ_c, sin μ_c)`, `k =
+  shrinkage_pseudo_count` (5), and `confidence = |combined| / (n + k)`. A
+  zero-open user gets `μ_c` and `R̄_c` exactly — an identity, not a branch
+  (no `case` arm to mutate; the unit test pins it). Rejected: the argmax of
+  the user's own histogram (noise at n ≈ 10); `confidence = n / (n + k)` (a
+  sample-size vibe, 0 at n = 0 — not "the prior").
+- **Two columns beyond §2.8's list: `center_hour_local` and
+  `cohort_hour_local`.** MAE must be measured off the model's UNCLAMPED
+  centre (the served time is band-dominated and would measure the product
+  rule, not recovery), and without the column `eval` would re-implement the
+  shrinkage in Python — the second model the contract forbids.
+  `cohort_hour_local` is the band's anchor: with it the band is a singular
+  test over the served table instead of a recomputation. Neither is written
+  to `send_schedule` (Phase 8). Rejected: a Python re-derivation; a second
+  model exposing the moment.
+- **The served minute is `round(frac × 60)` on the 1440-minute circle, split
+  by integer arithmetic** — a `floor` on the float turned a 0.4999… h centre
+  into 29 min (found in the first hour; the `is_circular` unit test pins
+  00:30). `center_hour_local` and `confidence` are `round(…, 6)` (the Phase 4
+  rounding decision) so the golden is engine-stable.
+- **The tie-break (`order by mass desc, hour_local asc`) has no mutation
+  operator** — a window-function `order by` is outside the four Python and
+  two SQL-arm operators; pinned by the unit test and by tiny's own
+  `c-morning` tie (bins 3 and 10 at 12 pooled opens → 3). BACKLOG row opened.
+- **The medium test seeds into `data/out/medium/` in-process** (the
+  generator's sanctioned, gitignored output; idempotent) and builds into a
+  tmp DuckDB — it is offline and in-process, so it runs under `make test`
+  (+10 s), not behind the `OTR_INT` marker (which is for services).
+
 ### Phase 4
 
 *On-time marts (`phase-4-marts`).*

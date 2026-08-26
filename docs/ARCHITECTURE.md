@@ -161,16 +161,30 @@ never by the wall clock.
 ### 2.8 Features and scores *(Phase 5)*
 
 - `features_user_hour`: per user, local-hour histogram of **organic
-  `app_opened`** events over `FEATURE_WINDOW_DAYS`. Prompt responses are not
-  inputs (exposure bias: you only observe response at the hour you prompted).
+  `app_opened`** events over `FEATURE_WINDOW_DAYS` (the window ends at the
+  data horizon, `max(client_event_time)` over all staged events). Prompt
+  responses are not inputs (exposure bias: you only observe response at the
+  hour you prompted). The unit is `user_id`, each open on its own local hour
+  (`client_event_time_local`): a user whose tz changes mid-window keeps one
+  histogram on one clock — the latent centre is per user, in local hours
+  (DECISIONS Phase 5). Sparse: no row for an empty bin.
 - `scores_send_time`: per `cohort_id`, the send window maximizing P(open within
-  `window_minutes`); per user, a bounded shift within `MAX_USER_SHIFT_MIN` of
-  the cohort moment. Bayesian shrinkage toward the cohort prior for sparse
-  users. Circular hour arithmetic (23:00 and 01:00 are 2 h apart). Ties broken
-  by explicit key order, never by insertion order.
+  `window_minutes`) — the hour `h` whose `[h, h + window_minutes)` holds the
+  most pooled opens, ties to the smaller hour; per user, a bounded shift
+  within `MAX_USER_SHIFT_MIN` of the cohort moment. Bayesian shrinkage toward
+  the cohort prior for sparse users: hours are angles at bin centres, the
+  prior is the cohort's pooled resultant vector weighted as
+  `SHRINKAGE_PSEUDO_COUNT` opens, the centre is the combined direction and
+  `confidence` its mean resultant length (`[0, 1]`; a zero-open user gets the
+  prior's exactly). Circular hour arithmetic (23:00 and 01:00 are 2 h apart)
+  in plain ANSI `floor`/`atan2` — not a dispatch macro (nothing diverges).
+  Ties broken by explicit key order, never by insertion order.
 - Columns: `user_id`, `cohort_id`, `send_hour_local`, `send_minute_local`,
-  `confidence`, `model_version`, `computed_as_of` (= max `client_event_time` in
-  the feature window — data-derived, never `now()`).
+  `cohort_hour_local` (the band's anchor), `center_hour_local` (the unclamped
+  posterior centre — the column `eval` scores MAE against; never served),
+  `confidence`, `model_version`, `computed_as_of` (= max `client_event_time`
+  of the opens in the feature window — data-derived, never `now()`). Every
+  column is defined once in `METRICS.md` § scores_send_time.
 
 **The model is a dbt model.** Versioned, unit-tested, runs on both warehouses.
 Python is reserved for `eval/`.

@@ -47,8 +47,11 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   pipeline.
 - `dbt/` — the dbt project: `models/staging` (Phase 2), `models/attribution`
   (Phase 3), `models/marts` (Phase 4: `ontime_rate_daily`,
-  `ontime_retention`; every metric defined once in `docs/METRICS.md`), later
-  `features, scores`; `macros/` (the five dispatch
+  `ontime_retention`; every metric defined once in `docs/METRICS.md`),
+  `models/features` (Phase 5: `features_user_hour` — organic `app_opened`
+  local-hour histogram per user), `models/scores` (Phase 5:
+  `scores_send_time` — the send-time model, cohort band + circular
+  shrinkage; `docs/METRICS.md` § scores_send_time); `macros/` (the five dispatch
   macros), `tests/` (singular data tests), `profiles.yml` (`duckdb`,
   `bigquery` targets).
   `models/staging/sources.yml` is GENERATED (`make gen-sources`), never edited.
@@ -56,12 +59,16 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   schema, types from the generated `ddl.sql`), `cli.py` (`load`, `dbt-build`,
   `drop-db`). Pipeline code — guarded by `test_truth_isolation.py`.
 - `eval/` *(Phase 3+)* — the ONLY code that reads truth: `score.py` (label
-  accuracy vs `truth/prompts.jsonl`), `golden.py` (a built table as canonical
-  CSV + diff — one `Golden` spec per frozen file: attribution,
-  `ontime_rate_daily`), `report.py` (the overall rate off the mart), `cli.py`
-  (`golden`, `score`, `report`); later reachable-center
-  MAE, `simulate.py`. Writes console and `data/out/<p>/expected/` only —
-  never a table, never `fixtures/`.
+  accuracy vs `truth/prompts.jsonl`; Phase 5: reachable-centre MAE and
+  coverage vs `truth/users.jsonl`, off the model's own columns — never a
+  centre Python derived), `golden.py` (a built table as canonical CSV +
+  diff — one `Golden` spec per frozen file: attribution,
+  `ontime_rate_daily`, `scores_send_time`), `report.py` (the overall rate
+  off the mart), `cli.py` (`golden`, `score`, `report`, `scores-golden`;
+  `truth_dir` = `fixtures/<p>/truth` when frozen, else
+  `data/out/<p>/truth`, printed `(unfrozen)`); later `simulate.py`. Writes
+  console and `data/out/<p>/expected/` only — never a table, never
+  `fixtures/`.
 - `serving/` *(Phase 8; Spanner target Phase 10)* — write-back to
   `send_schedule`.
 - `orchestration/` *(Phase 8)* — the Airflow DAG. No logic, only ordering.
@@ -153,9 +160,22 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   <p>, N rows, 0 differ`, exit 1 on any differing row. `WRITE=yes` (the
   literal only) writes `data/out/<p>/expected/attribution.csv` instead —
   `make freeze` is the only way it reaches `fixtures/`. Needs `dbt-build` first
-- `make eval PROFILE=<p>` — label accuracy vs `fixtures/<p>/truth/prompts.jsonl`
-  (`eval/cli.py score`, the ONLY truth reader); prints `eval OK: <p>, accuracy
-  1.000 (pin 1.000), N prompts`, exit 1 below `tests/pins.py::LABEL_ACCURACY`
+- `make eval PROFILE=<p>` — label accuracy vs `<p>/truth/prompts.jsonl` and
+  (Phase 5) reachable-centre MAE + coverage vs `<p>/truth/users.jsonl`
+  (`eval/cli.py score`, the ONLY truth reader; `truth/` is
+  `fixtures/<p>/` when frozen, else `data/out/<p>/`, printed `(unfrozen)`
+  — `medium` is seeded, never frozen); prints `eval OK: <p>, accuracy 1.000
+  (pin 1.000), N prompts` and `eval OK: <p>, mae 0.816201 h (pin 0.816201),
+  coverage 0.600000 (pin 0.600000), N users`, exit 1 below
+  `tests/pins.py::LABEL_ACCURACY` or off `SEND_TIME_PINS[<p>]` (tiny and
+  medium; another profile has no pin and fails)
+- `make scores-golden PROFILE=<p> [WRITE=yes]` — the built `scores_send_time`
+  table (nine columns, sorted by `(user_id, cohort_id)`) vs
+  `fixtures/<p>/expected/scores_send_time.csv`; prints `scores-golden OK:
+  <p>, N rows, 0 differ`, exit 1 on any differing row. `WRITE=yes` (the
+  literal only) writes `data/out/<p>/expected/scores_send_time.csv` instead
+  — `make freeze` is the only way it reaches `fixtures/`. Needs `dbt-build`
+  first
 - `make report PROFILE=<p> [WRITE=yes]` — the built `ontime_rate_daily` mart
   (ten columns, sorted by `(cohort_id, prompt_date)`) vs
   `fixtures/<p>/expected/ontime_rate_daily.csv` plus the overall rate
@@ -189,8 +209,27 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   backend-stamped). `attribution.cohort_id` is the prompt's own
   (`prompt_cohort_id`). `provisional` until `LOOKBACK_DAYS` closes, then
   `final` forever (Phase 7). Vars `skew_max_min` (5 = `generator/models.py`),
-  `delivery_grace_min` (10), `unattributed_max` (0.10), `retention_days` (28)
-  in `dbt_project.yml`.
+  `delivery_grace_min` (10), `unattributed_max` (0.10), `retention_days` (28),
+  and the send-time model's `feature_window_days` (30), `max_user_shift_min`
+  (120), `shrinkage_pseudo_count` (5), `model_version` (`v1`) in
+  `dbt_project.yml`.
+- Send-time model (Phase 5, `docs/METRICS.md` § scores_send_time):
+  `features_user_hour` counts ORGANIC `app_opened` only (responses are
+  exposure-biased), per `user_id` on each event's own local hour — a
+  tz-change user has one histogram (BACKLOG row closed) — inside
+  `(horizon − feature_window_days, horizon]`, `horizon = max(client_event_time)`.
+  `scores_send_time`: one row per user (open `dim_user` row); hours are
+  angles at bin centres (`h + 0.5`); the cohort prior is the pooled resultant
+  (`μ_c`, `R̄_c`); `center_hour_local` = direction of `user vector +
+  k·R̄_c·(cos μ_c, sin μ_c)`, `confidence = |combined| / (n + k)` — zero
+  opens give `μ_c` and `R̄_c` exactly; `cohort_hour_local` = the hour whose
+  `[h, h + window_minutes)` holds the most pooled opens, ties → smaller hour;
+  the served `send_hour_local:send_minute_local` is the centre clamped to
+  `±max_user_shift_min` of it. Circular arithmetic is ANSI `floor`/`atan2`
+  — no `%` (denylisted), no `mod` on floats, no sixth macro.
+  `computed_as_of` = `max(client_event_time)` of the opens in the window.
+  tiny: MAE 0.816201 h, coverage 0.6; medium (2,000 users, unfrozen): MAE
+  0.352354 h, coverage 0.7345.
 - On-time denominator is `prompts_delivered` = prompts with
   `delivered_in_grace`. Never user-days, never `prompts_sent`. Mart grain is
   `(cohort_id, prompt_date)` with `prompt_date` the LOCAL date
@@ -456,15 +495,16 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 4 implemented, in review (`phase-4-marts`).** Phases 0–3 merged
-(PRs #1, #2, #4, #5), round-tag fix merged (PR #3). `make dbt-build
-PROFILE=tiny` is green (5 models, 90 items: 24 unit tests, the rest data and
-singular tests); `make report PROFILE=tiny` → 14 cohort-days, 0 differ
-against the frozen `expected/ontime_rate_daily.csv`, overall rate 75 / 123 =
-0.609756; `attribution-golden` and `eval` unchanged (140 rows, accuracy 1.000).
-`docs/METRICS.md` defines every metric once; `ontime_retention` is all-NULL on
-tiny by design (7 days < `retention_days` 28). Next: review rounds, then
-Phase 5 (send-time model).
+**Phase 5 implemented, in review (`phase-5-send-time`).** Phases 0–4 merged
+(PRs #1, #2, #4, #5, #6), round-tag fix merged (PR #3). `make dbt-build
+PROFILE=tiny` is green (7 models, 117 items: 32 unit tests, the rest data and
+singular tests); `make scores-golden PROFILE=tiny` → 20 rows, 0 differ
+against the frozen `expected/scores_send_time.csv` (tiny re-frozen, 15 → 16
+manifest lines); `make eval PROFILE=tiny` → accuracy 1.000, MAE 0.816201 h,
+coverage 0.6; `make eval PROFILE=medium` (seeded, unfrozen: 2,000 users ×
+30 days, 5 s to seed, 5 s to build) → MAE 0.352354 h, coverage 0.7345 —
+the recovery proof. `report` and `attribution-golden` unchanged. Next:
+review rounds, then Phase 6 (counterfactual simulation).
 Open BACKLOG rows: **9**.
 
 (Update this section at the end of every working day.)
