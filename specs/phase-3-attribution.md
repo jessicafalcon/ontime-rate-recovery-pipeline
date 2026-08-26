@@ -1,9 +1,9 @@
-# Phase 3 — Attribution ⭐ checkpoint (PROPOSED)
+# Phase 3 — Attribution ⭐ checkpoint (APPROVED 2026-08-25 — implemented, in review)
 
 Contract for the `phase-3-attribution` branch. Source: `docs/PHASES.md`
 Phase 3. Depends on Phase 2 merged (PR #4, `07dfb51`).
 
-**Status: PROPOSED — do not start until approved.** No new dependencies:
+**Status: APPROVED 2026-08-25; implemented on `phase-3-attribution`.** No new dependencies:
 Phase 3 has no allowlist entry; `eval/` uses `duckdb` (Phase 2) and the
 standard library only. A need for any package is a STOP-and-ask.
 
@@ -179,7 +179,8 @@ make review-gate SPEC=specs/phase-3-attribution.md && make dbt-build PROFILE=tin
    *Evidence: row 4.*
 5. **Precedence is tested per arm and per adjacent overlap** — one dbt unit
    test per rule, one per adjacent pair, and the SQL mutation sweep kills
-   every `drop-arm` / `swap-arms` line. *Evidence: row 5.*
+   every `drop-arm` / `swap-arms` line (five drops, three swaps; the 4–5
+   swap is an equivalent mutant, see the block). *Evidence: row 5.*
 6. **`expected/` lands through `freeze` alone; seed and freeze stay honest.**
    `make seed PROFILE=tiny` still prints `manifest match` with `expected/` in
    the manifest; `freeze` refuses when `data/out/<p>/` lacks a manifest-listed
@@ -226,21 +227,31 @@ dbt/models/attribution/attribution.sql::label                   drop-arm:5
 dbt/models/attribution/attribution.sql::label                   swap-arms:1,2
 dbt/models/attribution/attribution.sql::label                   swap-arms:2,3
 dbt/models/attribution/attribution.sql::label                   swap-arms:3,4
-dbt/models/attribution/attribution.sql::label                   swap-arms:4,5
 ```
 
 (`drop-arm:5` turns `timing_gap` into the `else` → `unattributed`; the arm
-count is five `when`s plus `else`, so `drop-arm:6` is a refused line, tested.)
+count is five `when`s plus `else`, so `drop-arm:6` is a refused line, tested.
+`swap-arms:4,5` is NOT listed: the first sweep showed it SURVIVED because
+arms 4 and 5 are disjoint by construction — `timing_gap` requires no upload
+event and both `upload_fault` clauses imply one — so the swap is an
+equivalent mutant; the overlap is still pinned by the unit test
+`attribution_upload_fault_beats_timing_gap`, which proves the upload chain
+is action.)
 
 ## Pinned decisions (do not re-litigate)
 
 - **One `case` over per-prompt evidence, arms in the amended §2.5 order with
   the skew gate second** — satisfies invariants 2, 3. Evidence is
   pre-aggregated once per `prompt_id` in CTEs (`delivered_in_grace`,
-  `min_upload_delay_seconds`, `response_client_in_window`,
-  `response_received_in_window`, `has_upload_failed`, `has_upload_event`,
-  `has_capture_in_window`) and exposed as columns, so every arm reads
-  booleans and the unit tests assert the evidence as well as the label.
+  `min_upload_delay_seconds`, `response_on_time`,
+  `captured_in_window_received_late`, `has_response`,
+  `has_response_in_window`, `has_capture_in_window`, `has_upload_failed`,
+  `has_upload_event`) and exposed as columns, so every arm reads booleans
+  and the unit tests assert the evidence as well as the label. Rule 4a reads
+  the device clock off `capture_started` / `upload_*` — `response_recorded`
+  is backend-stamped with equal clocks (found on the first build: 5 of 8
+  upload faults fell to the residual under the literal reading; DECISIONS
+  Phase 3, ARCHITECTURE §8).
   Window = `[sent_at, sent_at + window_minutes)` half-open; grace = `delivered_at
   − sent_at ≤ delivery_grace_min·60` s via `timestamp_diff`. Rejected:
   nested `case`s per rule (the arm is the mutation unit; nesting hides one).

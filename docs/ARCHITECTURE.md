@@ -89,21 +89,34 @@ are emitted, so truth is exact by construction (DECISIONS Phase 1).
 on_time | upload_fault | delivery_fault | timing_gap | unattributed
 ```
 
-One label per `prompt_id × user_id`. Precedence when evidence overlaps (a
-delivery fault cannot also be a timing gap — the prompt never arrived):
+One label per `prompt_id × user_id` (= per `prompt_id`; a prompt has one
+user). The window is `[sent_at, sent_at + window_minutes)`. Precedence when
+evidence overlaps (a delivery fault cannot also be a timing gap — the prompt
+never arrived); the built label is the FIRST matching rule, one `case` arm
+each, one dbt unit test per arm and per adjacent pair (Phase 3):
 
 1. `delivery_fault` — no `prompt_delivered` within `DELIVERY_GRACE_MIN`.
-2. `on_time` — `response_recorded` with `client_event_time` inside the window
+   The receipt is server-stamped, so a skewed device clock cannot forge it.
+2. **Skew gate** *(Phase 3)* — `unattributed` when any event of the prompt
+   has a client clock AHEAD of the server past the bound
+   (`min(server_received_time − client_event_time) < −SKEW_MAX_MIN`). Sits
+   before the clock rules because they read the clock it distrusts; a
+   backward skew is indistinguishable from an upload delay (§8), so a
+   positive delay of any size is never skew.
+3. `on_time` — `response_recorded` with `client_event_time` inside the window
    AND `server_received_time` inside the window.
-3. `upload_fault` — client time inside the window, received time outside; or an
-   `upload_failed` chain with no `response_recorded`.
-4. `timing_gap` — delivered inside `DELIVERY_GRACE_MIN`, no `capture_started`
+4. `upload_fault` — a `response_recorded` exists but the device-side capture
+   (`capture_started` / `upload_*`; `response_recorded` itself is
+   backend-stamped, its two clocks equal) has client time inside the window
+   and received time outside; or an `upload_failed` chain with no
+   `response_recorded`.
+5. `timing_gap` — delivered inside `DELIVERY_GRACE_MIN`, no `capture_started`
    and no `response_recorded` inside the window, no `upload_*` chain. Evidence
    is delivery + no-action ALONE; whether the window was outside the user's
    reachable hours is Phase 5's question (2.8), never an attribution input
    (DECISIONS Phase 1, "timing_gap is delivery + no-action evidence alone").
-5. `unattributed` — everything else (skew beyond bound, contradictory evidence,
-   e.g. `capture_started` without any upload or response event). Its share is
+6. `unattributed` — everything else (contradictory evidence, e.g.
+   `capture_started` without any upload or response event). Its share is
    bounded by a dbt test (`UNATTRIBUTED_MAX`, spec-pinned); the bound is what
    makes the metric honest.
 
@@ -185,7 +198,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
 | loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked) | `raw.events`, `raw.dim_user` | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
-| eval | dbt outputs, truth | `docs/RESULTS.md` blocks, console | write any table the pipeline reads |
+| eval | dbt outputs, truth | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), `docs/RESULTS.md` blocks *(Phase 6)* | write any table the pipeline reads; write under `fixtures/` |
 | write-back | `scores_send_time` | `send_schedule` | read truth; read raw |
 | Airflow | — | — | contain logic (it orders `make` targets / dbt commands) |
 
@@ -256,7 +269,14 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   *behind* the server looks exactly like a slow upload (`received − client`
   large and positive); only a clock *ahead* (negative delay past
   `SKEW_MAX_MIN`) is distinguishable. The generator's skew injector is
-  forward-only; Phase 3 pins the rule on the negative side.
+  forward-only; Phase 3 pinned the rule on the negative side (§2.5 rule 2).
+- **`response_recorded` carries no device clock** (Phase 3). It is a backend
+  event: `client_event_time = server_received_time` by construction, so a
+  literal "response with client time inside, received outside" never
+  matches; the three-clock signal is on `capture_started` / `upload_*`, and
+  the skew injector never touches the response either — a skewed prompt's
+  response looks perfectly on time, which is why the skew gate precedes the
+  clock rules (§2.5).
 - **DuckDB `timezone(tz, ts)` converts in the wrong direction for a UTC
   column** (Phase 2). On a naive `timestamp` it interprets the value as local
   wall time in `tz` and returns a `timestamptz` that the client renders in the
