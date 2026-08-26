@@ -127,7 +127,7 @@ checked by `make report PROFILE=tiny`.
   stable across engines.
 - **Pinned by:** unit tests `ontime_rate_daily_zero_on_time_is_zero`,
   `ontime_rate_daily_nothing_delivered_is_null`;
-  `tests/pins.py::ONTIME_RATE` (tiny 75 / 123 = 0.610) via
+  `tests/pins.py::ONTIME_RATE` (tiny 75 / 123 = 0.609756) via
   `tests/test_marts.py::test_overall_rate_matches_pin` and `make report`.
 
 ## ontime_retention

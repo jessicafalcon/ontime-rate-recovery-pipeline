@@ -461,7 +461,7 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 PROFILE=tiny` is green (5 models, 90 items: 24 unit tests, the rest data and
 singular tests); `make report PROFILE=tiny` → 14 cohort-days, 0 differ
 against the frozen `expected/ontime_rate_daily.csv`, overall rate 75 / 123 =
-0.610; `attribution-golden` and `eval` unchanged (140 rows, accuracy 1.000).
+0.609756; `attribution-golden` and `eval` unchanged (140 rows, accuracy 1.000).
 `docs/METRICS.md` defines every metric once; `ontime_retention` is all-NULL on
 tiny by design (7 days < `retention_days` 28). Next: review rounds, then
 Phase 5 (send-time model).

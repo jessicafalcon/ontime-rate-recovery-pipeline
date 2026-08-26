@@ -102,7 +102,7 @@ PROFILE=tiny` on `main`).
      ontime_rate 0.609756 (pin 0.609756)` — the golden diff of `ontime_rate_daily`
      against `fixtures/<p>/expected/ontime_rate_daily.csv` plus the overall
      on-time rate `sum(on_time) / sum(prompts_delivered)` over the mart
-     (tiny: 75 / 123 = 0.6098), asserted against `tests/pins.py::
+     (tiny: 75 / 123 = 0.609756), asserted against `tests/pins.py::
      ONTIME_RATE`; exit 1 on any differing row or a rate off the pin. `make
      report PROFILE=<p> WRITE=yes` writes `data/out/<p>/expected/
      ontime_rate_daily.csv` instead, the `attribution-golden` shape.
@@ -255,7 +255,7 @@ make review-gate SPEC=specs/phase-4-marts.md && make dbt-build PROFILE=tiny && m
 | 3. **Zero-not-null.** For all cohort-days with `prompts_delivered > 0`, `ontime_rate` is a number (0 when `on_time = 0`); for all cohort-days with `prompts_delivered = 0`, `ontime_rate` is NULL and every count column is populated. | unit `ontime_rate_daily_zero_on_time_is_zero`; unit `ontime_rate_daily_nothing_delivered_is_null`; `schema.yml` `not_null` on every count column; `test_safe_divide_is_called_by_a_model` |
 | 4. **Grain.** For all prompts, the row it counts toward is `(cohort_id, cast(sent_at_local as date))`; each key appears once; a prompt whose UTC date differs from its local date lands on the local one. | unit `ontime_rate_daily_prompt_date_is_local`; `assert_cohort_day_key_unique.sql`; `test_prompt_date_is_local_on_tiny` |
 | 5. **Golden.** For all builds on tiny, `ontime_rate_daily` sorted by `(cohort_id, prompt_date)` equals `expected/ontime_rate_daily.csv` row for row and byte for byte; a difference is reported by key, never masked; the attribution golden is byte-identical through the same writer. | `test_daily_golden_matches_fixture`; `test_report_reports_a_planted_difference`; `test_golden_matches_fixture` (attribution); mutations `eval/golden.py::diff_rows constant-return:[]`, `eval/golden.py::export_rows swap-sort-key` |
-| 6. **Report.** For all profiles, `make report` prints the overall rate `sum(on_time) / sum(prompts_delivered)` over the mart and exits 1 when it differs from the pin or any row differs; on tiny the rate is `ONTIME_RATE`. | `test_overall_rate_matches_pin`; `test_report_fails_when_the_rate_is_off_the_pin`; mutation `eval/report.py::overall_rate constant-return:1.0` |
+| 6. **Report.** For all profiles, `make report` prints the overall rate `sum(on_time) / sum(prompts_delivered)` over the mart and exits 1 when it differs from the pin or any row differs; on tiny the rate is `ONTIME_RATE`; when nothing was delivered the rate is undefined (`None`, printed `undefined`, exit 1), never an error. | `test_overall_rate_matches_pin`; `test_report_fails_when_the_rate_is_off_the_pin`; `tests/test_marts.py::test_overall_rate_is_none_when_nothing_delivered`; mutations `eval/report.py::overall_rate constant-return:1.0`, `eval/report.py::overall_rate invert-guard` |
 | 7. **Retention.** For all users, one row; `retained` is true iff an organic `app_opened` falls on or after `anchor_date + retention_days`, false iff none does AND `observed_through ≥ anchor_date + retention_days`, NULL otherwise; `observed_through` is data-derived; the mart is a function of raw + dims + vars. | unit `ontime_retention_three_states`; `test_retention_is_all_null_on_tiny`; `test_two_builds_give_the_same_marts`; `test_marts_under_a_non_utc_host_zone_are_identical`; mutations `drop-arm:1`, `drop-arm:2` on `ontime_retention.sql::retained` |
 | 8. **One definition.** For all metric columns of both marts, exactly one `### ` block in `docs/METRICS.md` (grain, numerator, denominator, null policy, pinning test) and a `schema.yml` description that links, not restates. | `test_every_mart_metric_has_exactly_one_definition`; `make check-docs` |
 | 9. **Freeze scope.** For all freezes, `expected/ontime_rate_daily.csv` enters `fixtures/` only via `make freeze`; the fourteen existing manifest lines do not move. | `test_raw_dims_truth_hashes_are_the_phase_1_hashes`; `test_phase_3_expected_hash_is_unchanged`; `test_report_write_only_on_literal_yes`; review-gate `PASS fixtures` |
@@ -265,6 +265,7 @@ make review-gate SPEC=specs/phase-4-marts.md && make dbt-build PROFILE=tiny && m
 eval/golden.py::diff_rows                                       constant-return:[]
 eval/golden.py::export_rows                                     swap-sort-key
 eval/report.py::overall_rate                                    constant-return:1.0
+eval/report.py::overall_rate                                    invert-guard
 dbt/models/marts/ontime_retention.sql::retained                 drop-arm:1
 dbt/models/marts/ontime_retention.sql::retained                 drop-arm:2
 ```
@@ -298,6 +299,12 @@ three-state unit test gained a `u-a` prompt on the close day (excluded), so
 the hand mutation `<` → `<=` on the window predicate now dies. Accepted to
 BACKLOG: the two-column sort key in `export_rows` (trigger: a `Golden` with
 `key_width > 2`).
+
+## Review round 2 fixes (2026-08-25)
+
+Wording only: the `overall_rate` zero-delivered guard gained its
+`invert-guard` mutation line and Invariant 6 states the undefined-when-zero
+property; the tiny rate is quoted as `0.609756` everywhere the readout is.
 
 ## Pinned decisions (do not re-litigate)
 

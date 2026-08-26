@@ -131,7 +131,7 @@ row; `retention_days` 28 kept as the definition), `eval/golden.py`
 generalised to a `Golden` spec per frozen file (attribution byte-identical),
 `make report` (console only), `docs/METRICS.md` as a LIVING doc with a test
 that every mart metric has exactly one block. tiny: 14 cohort-days, 123
-delivered, rate 0.610; 6 unit tests, 2 singular tests; `safe_divide`'s first
+delivered, rate 0.609756; 6 unit tests, 2 singular tests; `safe_divide`'s first
 caller. Re-freeze: one manifest line added, fourteen unchanged.
 
 ---
