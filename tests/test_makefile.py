@@ -300,3 +300,27 @@ def test_power_passes_write_as_one_literal(value: str) -> None:
         )
         assert f"eval.cli power --write {quoted}" in out, (origin, out)
         assert "pwned" not in out.replace(value, "")
+
+
+# ------------------------------------------------- Phase 8a: writeback, pipeline
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""],
+)
+def test_writeback_and_pipeline_pass_profile_as_one_literal(value: str) -> None:
+    """Phase 8a: PROFILE reaches Python as one single-quoted token from either
+    origin; writeback/pipeline take no CONFIRM (non-destructive: create-if-not-
+    exists + upsert; a reset is `make drop-db … CONFIRM=yes`)."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for target in ("writeback", "pipeline"):
+        for origin in ("cmdline", "env"):
+            out = _make_n(
+                target,
+                {"PROFILE": value} if origin == "cmdline" else {},
+                {"PROFILE": value} if origin == "env" else {},
+            )
+            assert f"serving.cli {target} {quoted}" in out, (target, origin, out)
+            assert "pwned" not in out.replace(value, "")
+            assert "--confirm" not in out  # no CONFIRM knob
