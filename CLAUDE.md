@@ -142,7 +142,7 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   `dbt/models/staging/sources.yml` from `generator/models.py`;
   `tests/test_dbt_sources.py` fails on a hand edit
 - `make attribution-golden PROFILE=<p> [WRITE=yes]` — the built `attribution`
-  table (`prompt_id,user_id,cohort_id,label`, sorted by `prompt_id`) vs
+  table (`prompt_id,user_id,cohort_id,label`, sorted by `(prompt_id, user_id)`) vs
   `fixtures/<p>/expected/attribution.csv`; prints `attribution-golden OK:
   <p>, N rows, 0 differ`, exit 1 on any differing row. `WRITE=yes` (the
   literal only) writes `data/out/<p>/expected/attribution.csv` instead —

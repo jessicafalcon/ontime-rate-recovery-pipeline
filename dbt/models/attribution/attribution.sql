@@ -13,7 +13,10 @@
 -- The window is [sent_at, sent_at + window_minutes) — half-open, via
 -- timestamp_diff so both dialects agree. Evidence is aggregated once per prompt
 -- and exposed as columns so every arm reads a boolean; the arms are the unit
--- the mutation sweep drops and swaps (specs/phase-3-attribution.md).
+-- the mutation sweep drops and swaps (specs/phase-3-attribution.md). The
+-- existence flags are max(case … 1 else 0 end) = 1 — ANSI on both dialects
+-- (the boolean aggregate is DuckDB/Postgres-only; a dialect call belongs behind a macro or not
+-- in a model: tests/test_dbt_conventions.py).
 
 with prompts as (
 
@@ -66,19 +69,20 @@ evidence as (
     select
         prompt_id,
         min(upload_delay_seconds) as min_upload_delay_seconds,
-        bool_or(event_type = 'response_recorded' and client_in_window and received_in_window)
+        max(case when event_type = 'response_recorded' and client_in_window and received_in_window then 1 else 0 end) = 1
             as response_on_time,
-        bool_or(
-            event_type in ('capture_started', 'upload_started', 'upload_completed')
-            and client_in_window and not received_in_window
-        ) as captured_in_window_received_late,
-        bool_or(event_type = 'response_recorded') as has_response,
-        bool_or(event_type = 'response_recorded' and client_in_window)
+        max(case
+            when event_type in ('capture_started', 'upload_started', 'upload_completed')
+                and client_in_window and not received_in_window
+            then 1 else 0
+        end) = 1 as captured_in_window_received_late,
+        max(case when event_type = 'response_recorded' then 1 else 0 end) = 1 as has_response,
+        max(case when event_type = 'response_recorded' and client_in_window then 1 else 0 end) = 1
             as has_response_in_window,
-        bool_or(event_type = 'capture_started' and client_in_window)
+        max(case when event_type = 'capture_started' and client_in_window then 1 else 0 end) = 1
             as has_capture_in_window,
-        bool_or(event_type = 'upload_failed') as has_upload_failed,
-        bool_or(event_type in ('upload_started', 'upload_failed', 'upload_completed'))
+        max(case when event_type = 'upload_failed' then 1 else 0 end) = 1 as has_upload_failed,
+        max(case when event_type in ('upload_started', 'upload_failed', 'upload_completed') then 1 else 0 end) = 1
             as has_upload_event
     from flagged
     group by prompt_id

@@ -99,7 +99,8 @@ each, one dbt unit test per arm and per adjacent pair (Phase 3):
    The receipt is server-stamped, so a skewed device clock cannot forge it.
 2. **Skew gate** *(Phase 3)* — `unattributed` when any event of the prompt
    has a client clock AHEAD of the server past the bound
-   (`min(server_received_time − client_event_time) < −SKEW_MAX_MIN`). Sits
+   (`min(server_received_time − client_event_time) < −SKEW_MAX_MIN · 60`,
+   the delay in seconds, the bound in minutes). Sits
    before the clock rules because they read the clock it distrusts; a
    backward skew is indistinguishable from an upload delay (§8), so a
    positive delay of any size is never skew.

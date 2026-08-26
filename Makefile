@@ -93,7 +93,7 @@ gen-sources:
 
 # ------------------------------------------------------------------ Phase 3
 # The golden (eval/cli.py golden): the built attribution table vs
-# fixtures/<PROFILE>/expected/attribution.csv, sorted by prompt_id; exit 1 on
+# fixtures/<PROFILE>/expected/attribution.csv, sorted by (prompt_id, user_id); exit 1 on
 # any differing row. WRITE=yes (the literal only) writes data/out/<PROFILE>/
 # expected/attribution.csv instead — never fixtures/ (`make freeze` is the
 # only writer there). Needs `make dbt-build PROFILE=<p>` first.

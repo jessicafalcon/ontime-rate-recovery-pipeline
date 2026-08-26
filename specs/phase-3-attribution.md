@@ -205,7 +205,7 @@ make review-gate SPEC=specs/phase-3-attribution.md && make dbt-build PROFILE=tin
 | 2. **Precedence.** For all prompts, the label is the FIRST matching rule in the amended §2.5 order: delivery_fault → skew → on_time → upload_fault → timing_gap → unattributed. | per-arm unit tests `attribution_delivery_fault_no_receipt`, `attribution_delivery_fault_receipt_after_grace`, `attribution_skew_negative_delay`, `attribution_on_time`, `attribution_upload_fault_received_after_window`, `attribution_upload_fault_failed_chain`, `attribution_timing_gap`, `attribution_residual_is_unattributed` (capture without upload or response); overlap tests `attribution_delivery_fault_beats_everything` (no receipt, yet a response in window and a skewed event), `attribution_skew_beats_on_time` (in-window response, one skewed capture), `attribution_on_time_beats_upload_fault` (in-window response after an `upload_failed`), `attribution_upload_fault_beats_timing_gap` (`upload_failed` with no capture inside the window); `make mutate` `drop-arm` / `swap-arms` lines |
 | 3. **Skew is negative-only.** For all prompts, `unattributed`-by-skew iff `min(upload_delay_seconds)` over the prompt's events `< −skew_max_min·60`; no positive delay of any size is skew. | `attribution_skew_negative_delay` (−301 s → unattributed; −300 s and +100000 s → not) ; `tests/test_attribution.py::test_skew_var_equals_generator_pin` |
 | 4. **Bound.** For all builds on tiny, `unattributed` share ≤ `unattributed_max`. | `assert_unattributed_share_bounded.sql`; `tests/test_attribution.py::test_unattributed_share_matches_pin` |
-| 5. **Golden.** For all builds on tiny, the table sorted by `prompt_id` equals `expected/attribution.csv` row for row; a difference is reported by row, never masked. | `test_golden_matches_fixture`; `test_golden_reports_a_planted_difference`; mutation `eval/golden.py::diff_rows constant-return:[]` |
+| 5. **Golden.** For all builds on tiny, the table sorted by `(prompt_id, user_id)` equals `expected/attribution.csv` row for row; a difference is reported by row, never masked. | `test_golden_matches_fixture`; `test_golden_reports_a_planted_difference`; mutation `eval/golden.py::diff_rows constant-return:[]` |
 | 6. **Accuracy.** For all prompts, `eval` compares the built label to `truth/prompts.jsonl` on `prompt_id`; the tiny accuracy equals the pin and a flipped label lowers it. | `test_label_accuracy_matches_pin`; `test_accuracy_drops_when_a_label_is_flipped`; mutation `eval/score.py::label_accuracy constant-return:1.0` |
 | 7. **Determinism.** For all builds, `attribution` is a function of raw + dims + vars: byte-identical across two builds and under `TZ=Asia/Tokyo`; no clock call. | `tests/test_attribution.py::test_two_builds_give_the_same_golden`; `::test_build_under_a_non_utc_host_zone_is_identical`; `test_dbt_conventions.py::test_no_clock_call_in_any_model_or_macro` |
 | 8. **Seam.** For all dialect-divergent expressions, the five existing macros; no sixth. | `test_dbt_conventions.py::test_exactly_five_dispatch_macros` |
@@ -238,6 +238,15 @@ equivalent mutant; the overlap is still pinned by the unit test
 `attribution_upload_fault_beats_timing_gap`, which proves the upload chain
 is action.)
 
+## Review round 1 fixes (2026-08-25)
+
+`bool_or` (7×) was inline dialect SQL in `attribution.sql` — rewritten as the
+ANSI `max(case when … then 1 else 0 end) = 1`, seam untouched (five macros);
+`tests/test_dbt_conventions.py::test_no_dialect_function_in_any_model` greps
+`dbt/models/**/*.sql` for a denylist so the next inline dialect call is a red
+test. ARCHITECTURE §2.5 rule 2 now carries the `· 60` (seconds). The golden's
+tie-break is named everywhere its order is stated.
+
 ## Pinned decisions (do not re-litigate)
 
 - **One `case` over per-prompt evidence, arms in the amended §2.5 order with
@@ -256,7 +265,8 @@ is action.)
   − sent_at ≤ delivery_grace_min·60` s via `timestamp_diff`. Rejected:
   nested `case`s per rule (the arm is the mutation unit; nesting hides one).
 - **The golden is `prompt_id,user_id,cohort_id,label`**, canonical CSV
-  (header, `\n`, sorted by `prompt_id`) — satisfies invariant 5. Evidence
+  (header, `\n`, sorted by `(prompt_id, user_id)` — `prompt_id` is unique,
+  `user_id` names the tie-break) — satisfies invariant 5. Evidence
   columns are not in the golden (a wording change to a boolean would move
   the file without moving a label). Closes BACKLOG "Staging pins are counts
   only": the label is a function of every staged column that matters.

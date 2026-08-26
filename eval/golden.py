@@ -1,6 +1,7 @@
 """The golden: the built attribution table as canonical CSV, and the diff
-against a frozen copy. Row content only — sorted by prompt_id, never by
-insertion order (invariant 5)."""
+against a frozen copy. Row content only — sorted by (prompt_id, user_id):
+prompt_id is unique, user_id names the tie-break; never insertion order
+(invariant 5)."""
 
 from __future__ import annotations
 
