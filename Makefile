@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
-# (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); …
+# (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -104,3 +104,11 @@ attribution-golden:
 # the ONLY truth reader); exit 1 below tests/pins.py::LABEL_ACCURACY.
 eval:
 	uv run python -m eval.cli score $(call _Q,$(value PROFILE))
+
+# The on-time report (eval/cli.py report): the built ontime_rate_daily mart vs
+# fixtures/<PROFILE>/expected/ontime_rate_daily.csv, sorted by (cohort_id,
+# prompt_date), plus the overall rate vs tests/pins.py::ONTIME_RATE; console
+# only. WRITE=yes (the literal only) writes data/out/<PROFILE>/expected/
+# ontime_rate_daily.csv instead — never fixtures/. Needs `make dbt-build` first.
+report:
+	uv run python -m eval.cli report $(call _Q,$(value PROFILE)) --write $(call _Q,$(value WRITE))

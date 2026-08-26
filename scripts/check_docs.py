@@ -57,6 +57,8 @@ TRACES: list[tuple[str, str]] = [
     ("dbt/macros/to_local_time.sql", "duckdb__to_local_time"),
     ("tests/test_dbt_conventions.py", "test_exactly_five_dispatch_macros"),
     ("scripts/mutate.py", "SQL_OPERATORS"),
+    ("dbt/tests/assert_cohort_day_partition.sql", "prompts_delivered"),
+    ("eval/golden.py", "ONTIME_RATE_DAILY"),
     ("generator/cli.py", "missing_from_output"),
 ]
 

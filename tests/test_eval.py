@@ -10,7 +10,7 @@ import pytest
 from test_attribution import built as built  # noqa: PLC0414 — module fixture
 from test_staging import q
 
-from eval import cli, golden, score
+from eval import cli, golden, report, score
 from tests import pins
 
 ROOT = Path(__file__).parent.parent
@@ -87,7 +87,7 @@ def test_golden_write_only_on_literal_yes(
 
 def test_cli_refuses_bad_profile_before_any_path(monkeypatch) -> None:
     for name in ("../x", "", "a b", "Tiny"):
-        for fn in (cli.golden_cmd, cli.score_cmd):
+        for fn in (cli.golden_cmd, cli.score_cmd, cli.report_cmd):
             with pytest.raises(SystemExit) as e:
                 fn(name)
             assert e.value.code == 2
@@ -101,3 +101,58 @@ def test_score_cli_reproduces_the_pin(built: Path, monkeypatch, capsys) -> None:
     assert "on_time=75" in out and "unattributed=6" in out
     (n,) = q(built, "select count(*) from main_attribution.attribution")[0]
     assert n == pins.ATTRIBUTION_ROWS
+
+
+# ------------------------------------------------- Phase 4: report
+
+DAILY = golden.ONTIME_RATE_DAILY
+
+
+def test_report_reports_a_planted_difference(
+    built: Path, tmp_path: Path, monkeypatch, capsys
+):  # noqa: F811
+    rows = golden.export_rows(built, DAILY)
+    assert golden.parse(golden.render(rows, DAILY), DAILY) == rows
+    fix = tmp_path / "fix" / "tiny" / "expected"
+    fix.mkdir(parents=True)
+    planted = list(rows)
+    planted[0] = (*planted[0][:4], "0", *planted[0][5:])  # one on_time count changed
+    fix.joinpath("ontime_rate_daily.csv").write_text(golden.render(planted, DAILY))
+    monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    assert cli.report_cmd("tiny") == 1
+    out = capsys.readouterr().out
+    assert f"{rows[0][0]}/{rows[0][1]}: changed" in out
+    assert "report FAIL: tiny, 14 cohort-days, 1 differ" in out
+    with pytest.raises(ValueError, match="golden header"):
+        golden.parse(golden.render(rows), DAILY)  # the attribution header
+
+
+def test_report_fails_when_the_rate_is_off_the_pin(built: Path, monkeypatch, capsys):  # noqa: F811
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    assert cli.report_cmd("tiny") == 0
+    assert (
+        "report OK: tiny, 14 cohort-days, 0 differ, ontime_rate 0.610 (pin 0.610)"
+        in (capsys.readouterr().out)
+    )
+    monkeypatch.setattr(report, "overall_rate", lambda db: pins.ONTIME_RATE + 1e-6)
+    assert cli.report_cmd("tiny") == 1
+    assert "report FAIL" in capsys.readouterr().out
+
+
+def test_report_write_only_on_literal_yes(
+    built: Path, tmp_path: Path, monkeypatch, capsys
+):  # noqa: F811
+    monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
+    monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    for bad in ("YES", "true", "1", " yes"):
+        with pytest.raises(SystemExit) as e:
+            cli.report_cmd("tiny", bad)
+        assert e.value.code == 2
+    assert not (tmp_path / "out").exists()
+    assert cli.report_cmd("tiny", "yes") == 0
+    out = tmp_path / "out" / "tiny" / "expected" / "ontime_rate_daily.csv"
+    assert out.read_text() == golden.render(golden.export_rows(built, DAILY), DAILY)
+    assert not (tmp_path / "fix").exists()  # never fixtures/
+    assert "report WROTE" in capsys.readouterr().out
