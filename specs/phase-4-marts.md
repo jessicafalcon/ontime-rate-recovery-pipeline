@@ -1,9 +1,9 @@
-# Phase 4 — On-time marts and metric definitions (PROPOSED)
+# Phase 4 — On-time marts and metric definitions (APPROVED 2026-08-25 — implemented, in review)
 
 Contract for the `phase-4-marts` branch. Source: `docs/PHASES.md` Phase 4.
 Depends on Phase 3 merged (PR #5, `38c0f36`).
 
-**Status: PROPOSED — do not start until approved.** No new dependencies:
+**Status: APPROVED 2026-08-25; implemented on `phase-4-marts`.** No new dependencies:
 Phase 4 has no allowlist entry; the marts are dbt SQL, `make report` uses
 `duckdb` (Phase 2) and the standard library. A need for any package is a
 STOP-and-ask.
@@ -278,11 +278,14 @@ Equivalent-mutant exclusions, named up front:
   disjoint and their order unobservable. The three-state unit test still
   pins both.
 - `ontime_rate_daily.sql` has no multi-arm `case`: every count is a
-  single-arm `sum(case when … then 1 else 0 end)`. `drop-arm:1` on a
-  single arm leaves `case else 0 end` — a syntax error (`ERROR`, not a
-  mutant) — and `swap-arms` needs two. Those columns are pinned by the
-  partition singular test, the five-labels unit test and the golden (a
-  dropped or mis-aimed count changes a frozen row).
+  single-arm `sum(case when … then 1 else 0 end)` — the `sum(` wraps the
+  `case`, so there is no `end as <alias>` for the operator to address and a
+  line naming one is refused (verified: `refusing: no \`end as
+  prompts_delivered\``), and `swap-arms` needs two arms. Those columns are
+  pinned by the partition singular test, the five-labels unit test and the
+  golden (a dropped or mis-aimed count changes a frozen row).
+- Both exclusions were run once through `make mutate` on a scratch copy of
+  the block: `swap-arms:1,2` → SURVIVED, the single-arm drop → refused.
 
 ## Pinned decisions (do not re-litigate)
 

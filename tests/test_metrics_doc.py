@@ -31,4 +31,6 @@ def test_every_mart_metric_has_exactly_one_definition() -> None:
             assert f"- **{field}:**" in block, (metric, field)
     schema = SCHEMA.read_text()
     assert schema.count("docs/METRICS.md") >= len(DAILY_METRICS)
-    assert not re.search(r"on_time\s*/\s*prompts_delivered", schema)  # link, never restate
+    assert not re.search(
+        r"on_time\s*/\s*prompts_delivered", schema
+    )  # link, never restate

@@ -41,7 +41,8 @@ def test_partition_holds_on_every_tiny_cohort_day(built: Path) -> None:  # noqa:
         )
     }
     have = {
-        (r[0], r[1]): tuple(int(v) for v in r[2:9]) for r in golden.export_rows(built, SPEC)
+        (r[0], r[1]): tuple(int(v) for v in r[2:9])
+        for r in golden.export_rows(built, SPEC)
     }
     assert have == want
     assert len(have) == pins.COHORT_DAYS
@@ -53,7 +54,10 @@ def test_partition_holds_on_every_tiny_cohort_day(built: Path) -> None:  # noqa:
 
 def test_daily_golden_matches_fixture(built: Path) -> None:  # noqa: F811
     rows = golden.export_rows(built, SPEC)
-    assert golden.diff_rows(rows, golden.parse(DAILY.read_text(), SPEC), SPEC.key_width) == []
+    assert (
+        golden.diff_rows(rows, golden.parse(DAILY.read_text(), SPEC), SPEC.key_width)
+        == []
+    )
     assert golden.render(rows, SPEC) == DAILY.read_text()  # byte-identical CSV
 
 
@@ -84,7 +88,8 @@ def test_retention_is_all_null_on_tiny(built: Path) -> None:  # noqa: F811
     )
     assert rows == [(pins.RETENTION_ROWS, 0, pins.RETENTION_ROWS, pins.RETENTION_ROWS)]
     (opens,) = q(
-        built, "select count(*) from main_staging.stg_events where event_type = 'app_opened'"
+        built,
+        "select count(*) from main_staging.stg_events where event_type = 'app_opened'",
     )[0]
     assert opens == pins.ORGANIC_OPEN_ROWS
 
@@ -113,5 +118,7 @@ def test_marts_under_a_non_utc_host_zone_are_identical(built: Path, tmp_path: Pa
         "sys.exit(0 if build(Path(sys.argv[1])) else 1)"
     )
     env = {**os.environ, "TZ": "Asia/Tokyo", "PYTHONPATH": str(ROOT)}
-    subprocess.run([sys.executable, "-c", code, str(db2)], cwd=ROOT, env=env, check=True)
+    subprocess.run(
+        [sys.executable, "-c", code, str(db2)], cwd=ROOT, env=env, check=True
+    )
     assert _marts(built) == _marts(db2)
