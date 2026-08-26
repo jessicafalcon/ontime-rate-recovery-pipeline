@@ -46,7 +46,9 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   `cli.py` (`seed`, `freeze`). Truth goes to `<out>/truth/`, never read by the
   pipeline.
 - `dbt/` — the dbt project: `models/staging` (Phase 2), `models/attribution`
-  (Phase 3; later `marts, features, scores`), `macros/` (the five dispatch
+  (Phase 3), `models/marts` (Phase 4: `ontime_rate_daily`,
+  `ontime_retention`; every metric defined once in `docs/METRICS.md`), later
+  `features, scores`; `macros/` (the five dispatch
   macros), `tests/` (singular data tests), `profiles.yml` (`duckdb`,
   `bigquery` targets).
   `models/staging/sources.yml` is GENERATED (`make gen-sources`), never edited.
@@ -54,8 +56,10 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   schema, types from the generated `ddl.sql`), `cli.py` (`load`, `dbt-build`,
   `drop-db`). Pipeline code — guarded by `test_truth_isolation.py`.
 - `eval/` *(Phase 3+)* — the ONLY code that reads truth: `score.py` (label
-  accuracy vs `truth/prompts.jsonl`), `golden.py` (the attribution table as
-  canonical CSV + diff), `cli.py` (`golden`, `score`); later reachable-center
+  accuracy vs `truth/prompts.jsonl`), `golden.py` (a built table as canonical
+  CSV + diff — one `Golden` spec per frozen file: attribution,
+  `ontime_rate_daily`), `report.py` (the overall rate off the mart), `cli.py`
+  (`golden`, `score`, `report`); later reachable-center
   MAE, `simulate.py`. Writes console and `data/out/<p>/expected/` only —
   never a table, never `fixtures/`.
 - `serving/` *(Phase 8; Spanner target Phase 10)* — write-back to
@@ -75,8 +79,10 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   `make round-reset` clears them at phase start), `review_common.py` (shared
   SPEC validator / section parser / reduced env), `gen_dbt_sources.py`
   (`make gen-sources`: raw DDL + `sources.yml` from `generator/models.py`).
-- `docs/` — ARCHITECTURE.md (spec), PHASES.md (plan); later METRICS.md,
-  AB_DESIGN.md, RESULTS.md, DEPLOYMENT.md (all under `docs/`).
+- `docs/` — ARCHITECTURE.md (spec), PHASES.md (plan), METRICS.md (Phase 4:
+  the single definition of every served metric — grain, numerator,
+  denominator, null policy, pinning test); later AB_DESIGN.md, RESULTS.md,
+  DEPLOYMENT.md (all under `docs/`).
 - `DECISIONS.md` — why-not-X log. One entry per non-obvious choice.
 - `BACKLOG.md` — deferred findings with revisit triggers. Reviewed at every
   phase exit: do due items or re-defer with a new trigger, never drop.
@@ -150,7 +156,16 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
 - `make eval PROFILE=<p>` — label accuracy vs `fixtures/<p>/truth/prompts.jsonl`
   (`eval/cli.py score`, the ONLY truth reader); prints `eval OK: <p>, accuracy
   1.000 (pin 1.000), N prompts`, exit 1 below `tests/pins.py::LABEL_ACCURACY`
-- Later phases add: `report` (4), `simulate` (6),
+- `make report PROFILE=<p> [WRITE=yes]` — the built `ontime_rate_daily` mart
+  (ten columns, sorted by `(cohort_id, prompt_date)`) vs
+  `fixtures/<p>/expected/ontime_rate_daily.csv` plus the overall rate
+  `sum(on_time) / sum(prompts_delivered)` vs `tests/pins.py::ONTIME_RATE`;
+  prints `report OK: <p>, N cohort-days, 0 differ, ontime_rate 0.609756 (pin
+  0.609756)`, exit 1 on a differing row or a rate off the pin; console only
+  (`docs/RESULTS.md` is Phase 6's). `WRITE=yes` (the literal only) writes
+  `data/out/<p>/expected/ontime_rate_daily.csv` instead — `make freeze` is the
+  only way it reaches `fixtures/`. Needs `dbt-build` first
+- Later phases add: `simulate` (6),
   `writeback`, `pipeline`, `test-int-airflow` (8), `tf-plan | tf-apply |
   tf-destroy`, `test-int-bigquery` (9). Each lands with its phase and is
   listed here in the same PR.
@@ -174,8 +189,15 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   backend-stamped). `attribution.cohort_id` is the prompt's own
   (`prompt_cohort_id`). `provisional` until `LOOKBACK_DAYS` closes, then
   `final` forever (Phase 7). Vars `skew_max_min` (5 = `generator/models.py`),
-  `delivery_grace_min` (10), `unattributed_max` (0.10) in `dbt_project.yml`.
-- On-time denominator is `prompts_delivered`. Never user-days.
+  `delivery_grace_min` (10), `unattributed_max` (0.10), `retention_days` (28)
+  in `dbt_project.yml`.
+- On-time denominator is `prompts_delivered` = prompts with
+  `delivered_in_grace`. Never user-days, never `prompts_sent`. Mart grain is
+  `(cohort_id, prompt_date)` with `prompt_date` the LOCAL date
+  (`cast(sent_at_local as date)`; a Tokyo 08:00 prompt is the previous UTC
+  day). `ontime_rate` is NULL only when nothing was delivered; 0 when prompts
+  were delivered and none on time. `ontime_retention.retained` is NULL until
+  the window closes in the data (every tiny row) — descriptive only (§7).
 - `dim_user.tz` is SCD2 (`valid_to` empty = open row); local time is computed
   once, in staging (`stg_events.client_event_time_local`), via `to_local_time`.
 - `insert_id` is NOT unique in raw (the export carries duplicates; 44 in
@@ -215,8 +237,12 @@ DECISIONS.md or fix it.
   hand-edited. The generator validates on emit; staging asserts the columns.
 - Label contract: the five-label set is an `accepted_values` test AND an
   `eval` check; a sixth label anywhere is a BLOCKER.
-- Denominator contract: `sum(label counts) == prompts_delivered` per
-  cohort-day is a dbt test.
+- Denominator contract: `on_time + upload_fault + timing_gap + unattributed
+  == prompts_delivered` and `prompts_delivered + delivery_fault ==
+  prompts_sent` per cohort-day is a dbt test
+  (`assert_cohort_day_partition`); `delivery_fault` is counted beside the
+  denominator, never inside it. Every metric is defined once in
+  `docs/METRICS.md`; `schema.yml` links, never restates.
 - Model-is-a-model: send-time scoring lives in `dbt/models/scores/`. Python
   never computes a score the pipeline serves.
 - Write-back contract: replace only on strictly greater
@@ -430,13 +456,15 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 3 implemented, in review (`phase-3-attribution`).** Phases 0–2 merged
-(PRs #1, #2, #4), round-tag fix merged (PR #3). `make dbt-build PROFILE=tiny`
-is green (3 models, 44 data tests, 18 unit tests); `make attribution-golden
-PROFILE=tiny` → 140 rows, 0 differ against the frozen
-`fixtures/tiny/expected/attribution.csv`; `make eval PROFILE=tiny` → accuracy
-1.000 (75/34/17/8/6 = truth). The mutation sweep now drops and swaps SQL
-`case` arms. Next: review rounds, then Phase 4 (marts).
-Open BACKLOG rows: **7**.
+**Phase 4 implemented, in review (`phase-4-marts`).** Phases 0–3 merged
+(PRs #1, #2, #4, #5), round-tag fix merged (PR #3). `make dbt-build
+PROFILE=tiny` is green (5 models, 90 items: 24 unit tests, the rest data and
+singular tests); `make report PROFILE=tiny` → 14 cohort-days, 0 differ
+against the frozen `expected/ontime_rate_daily.csv`, overall rate 75 / 123 =
+0.609756; `attribution-golden` and `eval` unchanged (140 rows, accuracy 1.000).
+`docs/METRICS.md` defines every metric once; `ontime_retention` is all-NULL on
+tiny by design (7 days < `retention_days` 28). Next: review rounds, then
+Phase 5 (send-time model).
+Open BACKLOG rows: **9**.
 
 (Update this section at the end of every working day.)

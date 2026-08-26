@@ -198,3 +198,22 @@ def test_golden_and_eval_pass_profile_as_one_literal(value: str) -> None:
             assert "pwned" not in out.replace(value, "")
     out = _make_n("attribution-golden", {"PROFILE": "tiny"}, {})
     assert "eval.cli golden 'tiny' --write ''" in out
+
+
+# ------------------------------------------------- Phase 4: report
+
+
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_report_passes_profile_as_one_literal(value: str) -> None:
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for origin in ("cmdline", "env"):
+        kv = {"PROFILE": value, "WRITE": value}
+        out = _make_n(
+            "report", kv if origin == "cmdline" else {}, kv if origin == "env" else {}
+        )
+        assert f"eval.cli report {quoted}" in out, (origin, out)
+        assert (
+            f"--write {quoted}" in out
+        )  # env-exported WRITE reaches Python (stated residual)

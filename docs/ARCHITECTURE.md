@@ -126,12 +126,27 @@ Labels are `provisional` until the reprocessing lookback closes (2.7), then
 
 ### 2.6 Marts *(Phase 4)*
 
-- `ontime_rate_daily`: per `cohort_id × prompt_date` — `prompts_delivered`
-  (the denominator; **never user-days**, or delivery faults vanish), counts per
-  label, `ontime_rate`.
-- `ontime_retention`: per user, on-time rate over a trailing window vs
-  retained-at-28d. Descriptive only; the retention gap in synthetic data is a
-  designed property, not a finding (PROJECT_BRIEF §5).
+Every metric is defined once in `METRICS.md` (grain, numerator, denominator,
+null policy, pinning test); the marts' `schema.yml` links there.
+
+- `ontime_rate_daily`: per `cohort_id × prompt_date` — `prompts_sent`,
+  `prompts_delivered` (the denominator = prompts with `delivered_in_grace`;
+  **never user-days**, or delivery faults vanish; never `prompts_sent`), one
+  count per label, `ontime_rate = safe_divide(on_time, prompts_delivered)`.
+  `prompt_date` is the **local** date of `sent_at` — cohorts are defined by
+  the local send hour, and a Tokyo 08:00 prompt is the previous UTC day (§8).
+  Partition: the four delivered labels sum to `prompts_delivered`;
+  `delivery_fault` is counted beside it and completes `prompts_sent` (a dbt
+  test). Null policy: the rate is NULL only when nothing was delivered; a day
+  with delivered prompts and none on time is 0.
+- `ontime_retention`: per user — on-time rate over the `RETENTION_DAYS`
+  (28) window from the user's first prompt, and `retained`: an organic
+  `app_opened` on or after the window closes. Three states: true / false /
+  **NULL while the data horizon (`max` local event time, never the clock)
+  has not reached the close** — an unobservable user is never reported as
+  churned; on tiny (7 days) every row is NULL. Descriptive only; the
+  retention gap in synthetic data is a designed property, not a finding
+  (PROJECT_BRIEF §5, §7).
 
 ### 2.7 Incrementality and late arrival *(Phase 7)*
 

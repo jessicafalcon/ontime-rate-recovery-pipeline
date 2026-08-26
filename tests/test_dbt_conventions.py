@@ -137,6 +137,8 @@ SINGULAR = {
     "assert_one_label_per_prompt.sql": "ref('attribution')",
     "assert_unattributed_share_bounded.sql": "ref('attribution')",
     "assert_prompt_cohort_matches_dim.sql": "ref('stg_prompts')",
+    "assert_cohort_day_partition.sql": "ref('ontime_rate_daily')",
+    "assert_cohort_day_key_unique.sql": "ref('ontime_rate_daily')",
 }
 
 
@@ -163,7 +165,7 @@ def test_no_dbt_packages() -> None:
 
 
 def test_every_model_has_description_and_a_test() -> None:
-    for folder in ("staging", "attribution"):
+    for folder in ("staging", "attribution", "marts"):
         schema = (DBT / "models" / folder / "schema.yml").read_text()
         for model in (p.stem for p in (DBT / "models" / folder).glob("*.sql")):
             block = schema.split(f"- name: {model}\n", 1)[1]
@@ -182,3 +184,12 @@ def test_schema_label_values_equal_the_contract() -> None:
     assert m
     listed = [v.strip() for v in m.group(1).split(",")]
     assert listed == [c.value for c in Cause] == list(LABELS)
+
+
+def test_safe_divide_is_called_by_a_model() -> None:
+    """Phase 4: the rate seam has a caller (its DuckDB body was untested until
+    the marts), and the call is the macro, never an inline division."""
+    marts = (DBT / "models" / "marts").glob("*.sql")
+    text = "\n".join(p.read_text() for p in marts)
+    assert text.count("safe_divide(") == 2  # one rate per mart
+    assert not re.search(r"on_time\s*/\s*prompts_delivered", text)

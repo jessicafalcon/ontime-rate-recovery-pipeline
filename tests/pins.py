@@ -33,3 +33,13 @@ SKEW_MAX_MIN = 5  # == generator/models.py::SKEW_MAX_MIN == dbt var skew_max_min
 # The Phase 1 manifest lines (raw/dims/truth) — the Phase 3 re-freeze added
 # expected/attribution.csv and moved none of these.
 PHASE1_MANIFEST_LINES = 13
+
+# fixtures/tiny — Phase 4 (marts). Read off the first green build.
+COHORT_DAYS = 14  # 2 cohorts × 7 local prompt dates (2026-01-05 … 01-11)
+PROMPTS_DELIVERED = STG_PROMPT_ROWS - TRUTH_LABEL_COUNTS["delivery_fault"]  # 123
+ONTIME_RATE = TRUTH_LABEL_COUNTS["on_time"] / PROMPTS_DELIVERED  # 75 / 123
+LOCAL_DATE_DIFFERS_FROM_UTC = 34  # prompts whose local date is not the UTC date
+RETENTION_ROWS = 20  # one per user; every `retained` NULL (7 days < retention_days)
+ORGANIC_OPEN_ROWS = 211  # staged app_opened — the column no label reads (BACKLOG)
+RETENTION_DAYS = 28  # == dbt var retention_days (ARCHITECTURE §2.6)
+PHASE3_MANIFEST_LINES = PHASE1_MANIFEST_LINES + 1  # + expected/attribution.csv

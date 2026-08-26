@@ -65,7 +65,12 @@ def test_skew_var_equals_generator_pin() -> None:
 
     v = project_vars()
     assert v["skew_max_min"] == SKEW_MAX_MIN == pins.SKEW_MAX_MIN
-    assert set(v) == {"skew_max_min", "delivery_grace_min", "unattributed_max"}
+    assert set(v) == {
+        "skew_max_min",
+        "delivery_grace_min",
+        "unattributed_max",
+        "retention_days",
+    }
 
 
 def test_skew_is_negative_only_on_tiny(built: Path) -> None:

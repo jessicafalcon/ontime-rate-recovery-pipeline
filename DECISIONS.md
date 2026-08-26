@@ -19,6 +19,9 @@ annotated **Superseded by …** in place and never deleted.
   arrived); `unattributed` is explicit, never folded into "late". ([Phase 0](#phase-0))
 - **Truth never enters the pipeline.** Side-file under `truth/`; only `eval/`
   reads it; a test greps every pipeline directory for the word. ([Phase 0](#phase-0))
+- **The on-time denominator is `prompts_delivered`, and the four delivered
+  labels partition it.** `delivery_fault` is counted beside it, never inside;
+  every metric has one definition (`docs/METRICS.md`). ([Phase 4](#phase-4))
 
 **Model**
 
@@ -80,6 +83,67 @@ annotated **Superseded by …** in place and never deleted.
   anyone opening the repo in Claude Code.
 
 ## Appendix — by phase
+
+### Phase 4
+
+*On-time marts (`phase-4-marts`).*
+
+- **"`sum(label counts) == prompts_delivered`" was wording, not design
+  (reconciliation, approved 2026-08-25).** The five labels partition every
+  prompt and `delivery_fault` is the undelivered one, so the five-way sum is
+  `prompts_delivered + delivery_fault` and the sentence was false on 13 of
+  tiny's 14 cohort-days. The pinned identity is `on_time + upload_fault +
+  timing_gap + unattributed = prompts_delivered` and `prompts_delivered +
+  delivery_fault = prompts_sent` (`assert_cohort_day_partition.sql`);
+  `prompts_delivered = count(delivered_in_grace)`, the predicate §2.5 rule 1
+  negates, so the count and the label cannot drift. No structure, path or
+  writer moved — CLAUDE.md and PHASES were corrected. Closes BACKLOG "The
+  denominator contract's sum must exclude `delivery_fault`". Rejected:
+  reading the old sentence charitably (the next reader writes the five-way
+  test and watches it fail).
+- **`prompt_date` is the local date** (`cast(sent_at_local as date)`, ANSI —
+  the denylist forbids `::`). Cohorts are defined by the local send hour; a
+  UTC date splits one cohort's morning across two rows (every Tokyo
+  `c-morning` prompt; 34 of 140 on tiny). Computed in the mart from the
+  attribution column; Phase 7 moves it upstream when partitioning needs it.
+  Rejected: UTC.
+- **The rate is `safe_divide(on_time, prompts_delivered)`: NULL when nothing
+  was delivered, 0 when delivered and none on time.** PHASES' "a
+  delivery-fault-only day shows 0" named a zero-denominator day; a rate
+  there is undefined and the counts still show the outage. `on_time /
+  prompts_sent` was rejected (it moves the §4.6 denominator and makes an
+  outage look like a timing problem). Neither case exists on tiny; both are
+  unit tests — `safe_divide`'s first render.
+- **`ontime_retention.retained` has three states at `retention_days: 28`.**
+  tiny is 7 days, so a boolean would read "all churned" — the artefact §7
+  says synthetic data must not produce. NULL while the data-derived horizon
+  (`max` local event time — never the clock) is before the close; true /
+  false only after. The user's rate covers prompts in the half-open
+  `[anchor, anchor + retention_days)`; the close day opens `retained`'s
+  window (review round 1 pinned the boundary). Day arithmetic is `timestamp_diff('day', …)` on
+  midnight timestamps, so no date-add dialect (and no sixth macro) entered
+  the model. Not golden-frozen (all-NULL pins nothing); row and organic-open
+  counts are the pins. Rejected: a fixture-sized default (the definition
+  would bend to the fixture); scoping to `medium` (not frozen — no test
+  data at all).
+- **`eval/golden.py` is generalised, not copied**: a `Golden` spec
+  (relation, columns, key width, file) per frozen table; every golden sorts
+  by its first two columns — attribution `(prompt_id, user_id)`,
+  `ontime_rate_daily` `(cohort_id, prompt_date)` — so one `sorted` call and
+  one `swap-sort-key` mutation cover both. The attribution CSV is
+  byte-identical through the new writer. `make report` is the
+  `attribution-golden` shape plus the overall rate; console only. Rejected:
+  a second module; a second writer of `fixtures/`.
+- **`ontime_rate` is rounded to 6 places in the mart** so the frozen CSV
+  cannot move on an engine's float formatting; the Python pin compares
+  `75 / 123` exactly against the unrounded SQL sum. Rejected: an unrounded
+  double in a frozen file.
+- **`swap-arms:1,2` on `retained` is an equivalent mutant** (verified
+  SURVIVED once, excluded with its reason in the spec): an open after the
+  close implies the horizon is past it, so arms 1 and 2 are disjoint. The
+  single-arm count `case`s in `ontime_rate_daily` are wrapped in `sum(`, so
+  `end as <alias>` does not address them — the operator refuses, and those
+  columns are pinned by the partition test and the golden instead.
 
 ### Phase 3
 

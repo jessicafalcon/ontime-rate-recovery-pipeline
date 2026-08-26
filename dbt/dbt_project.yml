@@ -24,6 +24,7 @@ vars:
   skew_max_min: 5
   delivery_grace_min: 10
   unattributed_max: 0.10
+  retention_days: 28
 
 models:
   ontime:
@@ -33,3 +34,6 @@ models:
     attribution:
       +materialized: table
       +schema: attribution
+    marts:
+      +materialized: table
+      +schema: marts

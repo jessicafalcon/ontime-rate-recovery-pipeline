@@ -113,9 +113,26 @@ singular tests; vars `skew_max_min` 5, `delivery_grace_min` 10,
 `ontime_retention`; `docs/METRICS.md` as the single definition of each metric;
 `make report`.
 
-**Done when.** On tiny, `sum(label counts) == prompts_delivered` for every
+**Done when.** On tiny, `on_time + upload_fault + timing_gap + unattributed
+== prompts_delivered` (and `+ delivery_fault == prompts_sent`) for every
 cohort-day (dbt test); the report's on-time rate equals the fixture's expected
-value; a delivery-fault-only day shows on-time rate 0, not null.
+value; a cohort-day with delivered prompts and none on time shows on-time
+rate 0, not null, and a cohort-day with nothing delivered shows NULL with its
+counts populated. *(Corrected at exit: the original "sum(label counts)"
+summed all five, which holds only when there is no delivery fault; the
+original "delivery-fault-only day" has a zero denominator — BACKLOG row
+closed, DECISIONS Phase 4.)*
+
+**Delivered** (`phase-4-marts`, spec `specs/phase-4-marts.md`): as planned
+with the two corrections above, plus `prompt_date` as the LOCAL date (34 of
+tiny's 140 prompts straddle the UTC date), `ontime_retention.retained` as a
+three-state boolean (NULL until the window closes in the data — every tiny
+row; `retention_days` 28 kept as the definition), `eval/golden.py`
+generalised to a `Golden` spec per frozen file (attribution byte-identical),
+`make report` (console only), `docs/METRICS.md` as a LIVING doc with a test
+that every mart metric has exactly one block. tiny: 14 cohort-days, 123
+delivered, rate 0.609756; 6 unit tests, 2 singular tests; `safe_divide`'s first
+caller. Re-freeze: one manifest line added, fourteen unchanged.
 
 ---
 
