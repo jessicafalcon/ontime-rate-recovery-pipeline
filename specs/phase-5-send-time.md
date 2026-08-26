@@ -1,9 +1,9 @@
-# Phase 5 — Send-time model as a dbt model (PROPOSED)
+# Phase 5 — Send-time model as a dbt model (APPROVED 2026-08-25 — implemented, in review)
 
 Contract for the `phase-5-send-time` branch. Source: `docs/PHASES.md` Phase 5.
 Depends on Phase 4 merged (PR #6, `f39a31b`).
 
-**Status: PROPOSED — do not start until approved.** No new dependencies:
+**Status: APPROVED 2026-08-25; implemented on `phase-5-send-time`.** No new dependencies:
 Phase 5 has no allowlist entry; the model is dbt SQL, the eval extension uses
 `duckdb` (Phase 2), `math` and `json` from the standard library. numpy, scipy
 or any stats package is a STOP-and-ask — and unnecessary: circular means are
@@ -367,9 +367,11 @@ dbt/models/scores/scores_send_time.sql::send_hour_frac           drop-arm:1
 dbt/models/scores/scores_send_time.sql::send_hour_frac           drop-arm:2
 ```
 
-Equivalent-mutant exclusions, named up front (each to be run once through
-`make mutate` on a scratch copy of the block at implementation, the verdict
-recorded here):
+Equivalent-mutant exclusions, named up front (verified once at
+implementation through `make mutate` on a scratch copy of the block: the
+seven real lines KILLED, `swap-arms:1,2` SURVIVED as predicted; the
+`delete-call` line originally drafted for `circular_abs_diff_hours` was
+refused — no statement-level call — and became `constant-return:0.0`):
 
 - `scores_send_time.sql::send_hour_frac swap-arms:1,2` — arm 1 is "shift
   beyond +band → moment + max", arm 2 "shift beyond −band → moment − max";
@@ -383,6 +385,21 @@ recorded here):
 - `features_user_hour` has no multi-arm `case`: the organic filter is a
   `where`, the window a `where` — pinned by the three feature unit tests
   and `ORGANIC_OPEN_ROWS`.
+
+## Implementation notes (2026-08-25)
+
+- `cohort_hour_local` is a ninth column (the band's anchor): with it
+  `assert_send_time_within_band.sql` reads the served table instead of
+  recomputing the cohort moment. Recorded in DECISIONS Phase 5 with
+  `center_hour_local`; the golden carries nine columns.
+- The served minute is `round(frac × 60)` on the 1440-minute circle, split
+  by integer arithmetic — a float `floor` turned 0.4999… h into 29 min in
+  the first hour (the `is_circular` unit test pins 00:30).
+- tiny's `c-morning` cohort moment is a real two-way tie (bins 3 and 10 at
+  12 pooled opens → 3), so invariant 7 is exercised on the fixture as well
+  as in the unit test (`test_cohort_moments_and_as_of_match_pins`).
+- `tests/test_attribution.py::project_vars` tolerates a string var
+  (`model_version: v1`) and its var-set pin lists the four new vars.
 
 ## Pinned decisions (do not re-litigate)
 
