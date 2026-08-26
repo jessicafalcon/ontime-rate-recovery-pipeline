@@ -31,6 +31,7 @@ ARMS = ("baseline", "cohort", "recommended")
 BEGIN = "<!-- simulate:begin {profile} -->"
 END = "<!-- simulate:end {profile} -->"
 COLUMNS = (*LABELS, "prompts_sent", "prompts_delivered", "ontime_rate")
+SEED_NOTE = "`tests/pins.py::SIMULATE_SEED`"
 
 
 @dataclass(frozen=True)
@@ -184,6 +185,7 @@ def _fmt(rate: float | None) -> str:
 def render_block(profile: str, rows: list[tuple[str, dict[str, int]]]) -> str:
     """The Markdown table plus the lift line; causes in LABELS order, arms in
     the order given (ARMS) — explicit keys, never insertion order."""
+    # declared order — the swap-sort-key target (spec invariant 9), not list(LABELS)
     causes = sorted(LABELS, key=lambda c: (LABELS.index(c), c))
     header = ["arm", *causes, "prompts_sent", "prompts_delivered", "ontime_rate"]
     lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
@@ -208,9 +210,6 @@ def render_block(profile: str, rows: list[tuple[str, dict[str, int]]]) -> str:
         f"Profile `{profile}`, {sum(base.values())} prompts, seed {SEED_NOTE}."
     )
     return "\n".join(lines) + "\n"
-
-
-SEED_NOTE = "`tests/pins.py::SIMULATE_SEED`"
 
 
 def render(db: Path, truth: Path, profile: str, seed: int) -> str:
