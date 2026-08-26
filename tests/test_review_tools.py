@@ -721,3 +721,79 @@ def test_gate_accepts_a_declared_freeze(repo: Path, capsys) -> None:
     assert "re-frozen as the spec declares" in capsys.readouterr().out
     assert gate.freeze_declarations(declared) == {"tiny"}
     assert gate.freeze_declarations(None) == set()
+
+
+# ------------------------------------------- Phase 3: SQL operators (case arms)
+
+CASE_SQL = """select
+    x,
+    case
+        when a then 'one'
+        when b
+            and c then 'two'
+        when d then 'three'
+        else 'other'
+    end as label,
+    case when z then 1 else 0 end as other_case
+from t
+"""
+
+
+@pytest.fixture
+def sql_repo(repo: Path) -> Path:
+    (repo / "dbt" / "models" / "m").mkdir(parents=True)
+    (repo / "dbt" / "models" / "m" / "attr.sql").write_text(CASE_SQL)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "sql")
+    return repo
+
+
+def test_drop_arm_removes_the_named_arm(sql_repo: Path) -> None:
+    m = mutate.Mutation("dbt/models/m/attr.sql", "label", "drop-arm", "2")
+    assert mutate.apply(m, sql_repo) == "dbt/models/m/attr.sql:5"
+    text = (sql_repo / "dbt" / "models" / "m" / "attr.sql").read_text()
+    assert "when b" not in text and "then 'two'" not in text
+    assert (
+        "when a then 'one'\n        when d then 'three'\n        else 'other'" in text
+    )
+    assert "case when z then 1 else 0 end as other_case" in text  # untouched
+
+
+def test_swap_arms_exchanges_two_arms(sql_repo: Path) -> None:
+    m = mutate.Mutation("dbt/models/m/attr.sql", "label", "swap-arms", "1,3")
+    assert mutate.apply(m, sql_repo) == "dbt/models/m/attr.sql:4"
+    text = (sql_repo / "dbt" / "models" / "m" / "attr.sql").read_text()
+    assert (
+        "when d then 'three'\n        when b\n            and c then 'two'\n"
+        "        when a then 'one'\n        else 'other'"
+    ) in text
+
+
+def test_sql_operator_refuses_unknown_case_or_arm(sql_repo: Path) -> None:
+    f = "dbt/models/m/attr.sql"
+    with pytest.raises(common.Refused, match="has 3 arms"):
+        mutate.apply(mutate.Mutation(f, "label", "drop-arm", "4"), sql_repo)
+    with pytest.raises(common.Refused, match="no `end as nope`"):
+        mutate.apply(mutate.Mutation(f, "nope", "drop-arm", "1"), sql_repo)
+    with pytest.raises(common.Refused, match="two different arms"):
+        mutate.apply(mutate.Mutation(f, "label", "swap-arms", "2,2"), sql_repo)
+    with pytest.raises(common.Refused, match="not a tracked file"):
+        mutate.apply(
+            mutate.Mutation("dbt/models/m/x.sql", "label", "drop-arm", "1"), sql_repo
+        )
+    head = "## Invariants\n```mutations\n"
+    for line in (
+        "dbt/models/m/attr.sql::label drop-arm",
+        "dbt/models/m/attr.sql::label drop-arm:0",
+        "dbt/models/m/attr.sql::label swap-arms:1",
+        "dbt/macros/x.sql::label drop-arm:1",
+        "dbt/models/../tests/x.sql::label drop-arm:1",
+        "pkg/mod.py::f drop-arm:1",
+    ):
+        with pytest.raises(common.Refused):
+            mutate.parse_mutations(f"{head}{line}\n```\n")
+    ok = mutate.parse_mutations(
+        f"{head}dbt/models/./m/attr.sql::label swap-arms:1,2\n```\n"
+    )
+    assert ok[0].file == "dbt/models/m/attr.sql" and ok[0].arg == "1,2"
+    assert set(mutate.SQL_OPERATORS) == {"drop-arm", "swap-arms"}

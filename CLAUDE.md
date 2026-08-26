@@ -45,22 +45,26 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   refuses `fixtures/`), `manifest.py`, `truth.py` (the ONLY truth writer),
   `cli.py` (`seed`, `freeze`). Truth goes to `<out>/truth/`, never read by the
   pipeline.
-- `dbt/` — the dbt project: `models/staging` (Phase 2; later `attribution,
-  marts, features, scores`), `macros/` (the five dispatch macros), `tests/`
-  (singular data tests), `profiles.yml` (`duckdb`, `bigquery` targets).
+- `dbt/` — the dbt project: `models/staging` (Phase 2), `models/attribution`
+  (Phase 3; later `marts, features, scores`), `macros/` (the five dispatch
+  macros), `tests/` (singular data tests), `profiles.yml` (`duckdb`,
+  `bigquery` targets).
   `models/staging/sources.yml` is GENERATED (`make gen-sources`), never edited.
 - `loader/` *(Phase 2)* — raw landing: `load.py` (fixtures → DuckDB `raw`
   schema, types from the generated `ddl.sql`), `cli.py` (`load`, `dbt-build`,
   `drop-db`). Pipeline code — guarded by `test_truth_isolation.py`.
-- `eval/` *(Phase 3+)* — the ONLY code that reads truth: label scoring,
-  reachable-center MAE, `simulate.py`.
+- `eval/` *(Phase 3+)* — the ONLY code that reads truth: `score.py` (label
+  accuracy vs `truth/prompts.jsonl`), `golden.py` (the attribution table as
+  canonical CSV + diff), `cli.py` (`golden`, `score`); later reachable-center
+  MAE, `simulate.py`. Writes console and `data/out/<p>/expected/` only —
+  never a table, never `fixtures/`.
 - `serving/` *(Phase 8; Spanner target Phase 10)* — write-back to
   `send_schedule`.
 - `orchestration/` *(Phase 8)* — the Airflow DAG. No logic, only ordering.
 - `infra/` *(Phase 9+)* — Terraform; `modules/composer`, `modules/spanner`
   behind `enable_*` toggles.
 - `fixtures/tiny/` — golden `raw/events_<upload-date>.jsonl` + `dims/` +
-  `truth/` + `MANIFEST.sha256` (`expected/` from Phase 3). **READ-ONLY**: the
+  `truth/` + `expected/attribution.csv` (Phase 3) + `MANIFEST.sha256`. **READ-ONLY**: the
   review gate FAILs any change without a `Freeze:` line in the phase spec;
   `make freeze` is the only writer.
 - `tests/` — pytest, no services, no network (DuckDB in-process counts as
@@ -99,10 +103,12 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
 - `make mutate SPEC=specs/<f>.md` — the mutation sweep: the unmutated suite
   runs first in its own worktree and must be green (a red HEAD is a refusal),
   then each line of the spec's Invariants ```mutations block (`path.py::func op`; ops exactly
-  `delete-call`, `constant-return:<v>`, `invert-guard`, `swap-sort-key`) is
+  `delete-call`, `constant-return:<v>`, `invert-guard`, `swap-sort-key`; or,
+  over one `case … end as <alias>` in a `dbt/models/**.sql` file,
+  `path.sql::<alias> drop-arm:<n> | swap-arms:<i>,<j>` — Phase 3) is
   applied to HEAD in a throwaway `git worktree`, the offline suite runs there
-  under a reduced env, verdict `KILLED | SURVIVED | ERROR` per line; exit 1 on
-  any survivor. Python only — dbt SQL mutation is a BACKLOG row
+  under a reduced env (its in-process `dbt build` is what kills a SQL line),
+  verdict `KILLED | SURVIVED | ERROR` per line; exit 1 on any survivor
 - `make round-reset` — deletes this checkout's local `review-round-*` tags
   (`scripts/round_tag.py reset`). Run at phase start: round tags are local,
   never pushed, and phase-agnostic, so a new phase's rounds would otherwise
@@ -110,11 +116,14 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
 - `make seed PROFILE=<p>` — the generator: validates `[a-z0-9_]+`, writes
   `data/out/<p>/` only, hashes its output and compares to
   `fixtures/<p>/MANIFEST.sha256` when one exists (`seed OK … manifest match`;
-  exit 1 on drift). Never writes under `fixtures/`
+  exit 1 on drift) — over the generator's keys only (`raw/`, `dims/`,
+  `truth/`; `expected/` is the golden's). Never writes under `fixtures/`
 - `make freeze PROFILE=<p> CONFIRM=yes` — the ONLY writer of `fixtures/<p>/`:
-  copies `data/out/<p>/` over it and writes the manifest. `CONFIRM=yes` must
-  have command-line origin (`$(origin CONFIRM)`); a re-freeze also needs a
-  DECISIONS entry and a `Freeze: fixtures/<p>/MANIFEST.sha256` line in the spec
+  copies `data/out/<p>/` over it and writes the manifest; refuses when
+  `data/out/<p>/` lacks a file the current manifest lists (a bare `seed`
+  cannot drop `expected/`). `CONFIRM=yes` must have command-line origin
+  (`$(origin CONFIRM)`); a re-freeze also needs a DECISIONS entry and a
+  `Freeze: fixtures/<p>/MANIFEST.sha256` line in the spec
 - `make load PROFILE=<p>` — validates `[a-z0-9_]+`, loads
   `fixtures/<p>/{raw/events_*.jsonl,dims/dim_user.csv}` into `data/<p>.duckdb`
   schema `raw`; prints `load: source=…` (falls back to `data/out/<p>/`,
@@ -122,8 +131,8 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   (`load DRIFT`, exit 1); types come from the generated `loader/ddl.sql`, never
   inferred. Idempotent: tables are recreated
 - `make dbt-build PROFILE=<p> [TARGET=duckdb] [CONFIRM=yes]` — `load`, then
-  `dbt build` (source tests → `stg_events`, `stg_prompts` → data, unit and
-  singular tests) against `data/<p>.duckdb`; prints `dbt-build OK:
+  `dbt build` (source tests → `stg_events`, `stg_prompts`, `attribution` →
+  data, unit and singular tests) against `data/<p>.duckdb`; prints `dbt-build OK:
   <p>/<target>`, exit 1 on any failure. Any `TARGET` other than `duckdb` is a
   cloud-cost command: refused unless `CONFIRM=yes` has command-line origin.
   dbt telemetry is off (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`)
@@ -132,7 +141,16 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
 - `make gen-sources` — re-renders `loader/ddl.sql` and
   `dbt/models/staging/sources.yml` from `generator/models.py`;
   `tests/test_dbt_sources.py` fails on a hand edit
-- Later phases add: `attribution-golden` (3), `report` (4), `simulate` (6),
+- `make attribution-golden PROFILE=<p> [WRITE=yes]` — the built `attribution`
+  table (`prompt_id,user_id,cohort_id,label`, sorted by `(prompt_id, user_id)`) vs
+  `fixtures/<p>/expected/attribution.csv`; prints `attribution-golden OK:
+  <p>, N rows, 0 differ`, exit 1 on any differing row. `WRITE=yes` (the
+  literal only) writes `data/out/<p>/expected/attribution.csv` instead —
+  `make freeze` is the only way it reaches `fixtures/`. Needs `dbt-build` first
+- `make eval PROFILE=<p>` — label accuracy vs `fixtures/<p>/truth/prompts.jsonl`
+  (`eval/cli.py score`, the ONLY truth reader); prints `eval OK: <p>, accuracy
+  1.000 (pin 1.000), N prompts`, exit 1 below `tests/pins.py::LABEL_ACCURACY`
+- Later phases add: `report` (4), `simulate` (6),
   `writeback`, `pipeline`, `test-int-airflow` (8), `tf-plan | tf-apply |
   tf-destroy`, `test-int-bigquery` (9). Each lands with its phase and is
   listed here in the same PR.
@@ -147,8 +165,16 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   `app_opened` (organic — the reachability signal).
 - Upload delay = `server_received_time − client_event_time`. Skew beyond
   `SKEW_MAX_MIN` → `unattributed`.
-- Labels: exactly one of five per prompt×user; precedence in ARCHITECTURE
-  §2.5; `provisional` until `LOOKBACK_DAYS` closes, then `final` forever.
+- Labels: exactly one of five per prompt×user (= per `prompt_id`);
+  precedence in ARCHITECTURE §2.5: `delivery_fault` → skew gate (a client
+  clock AHEAD past `skew_max_min`, i.e. `min(upload_delay_seconds) <
+  −skew_max_min·60`; a positive delay is never skew) → `on_time` →
+  `upload_fault` → `timing_gap` → residual `unattributed`. The three-clock
+  signal lives on `capture_started`/`upload_*` (`response_recorded` is
+  backend-stamped). `attribution.cohort_id` is the prompt's own
+  (`prompt_cohort_id`). `provisional` until `LOOKBACK_DAYS` closes, then
+  `final` forever (Phase 7). Vars `skew_max_min` (5 = `generator/models.py`),
+  `delivery_grace_min` (10), `unattributed_max` (0.10) in `dbt_project.yml`.
 - On-time denominator is `prompts_delivered`. Never user-days.
 - `dim_user.tz` is SCD2 (`valid_to` empty = open row); local time is computed
   once, in staging (`stg_events.client_event_time_local`), via `to_local_time`.
@@ -404,12 +430,13 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 2 implemented, in review (`phase-2-staging`).** Phases 0–1 merged
-(PRs #1, #2), round-tag fix merged (PR #3). dbt on DuckDB: `make dbt-build
-PROFILE=tiny` is green (2 models, 33 data tests, 5 unit tests); `tests/pins.py`
-pins 970 raw → 926 staged (44 duplicates), 140 prompts, 22 dim rows; the raw
-DDL and `sources.yml` are generated from the pydantic contract; five dispatch
-macros with BigQuery stubs. Next: review rounds, then Phase 3 (attribution).
-Open BACKLOG rows: **8**.
+**Phase 3 implemented, in review (`phase-3-attribution`).** Phases 0–2 merged
+(PRs #1, #2, #4), round-tag fix merged (PR #3). `make dbt-build PROFILE=tiny`
+is green (3 models, 44 data tests, 18 unit tests); `make attribution-golden
+PROFILE=tiny` → 140 rows, 0 differ against the frozen
+`fixtures/tiny/expected/attribution.csv`; `make eval PROFILE=tiny` → accuracy
+1.000 (75/34/17/8/6 = truth). The mutation sweep now drops and swaps SQL
+`case` arms. Next: review rounds, then Phase 4 (marts).
+Open BACKLOG rows: **7**.
 
 (Update this section at the end of every working day.)

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from generator import cli, manifest, profiles
 from generator.generate import generate
+from tests import pins
 
 ROOT = Path(__file__).parent.parent
 TINY = ROOT / "fixtures" / "tiny"
@@ -20,8 +21,13 @@ def test_committed_tiny_matches_manifest() -> None:
 
 
 def test_regenerated_tiny_matches_manifest(tmp_path: Path) -> None:
+    """The generator's keys only: expected/ (Phase 3) is the golden's, not
+    the generator's — `seed` checks the same subset (cli.generated_drift)."""
     cli.write_output(tmp_path, generate(profiles.load("tiny")))
-    assert manifest.diff(tmp_path, TINY / manifest.NAME) == []
+    assert cli.generated_drift(tmp_path, TINY / manifest.NAME) == []
+    assert manifest.diff(tmp_path, TINY / manifest.NAME) == [
+        "expected/attribution.csv: missing"
+    ]
 
 
 def test_manifest_roundtrip_and_a_changed_byte_is_a_diff(tmp_path: Path) -> None:
@@ -39,3 +45,14 @@ def test_manifest_roundtrip_and_a_changed_byte_is_a_diff(tmp_path: Path) -> None
         "c.txt: extra",
         "sub/b.txt: changed",
     ]
+
+
+def test_raw_dims_truth_hashes_are_the_phase_1_hashes() -> None:
+    """The Phase 3 re-freeze added expected/attribution.csv and moved nothing:
+    the generator's own keys still hash to a fresh regeneration, and the
+    manifest is exactly the Phase 1 lines plus one."""
+    lines = manifest.parse((TINY / manifest.NAME).read_text())
+    generated = cli.generated_keys(lines)
+    assert len(generated) == pins.PHASE1_MANIFEST_LINES
+    assert set(lines) - set(generated) == {"expected/attribution.csv"}
+    assert {k.split("/")[0] for k in generated} == {"raw", "dims", "truth"}

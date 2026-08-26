@@ -5,6 +5,7 @@ assigned cause), 6 (seed reports drift and exits 1; freeze writes the fixture),
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -154,3 +155,54 @@ def test_freeze_copies_out_to_fixtures_and_writes_manifest(
     dst = tmp_path / "fix" / "tiny"
     assert (dst / manifest.NAME).exists()
     assert manifest.matches(dst, dst / manifest.NAME)
+
+
+# ------------------------------------------------- Phase 3: expected/ via freeze
+
+
+def test_seed_self_check_ignores_expected_keys(tmp_path: Path, monkeypatch, capsys):
+    """Invariant 11: the manifest lists expected/attribution.csv (Phase 3) but
+    `seed` never writes it — the self-check covers raw/, dims/, truth/ only."""
+    real = ROOT / "fixtures" / "tiny" / manifest.NAME
+    assert "expected/attribution.csv" in real.read_text()
+    monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
+    assert cli.seed("tiny") == 0
+    assert "manifest match" in capsys.readouterr().out
+    assert cli.generated_keys({"expected/a.csv": "x", "raw/e.jsonl": "y"}) == {
+        "raw/e.jsonl": "y"
+    }
+    # a generated key that drifts is still a drift
+    monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
+    monkeypatch.setattr(cli, "ROOT", tmp_path)
+    frozen = tmp_path / "fix" / "tiny" / manifest.NAME
+    frozen.parent.mkdir(parents=True)
+    lines = manifest.parse(real.read_text())
+    lines["truth/prompts.jsonl"] = "0" * 64
+    frozen.write_text(manifest.render(lines))
+    assert cli.seed("tiny") == 1
+    assert "truth/prompts.jsonl: changed" in capsys.readouterr().out
+
+
+def test_freeze_refuses_when_output_lacks_a_manifest_file(tmp_path: Path, monkeypatch):
+    """Invariant 11: a freeze after a bare `seed` would drop expected/ from the
+    fixture — refused, and the fixture is untouched."""
+    monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
+    monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
+    monkeypatch.setattr(cli, "ROOT", tmp_path)
+    assert cli.seed("tiny") == 0
+    assert cli.freeze("tiny", "yes", "command line") == 0
+    dst = tmp_path / "fix" / "tiny"
+    (tmp_path / "out" / "tiny" / "expected").mkdir()
+    (tmp_path / "out" / "tiny" / "expected" / "attribution.csv").write_text("h\n")
+    assert cli.freeze("tiny", "yes", "command line") == 0
+    before = (dst / manifest.NAME).read_text()
+    assert "expected/attribution.csv" in before
+    shutil.rmtree(tmp_path / "out" / "tiny" / "expected")
+    assert cli.missing_from_output(tmp_path / "out" / "tiny", dst / manifest.NAME) == [
+        "expected/attribution.csv"
+    ]
+    with pytest.raises(SystemExit) as e:
+        cli.freeze("tiny", "yes", "command line")
+    assert e.value.code == 2
+    assert (dst / manifest.NAME).read_text() == before
+    assert (dst / "expected" / "attribution.csv").read_text() == "h\n"

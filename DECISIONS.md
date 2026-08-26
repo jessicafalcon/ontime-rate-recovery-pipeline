@@ -60,10 +60,14 @@ annotated **Superseded by …** in place and never deleted.
   fixture. PROJECT_BRIEF.md §6 was renumbered to match (one numbering
   everywhere; `docs/PHASES.md` authoritative). The core risk (attribution recovers assigned causes; organic
   opens recover the latent window) is proven in Phases 1–5 before any cloud.
-- **Mutation sweep covers Python only.** dbt SQL has no operator; an invariant
-  upheld only in SQL names its dbt unit test in the Invariants table. BACKLOG
-  row, re-deferred at Phase 2 to "Phase 3 (attribution precedence is the first
-  multi-branch SQL)" — see Phase 2 appendix.
+- **Mutation sweep: four Python operators, two SQL operators over `case`
+  arms.** Python: `delete-call`, `constant-return`, `invert-guard`,
+  `swap-sort-key`. SQL (Phase 3): `drop-arm:<n>` / `swap-arms:<i>,<j>` over
+  ONE `case … end as <alias>` in a `dbt/models/**.sql` file, killed by the
+  suite's in-process `dbt build`. An invariant upheld only in SQL still names
+  its dbt unit test in the Invariants table; the arm operators prove the
+  test bites. Anything beyond arms is a BACKLOG row when a survivor class
+  needs it — see Phase 3 appendix.
 - **Review agents are selected by diff surface, not run wholesale.** A
   docs-only range gets the coherence-auditor (scoped) and the gate; code gets
   code-reviewer + functionality-tester; sensitive paths add security-reviewer.
@@ -76,6 +80,63 @@ annotated **Superseded by …** in place and never deleted.
   anyone opening the repo in Claude Code.
 
 ## Appendix — by phase
+
+### Phase 3
+
+*Attribution (`phase-3-attribution`).*
+
+- **The skew gate is its own precedence rule, second, before the clock rules
+  (reconciliation, approved 2026-08-25).** The injector skews only
+  client-side events; `prompt_delivered` and `response_recorded` are
+  server-stamped, so under the literal §2.5 order every skewed prompt in tiny
+  labelled `on_time`. Now: `delivery_fault` → skew (`min(upload_delay_seconds)
+  < −skew_max_min·60`) → `on_time` → `upload_fault` → `timing_gap` → residual.
+  Negative side only. Rejected: a skew predicate copied into each clock arm
+  (four copies of the bound; a survivor hides in whichever is dropped).
+- **The three-clock signal is read off `capture_started` / `upload_*`, not
+  `response_recorded`.** The response is a backend event whose two clocks are
+  equal by construction (ARCHITECTURE §8), so "a response with client time
+  inside the window, received outside" never matches; the device's clock is
+  on the capture and upload events. Rule 4a = a response exists AND such an
+  event has client in / received out. Found on the first build (5 of 8
+  upload faults fell to the residual); the §2.5 wording was ambiguous about
+  which event, not wrong. Rejected: reading the client clock off
+  `upload_completed` only (the offline case stamps it after the window).
+- **`expected/attribution.csv` reaches `fixtures/` only through `make
+  freeze` (reconciliation, approved 2026-08-25).** `make attribution-golden
+  WRITE=yes` writes `data/out/<p>/expected/`; `freeze` copies it in and
+  re-renders the manifest. `seed`'s self-check compares the generator's keys
+  only (`raw/`, `dims/`, `truth/`); `freeze` refuses when `data/out/<p>/`
+  lacks a manifest-listed file. Re-freeze of `fixtures/tiny/`: one line
+  added, the thirteen Phase 1 hashes unchanged (`tests/test_fixture.py`).
+  Rejected: a second writer under `fixtures/`; keeping `expected/` out of the
+  manifest.
+- **`attribution.cohort_id` is the prompt's own (`prompt_cohort_id`).** The
+  cohort that chose the send hour is what the on-time rate measures;
+  `dim_user.cohort_id` is the user's assignment at event time and could move
+  a final label's denominator row. `assert_prompt_cohort_matches_dim` pins
+  that they agree on real data. Rejected: `dim_user.cohort_id`.
+- **Golden = `prompt_id,user_id,cohort_id,label`**, canonical CSV sorted by
+  `(prompt_id, user_id)` — the evidence booleans are not in it (a renamed
+  boolean would move the file without moving a label).
+- **`eval/` is console-only and imports its pin from `tests/pins.py`.** One
+  place for every pinned number; `eval` prints and asserts the same value.
+  Rejected: a `docs/RESULTS.md` block now (Phase 6 owns the generated block).
+- **Three vars, defaulted in `dbt_project.yml`**: `skew_max_min: 5` (equality-
+  tested against `generator/models.py::SKEW_MAX_MIN`), `delivery_grace_min:
+  10` (the generator delivers 5–120 s after send), `unattributed_max: 0.10`
+  (tiny 0.043; `clock_skew_rate` 0.05).
+- **The SQL mutation operators are text-level over `when` lines.** One arm =
+  one line-leading `when … then …` block up to the next `when`/`else`; the
+  alias after `end as` selects the `case`. No SQL parser (none on the
+  allowlist; the arms are the unit the unit tests are written against).
+  Rejected: `swap-predicate` (which predicate is undecidable without parsing).
+- **`swap-arms:4,5` is an equivalent mutant and is not in the sweep.** The
+  first run reported it SURVIVED: `timing_gap` requires no upload event and
+  both `upload_fault` clauses imply one, so the arms are disjoint and their
+  order is unobservable. The overlap stays pinned by the unit test
+  `attribution_upload_fault_beats_timing_gap`. A survivor that is provably
+  equivalent is removed with its reason here, never left to fail the gate.
 
 ### Phase 2
 

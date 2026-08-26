@@ -49,6 +49,34 @@ def test_no_clock_call_in_any_model_or_macro(tmp_path: Path) -> None:
     assert clock_hits(tmp_path) == ["models/bad.sql"]
 
 
+# Dialect functions that must not appear inline in a MODEL (they belong to a
+# dispatch macro body or to an ANSI rewrite). Unit-test fixtures in schema.yml
+# may type their rows with them; macros are the seam by definition.
+DIALECT = re.compile(
+    r"(\bbool_or\b|\blogical_or\b|\bdate_diff\b|\btimezone\(|->>|::)", re.I
+)
+
+
+def dialect_hits(root: Path) -> list[str]:
+    return sorted(
+        str(p.relative_to(root))
+        for p in (root / "models").rglob("*.sql")
+        if DIALECT.search(p.read_text())
+    )
+
+
+def test_no_dialect_function_in_any_model(tmp_path: Path) -> None:
+    """Review round 1, Phase 3: bool_or sat inline in attribution.sql — the
+    seam the five macros exist for was bypassed with no test noticing."""
+    assert dialect_hits(DBT) == []
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "bad.sql").write_text("select bool_or(x) as y from t")
+    (tmp_path / "models" / "ok.sql").write_text(
+        "select max(case when x then 1 else 0 end) = 1 as y from t"
+    )
+    assert dialect_hits(tmp_path) == ["models/bad.sql"]
+
+
 def test_no_freshness_block() -> None:
     for p in sql_files(DBT):
         assert "freshness:" not in p.read_text(), p
@@ -106,6 +134,9 @@ SINGULAR = {
     "assert_every_event_matches_one_dim_row.sql": "ref('stg_events')",
     "assert_dim_user_key_unique.sql": "source('raw', 'dim_user')",
     "assert_error_code_only_on_upload_failed.sql": "ref('stg_events')",
+    "assert_one_label_per_prompt.sql": "ref('attribution')",
+    "assert_unattributed_share_bounded.sql": "ref('attribution')",
+    "assert_prompt_cohort_matches_dim.sql": "ref('stg_prompts')",
 }
 
 
@@ -132,8 +163,22 @@ def test_no_dbt_packages() -> None:
 
 
 def test_every_model_has_description_and_a_test() -> None:
-    schema = (DBT / "models" / "staging" / "schema.yml").read_text()
-    for model in (p.stem for p in (DBT / "models" / "staging").glob("*.sql")):
-        block = schema.split(f"- name: {model}\n", 1)[1]
-        assert "description:" in block.split("\n  - name:", 1)[0], model
-        assert "data_tests:" in block.split("\n  - name:", 1)[0], model
+    for folder in ("staging", "attribution"):
+        schema = (DBT / "models" / folder / "schema.yml").read_text()
+        for model in (p.stem for p in (DBT / "models" / folder).glob("*.sql")):
+            block = schema.split(f"- name: {model}\n", 1)[1]
+            assert "description:" in block.split("\n  - name:", 1)[0], model
+            assert "data_tests:" in block.split("\n  - name:", 1)[0], model
+
+
+def test_schema_label_values_equal_the_contract() -> None:
+    """The five-label set (CLAUDE.md label contract): schema.yml's accepted
+    values == generator Cause == eval LABELS. A sixth anywhere is a BLOCKER."""
+    from eval.score import LABELS
+    from generator.models import Cause
+
+    schema = (DBT / "models" / "attribution" / "schema.yml").read_text()
+    m = re.search(r"values: \[([^\]]+)\]", schema)
+    assert m
+    listed = [v.strip() for v in m.group(1).split(",")]
+    assert listed == [c.value for c in Cause] == list(LABELS)

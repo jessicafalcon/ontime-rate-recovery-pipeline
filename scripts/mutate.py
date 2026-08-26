@@ -11,7 +11,16 @@ Reads the spec's Invariants section for ONE fenced block:
     eval/simulate.py::pick_window             swap-sort-key
     ```
 
-Exactly four operators:
+Four Python operators, and (Phase 3) two SQL operators over ONE `case` in a
+dbt model, addressed `dbt/models/<…>.sql::<alias>` where `<alias>` is the
+column after `end as`:
+  drop-arm:<n>        delete the n-th `when … then …` arm (1-based; `else` is
+                      not an arm — out of range → ERROR)
+  swap-arms:<i>,<j>   exchange arms i and j (precedence)
+The SQL suite is the same offline pytest run: tests/test_staging.py builds the
+project in-process, so a dbt unit test going red is a KILLED line.
+
+Exactly four Python operators:
   delete-call         remove every statement-level call to the function, in every
                       tracked non-test .py file (a call used as a value is left;
                       none found → ERROR)
@@ -58,6 +67,11 @@ from review_common import (  # noqa: E402
 )
 
 OPERATORS = ("delete-call", "constant-return", "invert-guard", "swap-sort-key")
+SQL_OPERATORS = ("drop-arm", "swap-arms")
+_ARM_ARG = {
+    "drop-arm": re.compile(r"^[1-9]\d*$"),
+    "swap-arms": re.compile(r"^[1-9]\d*,[1-9]\d*$"),
+}
 MAX_LITERAL = 64  # chars; `constant-return:<v>` is a small literal, nothing else
 _BLOCK = re.compile(r"```mutations\n(.*?)```", re.S)
 _ORDER_BY = re.compile(r"(order by\s+)([^\n;)]+?)(\s*(?:limit\b|$))", re.I | re.M)
@@ -107,6 +121,11 @@ def parse_mutations(spec_text: str) -> list[Mutation]:
             )
         file, func = parts[0].split("::", 1)
         op, _, arg = parts[1].partition(":")
+        if op in SQL_OPERATORS:
+            if not _ARM_ARG[op].match(arg):
+                raise Refused(f"refusing: {op} takes {_ARM_ARG[op].pattern!r}: {ln!r}")
+            out.append(Mutation(_model_path(file), func, op, arg))
+            continue
         if op not in OPERATORS or (op == "constant-return") != bool(arg):
             raise Refused(
                 f"refusing: unknown operator {parts[1]!r} "
@@ -137,6 +156,21 @@ def _repo_path(file: str) -> str:
         raise Refused(
             f"refusing: {file!r} is under tests/ — the sweep never mutates the "
             "oracle it judges by (every operator, not only delete-call)"
+        )
+    return "/".join(parts)
+
+
+def _model_path(file: str) -> str:
+    """A SQL mutation target: a tracked `.sql` under dbt/models/ (the models are
+    the only SQL the suite builds; macros and tests are the oracle's side)."""
+    parts = PurePosixPath(posixpath.normpath(file)).parts
+    if not parts or Path(file).is_absolute() or ".." in parts or parts[0] == "..":
+        raise Refused(
+            f"refusing: mutation target must be a repo-relative path: {file!r}"
+        )
+    if parts[:2] != ("dbt", "models") or not parts[-1].endswith(".sql"):
+        raise Refused(
+            f"refusing: a SQL mutation target must be dbt/models/**.sql: {file!r}"
         )
     return "/".join(parts)
 
@@ -216,8 +250,66 @@ def _calls(name: str) -> bool:
     return pred
 
 
+_WHEN = re.compile(r"^\s*when\b", re.I | re.M)
+_ELSE = re.compile(r"^\s*else\b", re.I | re.M)
+
+
+def sql_arms(text: str, alias: str) -> tuple[int, int, list[str], str]:
+    """Locate `case … end as <alias>`: returns (start, end) offsets of the text
+    between `case` and `end`, the `when…then…` arms (each a whole line block),
+    and the trailing `else …` block. One arm per line-leading `when`."""
+    end = re.search(rf"^\s*end\s+as\s+{re.escape(alias)}\b", text, re.I | re.M)
+    if not end:
+        raise Refused(f"refusing: no `end as {alias}` in the model")
+    start = None
+    for mm in re.finditer(r"^\s*case\b[^\n]*\n", text, re.I | re.M):
+        if mm.end() <= end.start():
+            start = mm.end()
+    if start is None:
+        raise Refused(f"refusing: no `case` before `end as {alias}`")
+    body = text[start : end.start()]
+    whens = [mm.start() for mm in _WHEN.finditer(body)]
+    if not whens:
+        raise Refused(f"refusing: no `when` arm in the `case … end as {alias}`")
+    els = _ELSE.search(body)
+    tail = els.start() if els else len(body)
+    bounds = whens + [tail]
+    arms = [body[a:b] for a, b in zip(bounds, bounds[1:], strict=False)]
+    return start, end.start(), arms, body[tail:]
+
+
+def _apply_sql(m: Mutation, tree: Path) -> str:
+    path = tree / m.file
+    if tree.resolve() not in path.resolve().parents:
+        raise Refused(f"refusing: {path.name} resolves outside the worktree")
+    text = path.read_text()
+    start, end, arms, rest = sql_arms(text, m.func)
+    idx = [int(x) for x in m.arg.split(",")]
+    for i in idx:
+        if i > len(arms):
+            raise Refused(f"refusing: {m.op}:{m.arg} — the case has {len(arms)} arms")
+    if m.op == "drop-arm":
+        line = text[: start + sum(len(a) for a in arms[: idx[0] - 1])].count("\n") + 1
+        del arms[idx[0] - 1]
+    else:
+        i, j = idx
+        if i == j:
+            raise Refused("refusing: swap-arms needs two different arms")
+        line = (
+            text[: start + sum(len(a) for a in arms[: min(i, j) - 1])].count("\n") + 1
+        )
+        arms[i - 1], arms[j - 1] = arms[j - 1], arms[i - 1]
+    path.write_text(text[:start] + "".join(arms) + rest + text[end:])
+    return f"{m.file}:{line}"
+
+
 def apply(m: Mutation, tree: Path) -> str:
     """Apply `m` inside worktree `tree`; return `file:line` of the edit."""
+    if m.op in SQL_OPERATORS:
+        code, _ = run(["git", "ls-files", "--error-unmatch", "--", m.file], tree)
+        if code != 0:
+            raise Refused(f"refusing: {m.file} is not a tracked file")
+        return _apply_sql(m, tree)
     if m.op == "delete-call":
         pred = _calls(m.func)
         hits: list[str] = []

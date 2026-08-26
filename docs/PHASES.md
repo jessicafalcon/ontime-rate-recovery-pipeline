@@ -92,6 +92,19 @@ scores labels vs truth.
 ≥ the pin; `unattributed` share ≤ `UNATTRIBUTED_MAX`; every label is exactly
 one of the five (accepted-values test).
 
+**Delivered** (`phase-3-attribution`, spec `specs/phase-3-attribution.md`):
+as planned, plus the skew gate as its own precedence rule (§2.5 rule 2 — a
+skewed prompt's backend-stamped response otherwise labels `on_time`), the
+three-clock signal read off `capture_started`/`upload_*`, `cohort_id` =
+the prompt's own with an equality singular test, `expected/` produced under
+`data/out/` by `make attribution-golden WRITE=yes` and frozen only by `make
+freeze` (seed self-check scoped to generator keys; freeze refuses a missing
+manifest file), `make eval` (label accuracy, the only truth reader), and the
+dbt SQL mutation operators `drop-arm` / `swap-arms`. tiny: 140 labels,
+accuracy 1.000, 75/34/17/8/6, unattributed share 0.043; 13 unit tests, 3
+singular tests; vars `skew_max_min` 5, `delivery_grace_min` 10,
+`unattributed_max` 0.10.
+
 ---
 
 ## Phase 4 — On-time marts and metric definitions
