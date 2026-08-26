@@ -323,7 +323,7 @@ make review-gate SPEC=specs/phase-5-send-time.md && make dbt-build PROFILE=tiny 
 5. **Band, circle, tie.** Every served time is within `max_user_shift_min`
    (circular) of its cohort moment (dbt singular test); a user opening at
    23:00 and 01:00 is centred at 00:30, never 12:30; a two-way tie for the
-   cohort window resolves to the smaller opened hour. *Evidence: row 5.*
+   cohort window resolves to the smallest opened hour. *Evidence: row 5.*
 6. **Truth isolation and conventions.** `dbt/models/features` and
    `dbt/models/scores` never mention truth; no clock call, no `%`/`::`/
    dialect form inline, five macros, every model described and tested; the

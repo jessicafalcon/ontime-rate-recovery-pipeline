@@ -16,7 +16,7 @@
 -- The cohort moment is the local hour h, over the cohort's OPENED bins (an
 -- optimal window can always start at one), whose window [h, h + window_minutes)
 -- (circular; window_minutes from the cohort's prompts) holds the most pooled
--- opens — ties to the smaller opened hour (order by mass desc, hour asc). The served
+-- opens — ties to the smallest opened hour (order by mass desc, hour asc). The served
 -- time is the posterior centre clamped to ±max_user_shift_min of that moment.
 -- Circular arithmetic is ANSI: x − 24·floor(x/24) wraps, and
 -- d − 24·floor((d + 12)/24) is the signed short-arc difference in (−12, 12].

@@ -224,7 +224,7 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   k·R̄_c·(cos μ_c, sin μ_c)`, `confidence = |combined| / (n + k)` — zero
   opens give `μ_c` and `R̄_c` exactly; `cohort_hour_local` = the hour whose
   `[h, h + window_minutes)` holds the most pooled opens (`h` over opened
-  bins), ties → smaller opened hour;
+  bins), ties → smallest opened hour;
   the served `send_hour_local:send_minute_local` is the centre clamped to
   `±max_user_shift_min` of it. Circular arithmetic is ANSI `floor`/`atan2`
   — no `%` (denylisted), no `mod` on floats, no sixth macro.
