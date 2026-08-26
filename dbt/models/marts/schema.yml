@@ -1,0 +1,160 @@
+version: 2
+
+models:
+  - name: ontime_rate_daily
+    description: >
+      One row per cohort × local prompt date. Every column is defined once in
+      docs/METRICS.md (§ ontime_rate_daily); this file links, never restates.
+      The partition and key identities are singular tests
+      (assert_cohort_day_partition, assert_cohort_day_key_unique).
+    columns:
+      - name: cohort_id
+        description: The prompt's own cohort (attribution.cohort_id).
+        data_tests: [not_null]
+      - name: prompt_date
+        description: docs/METRICS.md § prompt_date — the LOCAL date of sent_at.
+        data_tests: [not_null]
+      - name: prompts_sent
+        description: docs/METRICS.md § prompts_sent.
+        data_tests: [not_null]
+      - name: prompts_delivered
+        description: docs/METRICS.md § prompts_delivered — THE denominator.
+        data_tests: [not_null]
+      - name: on_time
+        description: docs/METRICS.md § label counts.
+        data_tests: [not_null]
+      - name: upload_fault
+        description: docs/METRICS.md § label counts.
+        data_tests: [not_null]
+      - name: timing_gap
+        description: docs/METRICS.md § label counts.
+        data_tests: [not_null]
+      - name: unattributed
+        description: docs/METRICS.md § label counts.
+        data_tests: [not_null]
+      - name: delivery_fault
+        description: docs/METRICS.md § label counts — counted beside the denominator, never inside it.
+        data_tests: [not_null]
+      - name: ontime_rate
+        description: docs/METRICS.md § ontime_rate — NULL only when prompts_delivered = 0.
+
+  - name: ontime_retention
+    description: >
+      One row per user; descriptive only — the retention gap in synthetic data
+      is a designed property, never a finding (ARCHITECTURE §7). Defined once
+      in docs/METRICS.md (§ ontime_retention).
+    columns:
+      - name: user_id
+        data_tests: [unique, not_null]
+      - name: anchor_date
+        description: docs/METRICS.md § ontime_retention — the user's first local prompt date.
+        data_tests: [not_null]
+      - name: observed_through
+        description: docs/METRICS.md § ontime_retention — the data-derived horizon, never the clock.
+        data_tests: [not_null]
+      - name: prompts_delivered
+        data_tests: [not_null]
+      - name: on_time
+        data_tests: [not_null]
+      - name: ontime_rate
+        description: docs/METRICS.md § ontime_retention — the user's rate inside the retention window.
+      - name: retained
+        description: docs/METRICS.md § retained — NULL until the window closes; on tiny every row.
+
+unit_tests:
+  - name: ontime_rate_daily_five_labels_one_day
+    description: >
+      Invariant 1: all five labels on one cohort-day — the four delivered ones
+      sum to prompts_delivered (4), delivery_fault is counted beside it and
+      completes prompts_sent (5); the rate is 1/4.
+    model: ontime_rate_daily
+    given:
+      - input: ref('attribution')
+        format: sql
+        rows: |
+          select 'u-1' as user_id, 'c-morning' as cohort_id, timestamp '2026-01-05 08:00:00' as sent_at_local, 'on_time' as label, true as delivered_in_grace
+          union all select 'u-2', 'c-morning', timestamp '2026-01-05 08:00:00', 'upload_fault', true
+          union all select 'u-3', 'c-morning', timestamp '2026-01-05 08:00:00', 'timing_gap', true
+          union all select 'u-4', 'c-morning', timestamp '2026-01-05 08:00:00', 'unattributed', true
+          union all select 'u-5', 'c-morning', timestamp '2026-01-05 08:00:00', 'delivery_fault', false
+    expect:
+      rows:
+        - {cohort_id: c-morning, prompt_date: 2026-01-05, prompts_sent: 5, prompts_delivered: 4, on_time: 1, upload_fault: 1, timing_gap: 1, unattributed: 1, delivery_fault: 1, ontime_rate: 0.25}
+  - name: ontime_rate_daily_zero_on_time_is_zero
+    description: >
+      Invariant 3: delivered prompts and none on time → ontime_rate = 0, not NULL.
+    model: ontime_rate_daily
+    given:
+      - input: ref('attribution')
+        format: sql
+        rows: |
+          select 'u-1' as user_id, 'c-evening' as cohort_id, timestamp '2026-01-05 20:00:00' as sent_at_local, 'timing_gap' as label, true as delivered_in_grace
+          union all select 'u-2', 'c-evening', timestamp '2026-01-05 20:00:00', 'upload_fault', true
+    expect:
+      rows:
+        - {cohort_id: c-evening, prompt_date: 2026-01-05, prompts_sent: 2, prompts_delivered: 2, on_time: 0, ontime_rate: 0.0}
+  - name: ontime_rate_daily_nothing_delivered_is_null
+    description: >
+      Invariant 3, the other side: a delivery-fault-only day → ontime_rate NULL
+      (safe_divide's contract), every count populated.
+    model: ontime_rate_daily
+    given:
+      - input: ref('attribution')
+        format: sql
+        rows: |
+          select 'u-1' as user_id, 'c-evening' as cohort_id, timestamp '2026-01-05 20:00:00' as sent_at_local, 'delivery_fault' as label, false as delivered_in_grace
+          union all select 'u-2', 'c-evening', timestamp '2026-01-05 20:00:00', 'delivery_fault', false
+    expect:
+      rows:
+        - {cohort_id: c-evening, prompt_date: 2026-01-05, prompts_sent: 2, prompts_delivered: 0, on_time: 0, delivery_fault: 2, ontime_rate: null}
+  - name: ontime_rate_daily_prompt_date_is_local
+    description: >
+      Invariant 4: a Tokyo 08:00 prompt sent at 23:00 UTC the day before lands
+      on the LOCAL date (2026-01-05), not the UTC one.
+    model: ontime_rate_daily
+    given:
+      - input: ref('attribution')
+        format: sql
+        rows: |
+          select 'u-1' as user_id, 'c-morning' as cohort_id, timestamp '2026-01-04 23:00:00' as sent_at, timestamp '2026-01-05 08:00:00' as sent_at_local, 'on_time' as label, true as delivered_in_grace
+    expect:
+      rows:
+        - {cohort_id: c-morning, prompt_date: 2026-01-05, prompts_sent: 1, on_time: 1, ontime_rate: 1.0}
+  - name: ontime_rate_daily_counts_prompts_not_user_days
+    description: >
+      Invariant 2: one user with two delivered prompts on one day counts 2, never 1.
+    model: ontime_rate_daily
+    given:
+      - input: ref('attribution')
+        format: sql
+        rows: |
+          select 'u-1' as user_id, 'c-morning' as cohort_id, timestamp '2026-01-05 08:00:00' as sent_at_local, 'on_time' as label, true as delivered_in_grace
+          union all select 'u-1', 'c-morning', timestamp '2026-01-05 08:30:00', 'timing_gap', true
+    expect:
+      rows:
+        - {cohort_id: c-morning, prompt_date: 2026-01-05, prompts_sent: 2, prompts_delivered: 2, on_time: 1, ontime_rate: 0.5}
+  - name: ontime_retention_three_states
+    description: >
+      Invariant 7 at retention_days = 28. u-a (anchor 01-01) opens on 01-29 = day 28 → retained;
+      u-b (anchor 01-01) never opens and the horizon (01-29) closes its window → churned;
+      u-c (anchor 01-05) closes on 02-02, past the horizon → NULL. u-a's rate counts only
+      the prompt inside the window (its 01-30 prompt is day 29, excluded).
+    model: ontime_retention
+    given:
+      - input: ref('attribution')
+        format: sql
+        rows: |
+          select 'u-a' as user_id, timestamp '2026-01-01 08:00:00' as sent_at_local, 'on_time' as label, true as delivered_in_grace
+          union all select 'u-a', timestamp '2026-01-30 08:00:00', 'timing_gap', true
+          union all select 'u-b', timestamp '2026-01-01 08:00:00', 'timing_gap', true
+          union all select 'u-c', timestamp '2026-01-05 08:00:00', 'on_time', true
+      - input: ref('stg_events')
+        format: sql
+        rows: |
+          select 'u-a' as user_id, 'app_opened' as event_type, timestamp '2026-01-29 09:00:00' as client_event_time_local
+          union all select 'u-b', 'app_opened', timestamp '2026-01-27 09:00:00'
+    expect:
+      rows:
+        - {user_id: u-a, anchor_date: 2026-01-01, observed_through: 2026-01-29, prompts_delivered: 1, on_time: 1, ontime_rate: 1.0, retained: true}
+        - {user_id: u-b, anchor_date: 2026-01-01, observed_through: 2026-01-29, prompts_delivered: 1, on_time: 0, ontime_rate: 0.0, retained: false}
+        - {user_id: u-c, anchor_date: 2026-01-05, observed_through: 2026-01-29, prompts_delivered: 1, on_time: 1, ontime_rate: 1.0, retained: null}
