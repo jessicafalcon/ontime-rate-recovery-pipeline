@@ -115,6 +115,35 @@ def test_no_default_dispatch_body() -> None:
         assert f"default__{name}" not in (DBT / "macros" / f"{name}.sql").read_text()
 
 
+def test_partition_overwrite_is_delete_and_insert_on_duckdb() -> None:
+    """Phase 7 (closes the BACKLOG row): the DuckDB body is delete-AND-insert (the
+    name's promise), and the custom incremental strategy routes through the one
+    dispatched seam — no second dispatch macro, so the count stays five."""
+    text = (DBT / "macros" / "partition_overwrite.sql").read_text()
+    body = re.search(
+        r"{% macro duckdb__partition_overwrite\(.*?%}(.*?){% endmacro %}", text, re.S
+    ).group(1)
+    assert "delete from" in body
+    assert "insert into" in body and "select" in body
+    # the strategy macro is plumbing that CALLS the dispatched macro, not a sixth
+    assert "get_incremental_partition_overwrite_sql" in text
+    assert "partition_overwrite(" in text
+    assert text.count("adapter.dispatch('partition_overwrite', 'ontime')") == 1
+
+
+def test_incremental_models_use_the_partition_overwrite_strategy() -> None:
+    """The three event-level models are incremental on the one strategy; the
+    marts/features/scores stay table (they aggregate the full inputs)."""
+    incr = {"stg_events", "stg_prompts", "attribution"}
+    for p in (DBT / "models").rglob("*.sql"):
+        text = p.read_text()
+        if p.stem in incr:
+            assert "materialized='incremental'" in text, p.stem
+            assert "incremental_strategy='partition_overwrite'" in text, p.stem
+        else:
+            assert "materialized='incremental'" not in text, p.stem
+
+
 def test_session_zone_is_pinned_in_profile_and_macro() -> None:
     """Belt and braces for invariant 3: the profile pins the session zone and
     the macro pins its input as UTC (ARCHITECTURE §8: timezone() direction)."""

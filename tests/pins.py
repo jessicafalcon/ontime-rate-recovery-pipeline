@@ -115,3 +115,19 @@ POWER_TABLE = [
     ("medium", 2, 9775, 11),
     ("medium", 5, 1565, 2),
 ]
+
+# fixtures/tiny — Phase 7 (incrementality and late arrival). Read off the first
+# green two-landing build; the horizon is data-derived (max(server_upload_time)).
+LOOKBACK_DAYS = 5  # == dbt var lookback_days; lookback_days * 24 (120 h) > the
+# late_arrival_max_hours of every profile (tiny 48 h, medium 72 h)
+LATE_FILE_TINY = "2026-01-13"  # the upload date the late arrivals land on
+LANDING_SPLIT_TINY = "2026-01-12"  # bulk landing <= this, then the late tail
+# After the full landing (horizon 2026-01-13): final = prompt_date <= 2026-01-08
+# (2026-01-05 .. 08), the four closed local send dates; the rest provisional.
+FINAL_PROMPTS_TINY = 80
+PROVISIONAL_PROMPTS_TINY = STG_PROMPT_ROWS - FINAL_PROMPTS_TINY  # 60
+# After the bulk landing alone (horizon 2026-01-12): final = prompt_date <= 07.
+LANDING1_FINAL_PROMPTS_TINY = 60
+# The one tiny duplicate whose copies land on different upload dates (2026-01-05,
+# 2026-01-06): the dedupe keeps the earliest upload across landings.
+STRADDLING_DUPLICATE_TINY = "e-0000259"
