@@ -19,6 +19,7 @@ SCRUB = (
     "CONFIRM",
     "PROFILE",
     "TARGET",
+    "WRITE",
     "MAKEFLAGS",
     "MFLAGS",
 )
@@ -173,3 +174,27 @@ def test_drop_db_requires_confirm_from_the_command_line() -> None:
     assert "--confirm 'yes' --confirm-origin 'environment'" in out
     out = _make_n("drop-db", {"PROFILE": "tiny"}, {})
     assert "--confirm '' --confirm-origin 'file'" in out
+
+
+# ------------------------------------------------- Phase 3: attribution-golden, eval
+
+
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_golden_and_eval_pass_profile_as_one_literal(value: str) -> None:
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for target, cmd in (("attribution-golden", "golden"), ("eval", "score")):
+        for origin in ("cmdline", "env"):
+            kv = {"PROFILE": value, "WRITE": value}
+            out = _make_n(
+                target, kv if origin == "cmdline" else {}, kv if origin == "env" else {}
+            )
+            assert f"eval.cli {cmd} {quoted}" in out, (target, origin, out)
+            if target == "attribution-golden":
+                assert (
+                    f"--write {quoted}" in out
+                )  # env-exported WRITE reaches Python (stated residual)
+            assert "pwned" not in out.replace(value, "")
+    out = _make_n("attribution-golden", {"PROFILE": "tiny"}, {})
+    assert "eval.cli golden 'tiny' --write ''" in out

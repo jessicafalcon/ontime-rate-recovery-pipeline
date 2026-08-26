@@ -15,3 +15,21 @@ STG_NEGATIVE_DELAY_ROWS = 24  # client clock ahead (the skew injector); min −5
 STG_DELAY_RANGE_SECONDS = (-5155, 22090)
 RAW_UPLOAD_ERROR_CODE_NULLS = 190  # upload_started/completed carry error_code: null
 STG_UPLOAD_ERROR_CODE_NULLS = 180  # the same after dedupe (10 copies were duplicates)
+
+# fixtures/tiny — Phase 3 (attribution). Read off the first green build; the
+# truth counts are the generator's assigned causes (eval is the only reader).
+ATTRIBUTION_ROWS = STG_PROMPT_ROWS  # exactly one label per prompt
+TRUTH_LABEL_COUNTS = {
+    "on_time": 75,
+    "upload_fault": 8,
+    "delivery_fault": 17,
+    "timing_gap": 34,
+    "unattributed": 6,
+}
+ATTRIBUTION_LABEL_COUNTS = TRUTH_LABEL_COUNTS  # every label recovered on tiny
+LABEL_ACCURACY = 1.0  # `make eval PROFILE=tiny`; a drift is a red test
+UNATTRIBUTED_SHARE = 6 / 140  # 0.043 < var unattributed_max (0.10)
+SKEW_MAX_MIN = 5  # == generator/models.py::SKEW_MAX_MIN == dbt var skew_max_min
+# The Phase 1 manifest lines (raw/dims/truth) — the Phase 3 re-freeze added
+# expected/attribution.csv and moved none of these.
+PHASE1_MANIFEST_LINES = 13

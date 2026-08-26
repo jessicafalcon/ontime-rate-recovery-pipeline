@@ -45,7 +45,7 @@ _TICK = re.compile(r"`([^`\n]*)`")
 # (file relative to repo root, token that must be present) — guards, targets and
 # source phrases the docs name by identity. Add a row when a doc cites a symbol.
 TRACES: list[tuple[str, str]] = [
-    ("Makefile", "unexport SPEC BASE DELETED CONFIRM PROFILE TARGET"),
+    ("Makefile", "unexport SPEC BASE DELETED CONFIRM PROFILE TARGET WRITE"),
     ("scripts/review_common.py", "resolve_spec"),
     ("scripts/mutate.py", "OPERATORS"),
     ("scripts/review_gate.py", "check_fixtures"),
@@ -56,6 +56,8 @@ TRACES: list[tuple[str, str]] = [
     ("scripts/gen_dbt_sources.py", "column_tests"),
     ("dbt/macros/to_local_time.sql", "duckdb__to_local_time"),
     ("tests/test_dbt_conventions.py", "test_exactly_five_dispatch_macros"),
+    ("scripts/mutate.py", "SQL_OPERATORS"),
+    ("generator/cli.py", "missing_from_output"),
 ]
 
 

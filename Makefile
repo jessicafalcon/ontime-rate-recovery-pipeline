@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
-# (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); …
+# (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -12,7 +12,7 @@
 # environment is `$(origin VAR)`; every future CONFIRM knob tests
 # `$(origin CONFIRM)` = `command line` inside its recipe (spec threat model,
 # corrected in review round 1; pinned by tests/test_makefile.py).
-unexport SPEC BASE DELETED CONFIRM PROFILE TARGET
+unexport SPEC BASE DELETED CONFIRM PROFILE TARGET WRITE
 _Q = '$(subst ','\'',$(1))'
 
 setup:
@@ -90,3 +90,17 @@ drop-db:
 # (scripts/gen_dbt_sources.py). tests/test_dbt_sources.py fails on a hand edit.
 gen-sources:
 	uv run python scripts/gen_dbt_sources.py
+
+# ------------------------------------------------------------------ Phase 3
+# The golden (eval/cli.py golden): the built attribution table vs
+# fixtures/<PROFILE>/expected/attribution.csv, sorted by prompt_id; exit 1 on
+# any differing row. WRITE=yes (the literal only) writes data/out/<PROFILE>/
+# expected/attribution.csv instead — never fixtures/ (`make freeze` is the
+# only writer there). Needs `make dbt-build PROFILE=<p>` first.
+attribution-golden:
+	uv run python -m eval.cli golden $(call _Q,$(value PROFILE)) --write $(call _Q,$(value WRITE))
+
+# Label accuracy vs fixtures/<PROFILE>/truth/prompts.jsonl (eval/cli.py score —
+# the ONLY truth reader); exit 1 below tests/pins.py::LABEL_ACCURACY.
+eval:
+	uv run python -m eval.cli score $(call _Q,$(value PROFILE))

@@ -106,6 +106,9 @@ SINGULAR = {
     "assert_every_event_matches_one_dim_row.sql": "ref('stg_events')",
     "assert_dim_user_key_unique.sql": "source('raw', 'dim_user')",
     "assert_error_code_only_on_upload_failed.sql": "ref('stg_events')",
+    "assert_one_label_per_prompt.sql": "ref('attribution')",
+    "assert_unattributed_share_bounded.sql": "ref('attribution')",
+    "assert_prompt_cohort_matches_dim.sql": "ref('stg_prompts')",
 }
 
 
@@ -132,8 +135,22 @@ def test_no_dbt_packages() -> None:
 
 
 def test_every_model_has_description_and_a_test() -> None:
-    schema = (DBT / "models" / "staging" / "schema.yml").read_text()
-    for model in (p.stem for p in (DBT / "models" / "staging").glob("*.sql")):
-        block = schema.split(f"- name: {model}\n", 1)[1]
-        assert "description:" in block.split("\n  - name:", 1)[0], model
-        assert "data_tests:" in block.split("\n  - name:", 1)[0], model
+    for folder in ("staging", "attribution"):
+        schema = (DBT / "models" / folder / "schema.yml").read_text()
+        for model in (p.stem for p in (DBT / "models" / folder).glob("*.sql")):
+            block = schema.split(f"- name: {model}\n", 1)[1]
+            assert "description:" in block.split("\n  - name:", 1)[0], model
+            assert "data_tests:" in block.split("\n  - name:", 1)[0], model
+
+
+def test_schema_label_values_equal_the_contract() -> None:
+    """The five-label set (CLAUDE.md label contract): schema.yml's accepted
+    values == generator Cause == eval LABELS. A sixth anywhere is a BLOCKER."""
+    from eval.score import LABELS
+    from generator.models import Cause
+
+    schema = (DBT / "models" / "attribution" / "schema.yml").read_text()
+    m = re.search(r"values: \[([^\]]+)\]", schema)
+    assert m
+    listed = [v.strip() for v in m.group(1).split(",")]
+    assert listed == [c.value for c in Cause] == list(LABELS)

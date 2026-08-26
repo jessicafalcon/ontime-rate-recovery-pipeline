@@ -1,6 +1,6 @@
 # The dbt project (CLAUDE.md → Repo map). One project, two targets
 # (dbt/profiles.yml: duckdb, bigquery). Every var has a default here and is
-# named in the spec that introduced it — Phase 2 introduces none.
+# named in the spec that introduced it — Phase 3 introduces the three below.
 name: ontime
 version: "0.1.0"
 profile: ontime
@@ -17,8 +17,19 @@ test-paths: ["tests"]
 target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
+# Phase 3 (specs/phase-3-attribution.md). skew_max_min equals
+# generator/models.py::SKEW_MAX_MIN (equality-tested); only a NEGATIVE upload
+# delay past it is skew (ARCHITECTURE §8).
+vars:
+  skew_max_min: 5
+  delivery_grace_min: 10
+  unattributed_max: 0.10
+
 models:
   ontime:
     staging:
       +materialized: table
       +schema: staging
+    attribution:
+      +materialized: table
+      +schema: attribution

@@ -53,7 +53,7 @@ def seed(name: str) -> int:
     files = manifest.compute(out)
     frozen = FIXTURES / name / manifest.NAME
     if frozen.exists():
-        drift = manifest.diff(out, frozen)
+        drift = generated_drift(out, frozen)
         if drift:
             print(
                 f"seed DRIFT: {len(drift)} files differ from {frozen.relative_to(ROOT)}"
@@ -67,6 +67,36 @@ def seed(name: str) -> int:
     return 0
 
 
+GENERATED = ("raw/", "dims/", "truth/")  # what `seed` writes; expected/ is not
+
+
+def generated_keys(m: dict[str, str]) -> dict[str, str]:
+    """The manifest entries the generator is responsible for. `expected/`
+    (Phase 3, written by attribution-golden) is in the manifest but not in a
+    seed's output, so seed's self-check must not report it missing."""
+    return {k: v for k, v in m.items() if k.startswith(GENERATED)}
+
+
+def generated_drift(out: Path, frozen: Path) -> list[str]:
+    have = generated_keys(manifest.compute(out))
+    want = generated_keys(manifest.parse(frozen.read_text()))
+    return [
+        f"{k}: "
+        + ("missing" if k not in have else "extra" if k not in want else "changed")
+        for k in sorted(set(have) | set(want))
+        if have.get(k) != want.get(k)
+    ]
+
+
+def missing_from_output(out: Path, frozen: Path) -> list[str]:
+    """Manifest-listed files absent from data/out/<p>/ — a freeze would silently
+    drop them from the fixture (e.g. expected/ after a bare `seed`)."""
+    if not frozen.exists():
+        return []
+    have = manifest.compute(out)
+    return sorted(k for k in manifest.parse(frozen.read_text()) if k not in have)
+
+
 def freeze(name: str, confirm: str, origin: str) -> int:
     try:
         profiles.load(name)
@@ -78,6 +108,12 @@ def freeze(name: str, confirm: str, origin: str) -> int:
     if not src.is_dir():
         die(f"freeze: refused — run `make seed PROFILE={name}` first (no {src})")
     dst = FIXTURES / name
+    missing = missing_from_output(src, dst / manifest.NAME)
+    if missing:
+        die(
+            f"freeze: refused — {src.relative_to(ROOT)} lacks {len(missing)} file(s) "
+            f"the current manifest lists: {', '.join(missing)}"
+        )
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
