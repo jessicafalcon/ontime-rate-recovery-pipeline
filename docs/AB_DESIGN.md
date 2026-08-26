@@ -11,6 +11,10 @@ baseline rates (never edit inside the markers).
 Sending the daily prompt at the model's schedule (`scores_send_time`,
 cohort band + bounded per-user shift) raises the on-time rate per delivered
 prompt versus the current fixed cohort hour, without raising opt-outs.
+The simulation (`RESULTS.md`, medium) says the lift comes from the
+per-user shift, not the band move alone (`cohort` arm 0.457732 vs baseline
+0.460920; `recommended` 0.623291) — so the treatment is the full served
+schedule, and a band-only arm is not worth a slot.
 
 ## Randomisation unit: user, within cohort
 
@@ -71,7 +75,9 @@ longer. One prompt per user-day; the delivered share is the profile's
 `prompts_delivered / prompts_sent`. Two-sided α = 0.05, power = 0.8, the
 two-proportion normal approximation (`eval/power.py`; users per arm =
 `(z₁₋α/₂ + z₁₋β)² · (p₁(1−p₁) + p₂(1−p₂)) / (p₂ − p₁)²`). `days` assumes
-half the profile's users in each arm.
+half the profile's users in each arm. The `tiny` rows (20 users →
+thousands of days) are the `POWER_TABLE` regression pin, not a plan; read
+the `medium` rows for scale.
 
 <!-- power:begin -->
 | profile | baseline ontime_rate | MDE (pp) | delivered prompts per arm | days at half the users per arm |
