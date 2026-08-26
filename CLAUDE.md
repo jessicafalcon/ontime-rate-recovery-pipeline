@@ -437,6 +437,6 @@ PROFILE=tiny` → 140 rows, 0 differ against the frozen
 `fixtures/tiny/expected/attribution.csv`; `make eval PROFILE=tiny` → accuracy
 1.000 (75/34/17/8/6 = truth). The mutation sweep now drops and swaps SQL
 `case` arms. Next: review rounds, then Phase 4 (marts).
-Open BACKLOG rows: **6**.
+Open BACKLOG rows: **7**.
 
 (Update this section at the end of every working day.)
