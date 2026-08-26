@@ -187,7 +187,13 @@ never by the wall clock.
   posterior centre — the column `eval` scores MAE against; never served),
   `confidence`, `model_version`, `computed_as_of` (= max `client_event_time`
   of the opens in the feature window — data-derived, never `now()`). Every
-  column is defined once in `METRICS.md` § scores_send_time.
+  column is defined once in `METRICS.md` § scores_send_time. **The table is
+  the served schedule, not an eval scratchpad**: `center_hour_local` and
+  `cohort_hour_local` are the two diagnostic columns (Phase 5, DECISIONS);
+  any further one is a design change with its own entry, and the write-back
+  carries only §2.9's columns. Downstream readers (Phase 6's simulation,
+  Phase 8's write-back) consume the clamped `send_hour_local` /
+  `send_minute_local`, never the unclamped centre.
 
 **The model is a dbt model.** Versioned, unit-tested, runs on both warehouses.
 Python is reserved for `eval/`.

@@ -168,8 +168,11 @@ unit tests, 1 singular test; `%` joined the dialect denylist.
 ## Phase 6 — Counterfactual simulation and A/B spec ⭐ checkpoint
 
 **Goal.** `eval/simulate.py`: re-run the generator's response function under
-the recommended schedule (seeded); report simulated on-time rate vs baseline,
-by cause. `docs/AB_DESIGN.md`: randomization unit, persistent holdout, power
+the recommended schedule (seeded) — the SERVED `scores_send_time.
+send_hour_local` / `send_minute_local`, never the unclamped
+`center_hour_local` (Phase 5 exit audit; an invariant with a test); `medium`
+is unfrozen, so `simulate` resolves `data/out/medium/` the way `eval` does.
+Report simulated on-time rate vs baseline, by cause. `docs/AB_DESIGN.md`: randomization unit, persistent holdout, power
 calculation, primary metric, guardrails, jitter. `docs/RESULTS.md` generated
 block.
 
