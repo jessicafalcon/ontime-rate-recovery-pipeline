@@ -364,17 +364,25 @@ eval/simulate.py::cause_of                 invert-guard
 eval/simulate.py::ontime_rate              constant-return:0.0
 eval/simulate.py::ontime_rate              invert-guard
 eval/simulate.py::render_block             swap-sort-key
+eval/blocks.py::find_block                 invert-guard
 eval/blocks.py::replace_block              invert-guard
 eval/blocks.py::write_block                delete-call
 eval/cli.py::simulate_cmd                  invert-guard
 eval/power.py::sample_size_per_arm         constant-return:1
+eval/power.py::days_to_power               constant-return:1
 eval/power.py::z_quantile                  constant-return:0.0
 eval/power.py::z_quantile                  invert-guard
 ```
 
-Equivalent-mutant exclusions, named up front (each verified once at
-implementation on a scratch copy of the block; the verdicts are recorded
-in Implementation notes):
+Equivalent-mutant exclusions, named up front and verified once at
+implementation on a scratch copy of the block (2026-08-26): the three
+unaddressable lines were REFUSED by the operator as predicted
+(`simulate_arm swap-sort-key`, `read_prompts swap-sort-key` — "no
+multi-key sorted()"; `built_labels delete-call` — "no statement-level
+call"); the two lines first listed as covered-by-another-pin
+(`find_block invert-guard`, `days_to_power constant-return:1`) were
+KILLED, so they are real mutants and were promoted into the block above
+(13 → 15 lines, all KILLED):
 
 - `cause_of` has four guards; `invert-guard` addresses only the first
   (delivery). The skew, response and upload guards are pinned by
@@ -385,13 +393,27 @@ in Implementation notes):
   pre-sorted by the single key `prompt_id` in `read_prompts` (a one-element
   key `swap-sort-key` cannot address; the uniform-to-prompt pairing is
   pinned by `SIMULATED_TINY`), arms are iterated in the `ARMS` tuple.
-- `find_block` shares `replace_block`'s missing-marker guard; one
-  `invert-guard` line covers the write path.
-- `days_to_power` is one `ceil` of a ratio — `constant-return` on
-  `sample_size_per_arm` already moves every row it feeds; a separate line
-  would kill through the same pin.
 - `eval/score.py::built_labels` is the Phase 3 reader — its `delete-call`
   would be refused (called as a value); the `data` row's pin covers it.
+
+## Implementation notes (2026-08-26)
+
+- `make mutate`: 13/13 KILLED on the drafted block; the exclusion scratch
+  run refused three lines and killed two, which joined the block (15/15).
+- `built_schedule` connects without `read_only` — dbt's in-process handle
+  holds the file in write mode during the suite and a read-only connect
+  raises (`score.py` had the same note); the planted-centre test
+  `checkpoint`s before copying the built DB, or the copy lacks the schema
+  (the build sits in the WAL).
+- tiny's lift is negative (0.516667 vs 0.550000): the `c-morning` band
+  anchor is hour 3 (the bin-3/bin-10 tie of Phase 5) while the data was
+  sent at 8. Recorded in the block's prose, DECISIONS and CLAUDE.md; medium
+  is the proof (+0.162371).
+- The `simulate` block names the seed by its pin (`tests/pins.py::
+  SIMULATE_SEED`), not by value, so a re-seed changes counts, not prose.
+- Six of medium's 60,000 baseline prompts sit at odd hours (tz-change
+  days); the simulated arms use the schedule hour (the reconciliation's
+  stated assumption).
 
 ## Pinned decisions (do not re-litigate)
 
