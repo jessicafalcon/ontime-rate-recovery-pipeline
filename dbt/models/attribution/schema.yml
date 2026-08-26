@@ -40,6 +40,9 @@ unit_tests:
     description: >
       Rule 1: a prompt with no prompt_delivered receipt is a delivery_fault.
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -48,7 +51,7 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: delivery_fault, delivered_in_grace: false}
@@ -56,6 +59,9 @@ unit_tests:
     description: >
       Rule 1, the grace edge: a receipt 11 min after send (> delivery_grace_min = 10) is a delivery_fault even though delivered_at is populated; a receipt at exactly 10 min is in grace (and, with no other evidence, a timing_gap).
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -65,8 +71,8 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-2-s' as insert_id, 'prompt_sent' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-2-s' as insert_id, 'prompt_sent' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: delivery_fault, delivered_in_grace: false}
@@ -75,6 +81,9 @@ unit_tests:
     description: >
       Rule 2 and invariant 3: skew is a client clock AHEAD of the server past skew_max_min (5 min). p-1 has one capture with delay −301 s → unattributed although its response is on time; p-2 at exactly −300 s is not skew; p-3's +100000 s delay is an upload delay, never skew.
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -85,15 +94,15 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:15:01' as client_event_time, timestamp '2026-01-05 08:10:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:15:01', timestamp '2026-01-05 08:10:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds
-          union all select 'p-2-s' as insert_id, 'prompt_sent' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-2-c' as insert_id, 'capture_started' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:15:00' as client_event_time, timestamp '2026-01-05 08:10:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:15:00', timestamp '2026-01-05 08:10:00') as bigint) as upload_delay_seconds
-          union all select 'p-2-r' as insert_id, 'response_recorded' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds
-          union all select 'p-3-s' as insert_id, 'prompt_sent' as event_type, 'p-3' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-3-c' as insert_id, 'capture_started' as event_type, 'p-3' as prompt_id, timestamp '2026-01-05 08:10:00' as client_event_time, timestamp '2026-01-06 11:56:40' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:10:00', timestamp '2026-01-06 11:56:40') as bigint) as upload_delay_seconds
-          union all select 'p-3-r' as insert_id, 'response_recorded' as event_type, 'p-3' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:15:01' as client_event_time, timestamp '2026-01-05 08:10:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:15:01', timestamp '2026-01-05 08:10:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-2-s' as insert_id, 'prompt_sent' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-2-c' as insert_id, 'capture_started' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:15:00' as client_event_time, timestamp '2026-01-05 08:10:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:15:00', timestamp '2026-01-05 08:10:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-2-r' as insert_id, 'response_recorded' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-3-s' as insert_id, 'prompt_sent' as event_type, 'p-3' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-3-c' as insert_id, 'capture_started' as event_type, 'p-3' as prompt_id, timestamp '2026-01-05 08:10:00' as client_event_time, timestamp '2026-01-06 11:56:40' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:10:00', timestamp '2026-01-06 11:56:40') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-3-r' as insert_id, 'response_recorded' as event_type, 'p-3' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: unattributed, min_upload_delay_seconds: -301}
@@ -103,6 +112,9 @@ unit_tests:
     description: >
       Rule 3: a response whose client and received clocks are both inside [sent_at, sent_at + window_minutes).
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -111,9 +123,9 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:10:00' as client_event_time, timestamp '2026-01-05 08:10:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:10:00', timestamp '2026-01-05 08:10:05') as bigint) as upload_delay_seconds
-          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:10:00' as client_event_time, timestamp '2026-01-05 08:10:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:10:00', timestamp '2026-01-05 08:10:05') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: on_time, response_on_time: true}
@@ -121,6 +133,9 @@ unit_tests:
     description: >
       Rule 4a: the three-clock signal — a capture with client time inside the window (08:20) received after it (10:00), then a backend-stamped response, is an upload_fault; the window end is exclusive (received at exactly 09:00:00 is outside).
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -130,12 +145,12 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 10:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 10:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 10:00:30' as client_event_time, timestamp '2026-01-05 10:00:30' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 10:00:30', timestamp '2026-01-05 10:00:30') as bigint) as upload_delay_seconds
-          union all select 'p-2-s' as insert_id, 'prompt_sent' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-2-c' as insert_id, 'capture_started' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 09:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 09:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-2-r' as insert_id, 'response_recorded' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 09:00:30' as client_event_time, timestamp '2026-01-05 09:00:30' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 09:00:30', timestamp '2026-01-05 09:00:30') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 10:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 10:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 10:00:30' as client_event_time, timestamp '2026-01-05 10:00:30' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 10:00:30', timestamp '2026-01-05 10:00:30') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-2-s' as insert_id, 'prompt_sent' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-2-c' as insert_id, 'capture_started' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 09:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 09:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-2-r' as insert_id, 'response_recorded' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 09:00:30' as client_event_time, timestamp '2026-01-05 09:00:30' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 09:00:30', timestamp '2026-01-05 09:00:30') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: upload_fault, captured_in_window_received_late: true}
@@ -144,6 +159,9 @@ unit_tests:
     description: >
       Rule 4b: an upload_failed chain with no response_recorded is an upload_fault.
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -152,10 +170,10 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:10:00' as client_event_time, timestamp '2026-01-05 08:10:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:10:00', timestamp '2026-01-05 08:10:05') as bigint) as upload_delay_seconds
-          union all select 'p-1-u1' as insert_id, 'upload_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:12:00' as client_event_time, timestamp '2026-01-05 08:12:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:12:00', timestamp '2026-01-05 08:12:05') as bigint) as upload_delay_seconds
-          union all select 'p-1-f1' as insert_id, 'upload_failed' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:13:00' as client_event_time, timestamp '2026-01-05 08:13:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:13:00', timestamp '2026-01-05 08:13:05') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:10:00' as client_event_time, timestamp '2026-01-05 08:10:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:10:00', timestamp '2026-01-05 08:10:05') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-u1' as insert_id, 'upload_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:12:00' as client_event_time, timestamp '2026-01-05 08:12:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:12:00', timestamp '2026-01-05 08:12:05') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-f1' as insert_id, 'upload_failed' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:13:00' as client_event_time, timestamp '2026-01-05 08:13:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:13:00', timestamp '2026-01-05 08:13:05') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: upload_fault, has_upload_failed: true, has_response: false}
@@ -163,6 +181,9 @@ unit_tests:
     description: >
       Rule 5: delivered in grace, no capture_started or response_recorded inside the window, no upload event — a prompt_opened alone is not action (delivery + no-action evidence alone, DECISIONS Phase 1).
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -172,9 +193,9 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-o' as insert_id, 'prompt_opened' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:05:00' as client_event_time, timestamp '2026-01-05 08:05:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:05:00', timestamp '2026-01-05 08:05:05') as bigint) as upload_delay_seconds
-          union all select 'p-2-s' as insert_id, 'prompt_sent' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-o' as insert_id, 'prompt_opened' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:05:00' as client_event_time, timestamp '2026-01-05 08:05:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:05:00', timestamp '2026-01-05 08:05:05') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-2-s' as insert_id, 'prompt_sent' as event_type, 'p-2' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: timing_gap}
@@ -183,6 +204,9 @@ unit_tests:
     description: >
       The else arm: contradictory evidence — a capture_started with no upload event and no response — is unattributed, never guessed.
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -191,8 +215,8 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:10:00' as client_event_time, timestamp '2026-01-05 08:10:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:10:00', timestamp '2026-01-05 08:10:05') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:10:00' as client_event_time, timestamp '2026-01-05 08:10:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:10:00', timestamp '2026-01-05 08:10:05') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: unattributed, has_capture_in_window: true, has_upload_event: false}
@@ -200,6 +224,9 @@ unit_tests:
     description: >
       Overlap 1–2/3: no receipt, yet an on-time response AND a skewed capture — the receipt is server-stamped, so delivery_fault wins.
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -208,9 +235,9 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:15:01' as client_event_time, timestamp '2026-01-05 08:10:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:15:01', timestamp '2026-01-05 08:10:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:15:01' as client_event_time, timestamp '2026-01-05 08:10:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:15:01', timestamp '2026-01-05 08:10:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: delivery_fault}
@@ -218,6 +245,9 @@ unit_tests:
     description: >
       Overlap 2–3: an on-time response with one client-side event 10 min ahead of the server — the clock evidence is untrusted, unattributed wins.
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -226,9 +256,9 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:10:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:10:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-c' as insert_id, 'capture_started' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:10:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:10:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: unattributed, response_on_time: true}
@@ -236,6 +266,9 @@ unit_tests:
     description: >
       Overlap 3–4: an upload_failed followed by an on-time response — on_time wins.
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -244,9 +277,9 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-f1' as insert_id, 'upload_failed' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:12:00' as client_event_time, timestamp '2026-01-05 08:12:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:12:00', timestamp '2026-01-05 08:12:05') as bigint) as upload_delay_seconds
-          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-f1' as insert_id, 'upload_failed' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:12:00' as client_event_time, timestamp '2026-01-05 08:12:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:12:00', timestamp '2026-01-05 08:12:05') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-r' as insert_id, 'response_recorded' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:20:00' as client_event_time, timestamp '2026-01-05 08:20:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:20:00', timestamp '2026-01-05 08:20:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: on_time, has_upload_failed: true}
@@ -254,6 +287,9 @@ unit_tests:
     description: >
       Overlap 4–5: an upload_failed with no capture inside the window and no response — an upload chain is action, so upload_fault wins over timing_gap.
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -262,8 +298,8 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
-          union all select 'p-1-f1' as insert_id, 'upload_failed' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:12:00' as client_event_time, timestamp '2026-01-05 08:12:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:12:00', timestamp '2026-01-05 08:12:05') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
+          union all select 'p-1-f1' as insert_id, 'upload_failed' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:12:00' as client_event_time, timestamp '2026-01-05 08:12:05' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:12:00', timestamp '2026-01-05 08:12:05') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, label: upload_fault}
@@ -271,6 +307,9 @@ unit_tests:
     description: >
       Invariant 10: attribution.cohort_id is the prompt_sent event's cohort, not dim_user's (they differ here; the singular test forbids that on real data).
     model: attribution
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_prompts')
         format: sql
@@ -279,7 +318,7 @@ unit_tests:
       - input: ref('stg_events')
         format: sql
         rows: |
-          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds
+          select 'p-1-s' as insert_id, 'prompt_sent' as event_type, 'p-1' as prompt_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:00' as server_received_time, cast(date_diff('second', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:00') as bigint) as upload_delay_seconds, cast(null as timestamp) as server_upload_time
     expect:
       rows:
         - {prompt_id: p-1, cohort_id: c-evening}

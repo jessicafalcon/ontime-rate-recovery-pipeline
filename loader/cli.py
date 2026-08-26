@@ -17,6 +17,7 @@ from typing import NoReturn
 from loader import load as loader
 
 NAME_RE = re.compile(r"^[a-z0-9_]+$")
+THROUGH_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # an upload date; a subset of [0-9-]+
 DBT_DIR = loader.ROOT / "dbt"
 
 
@@ -31,8 +32,17 @@ def validate_name(kind: str, value: str) -> str:
     return value
 
 
-def load(profile: str) -> int:
+def validate_through(value: str) -> str:
+    """A landing cut-off is an upload date; it filters file names already under
+    fixtures/<p>/raw/ and never becomes a path (Phase 7 threat model)."""
+    if not THROUGH_RE.match(value):
+        die(f"THROUGH: refused — THROUGH must be an upload date YYYY-MM-DD, got {value!r}")
+    return value
+
+
+def load(profile: str, through: str = "") -> int:
     validate_name("PROFILE", profile)
+    cut = validate_through(through) if through else None
     try:
         source = loader.fixture_dir(profile)
         drift = loader.manifest_drift(source)
@@ -41,7 +51,7 @@ def load(profile: str) -> int:
             for d in drift[:20]:
                 print(f"    {d}")
             return 1
-        files, events, dims = loader.load(profile)
+        files, events, dims = loader.load(profile, through=cut)
     except FileNotFoundError as e:
         die(f"load: refused — {e}")
     except loader.ConflictingDuplicates as e:
@@ -52,16 +62,39 @@ def load(profile: str) -> int:
         )
         return 1
     tag = "" if source.parent.name == "fixtures" else " (unfrozen)"
+    landing = f", landing ≤ {cut}" if cut else ""
     print(f"load: source={source.relative_to(loader.ROOT)}{tag}")
-    print(f"load OK: {profile} — {files} files, {events} event rows, {dims} dim rows")
+    print(
+        f"load OK: {profile} — {files} files{landing}, "
+        f"{events} event rows, {dims} dim rows"
+    )
     return 0
 
 
 LOCAL_TARGET = "duckdb"
 
 
-def dbt_build(profile: str, target: str, confirm: str = "", origin: str = "") -> int:
+def full_refresh_args(full: str, origin: str) -> list[str]:
+    """['--full-refresh'] only when FULL=yes comes from the command line — a
+    rebuild-from-scratch of the incremental tables (Phase 7). An env FULL is
+    ignored (the $(origin) gate), so a stray one leaves a normal incremental
+    build, visible in the console."""
+    if full == "yes" and origin == "command line":
+        return ["--full-refresh"]
+    return []
+
+
+def dbt_build(
+    profile: str,
+    target: str,
+    confirm: str = "",
+    origin: str = "",
+    full: str = "",
+    full_origin: str = "",
+) -> int:
     validate_name("PROFILE", profile)
+    if full and full != "yes":
+        die(f"dbt-build: refused — FULL takes only the literal 'yes', got {full!r}")
     target = target or LOCAL_TARGET
     validate_name("TARGET", target)
     if target != LOCAL_TARGET and (origin != "command line" or confirm != "yes"):
@@ -85,6 +118,7 @@ def dbt_build(profile: str, target: str, confirm: str = "", origin: str = "") ->
             "--target",
             target,
         ]
+        + full_refresh_args(full, full_origin)
     )
     if not res.success:
         print(f"dbt-build FAIL: {profile}/{target}")
@@ -113,21 +147,27 @@ def drop_db(profile: str, confirm: str, origin: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("load").add_argument("profile")
+    ld = sub.add_parser("load")
+    ld.add_argument("profile")
+    ld.add_argument("--through", default="")
     b = sub.add_parser("dbt-build")
     b.add_argument("profile")
     b.add_argument("--target", default="")
     b.add_argument("--confirm", default="")
     b.add_argument("--confirm-origin", default="")
+    b.add_argument("--full", default="")
+    b.add_argument("--full-origin", default="")
     d = sub.add_parser("drop-db")
     d.add_argument("profile")
     d.add_argument("--confirm", default="")
     d.add_argument("--confirm-origin", default="")
     a = ap.parse_args(argv)
     if a.cmd == "load":
-        return load(a.profile)
+        return load(a.profile, a.through)
     if a.cmd == "dbt-build":
-        return dbt_build(a.profile, a.target, a.confirm, a.confirm_origin)
+        return dbt_build(
+            a.profile, a.target, a.confirm, a.confirm_origin, a.full, a.full_origin
+        )
     return drop_db(a.profile, a.confirm, a.confirm_origin)
 
 

@@ -51,9 +51,13 @@ def test_no_clock_call_in_any_model_or_macro(tmp_path: Path) -> None:
 
 # Dialect functions that must not appear inline in a MODEL (they belong to a
 # dispatch macro body or to an ANSI rewrite). Unit-test fixtures in schema.yml
-# may type their rows with them; macros are the seam by definition.
+# may type their rows with them; macros are the seam by definition. The `%`
+# alternative is SQL modulo (Phase 5 denylist); it excludes a `%` adjacent to a
+# Jinja brace (`{% … %}`), which Phase 7's incremental blocks use — that is a
+# statement delimiter, not modulo.
 DIALECT = re.compile(
-    r"(\bbool_or\b|\blogical_or\b|\bdate_diff\b|\btimezone\(|->>|::|%)", re.I
+    r"(\bbool_or\b|\blogical_or\b|\bdate_diff\b|\btimezone\(|->>|::|(?<!\{)%(?!\}))",
+    re.I,
 )
 
 

@@ -20,7 +20,12 @@ clean-targets: ["target", "dbt_packages"]
 # Phase 3 (specs/phase-3-attribution.md). skew_max_min equals
 # generator/models.py::SKEW_MAX_MIN (equality-tested); only a NEGATIVE upload
 # delay past it is skew (ARCHITECTURE §8). Phase 5 adds the send-time model's
-# hyper-parameters (specs/phase-5-send-time.md).
+# hyper-parameters (specs/phase-5-send-time.md). Phase 7 adds lookback_days
+# (specs/phase-7-incremental.md): the reprocessing lookback for the event-level
+# incremental models, data-derived horizon = max(server_upload_time); a partition
+# is `final` once it is >= lookback_days behind it. Pinned identity, lookback_days
+# * 24 > late_arrival_max_hours on every profile (medium's 72 h is the floor), so
+# a late event never lands on a closed partition.
 vars:
   skew_max_min: 5
   delivery_grace_min: 10
@@ -30,6 +35,7 @@ vars:
   max_user_shift_min: 120
   shrinkage_pseudo_count: 5
   model_version: v1
+  lookback_days: 5
 
 models:
   ontime:

@@ -69,6 +69,9 @@ unit_tests:
       both server clocks but differing in client_event_time (e-3) — exactly
       one row per id, the earliest on each key in turn (invariant 1).
     model: stg_events
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: source('raw', 'events')
         format: sql
@@ -94,6 +97,9 @@ unit_tests:
       an event on each side of the change converts under its own row,
       and the open row (valid_to null) is unbounded (spec invariant 2).
     model: stg_events
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: source('raw', 'events')
         format: sql
@@ -113,6 +119,9 @@ unit_tests:
         - {insert_id: e-3, tz: Europe/London, client_event_time_local: "2027-06-01 13:00:00"}
   - name: stg_events_json_null_error_code_is_sql_null
     model: stg_events
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: source('raw', 'events')
         format: sql
@@ -130,6 +139,9 @@ unit_tests:
   - name: stg_events_upload_delay_sign
     description: received − client in seconds; a client clock ahead of the server gives a NEGATIVE delay (the Phase 3 skew signal, ARCHITECTURE §8).
     model: stg_events
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: source('raw', 'events')
         format: sql
@@ -147,6 +159,9 @@ unit_tests:
   - name: stg_prompts_takes_first_delivery_receipt
     description: Three receipts for one prompt — two TIE on the earliest client_event_time and the lower insert_id wins (e-2 over e-3); a later receipt (e-4) loses on time; a prompt with no receipt keeps a null delivered_at.
     model: stg_prompts
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_events')
         format: sql
