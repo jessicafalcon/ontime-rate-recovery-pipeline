@@ -20,6 +20,8 @@ SCRUB = (
     "PROFILE",
     "TARGET",
     "WRITE",
+    "THROUGH",
+    "FULL",
     "MAKEFLAGS",
     "MFLAGS",
 )
@@ -165,6 +167,34 @@ def test_load_and_dbt_build_pass_profile_and_target_as_one_literal(value: str):
         "dbt-build", {"PROFILE": "tiny", "TARGET": "bigquery", "CONFIRM": "yes"}, {}
     )
     assert "--confirm 'yes' --confirm-origin 'command line'" in out
+
+
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_load_passes_through_as_one_literal(value: str) -> None:
+    """Phase 7: THROUGH reaches Python as one single-quoted token from either
+    origin; Python validates it as an upload date and never derives a path."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for origin in ("cmdline", "env"):
+        out = _make_n(
+            "load",
+            {"THROUGH": value} if origin == "cmdline" else {"PROFILE": "tiny"},
+            {"THROUGH": value} if origin == "env" else {},
+        )
+        assert f"--through {quoted}" in out, (origin, out)
+        assert "pwned" not in out.replace(value, "")
+
+
+def test_dbt_build_full_refresh_from_command_line_only() -> None:
+    """Phase 7: the recipe passes $(origin FULL) verbatim; Python adds
+    --full-refresh only for FULL=yes from the command line."""
+    out = _make_n("dbt-build", {"PROFILE": "tiny", "FULL": "yes"}, {})
+    assert "--full 'yes' --full-origin 'command line'" in out
+    out = _make_n("dbt-build", {"PROFILE": "tiny"}, {"FULL": "yes"})
+    assert "--full 'yes' --full-origin 'environment'" in out
+    out = _make_n("dbt-build", {"PROFILE": "tiny"}, {})
+    assert "--full '' --full-origin 'file'" in out
 
 
 def test_drop_db_requires_confirm_from_the_command_line() -> None:

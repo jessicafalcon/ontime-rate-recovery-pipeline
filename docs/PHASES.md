@@ -212,6 +212,24 @@ reprocessing behind one partition-overwrite macro (both dialects);
 arrivals) converges to the same attribution as a single landing; running the
 second landing twice is a no-op; a `final` label never changes.
 
+**Delivered** (`phase-7-incremental`, spec `specs/phase-7-incremental.md`): as
+planned. `stg_events` (partition `event_date`), `stg_prompts` and `attribution`
+(partition `prompt_date`) are incremental via a custom `partition_overwrite`
+strategy (the delete-and-insert seam completed and the BACKLOG row closed);
+`features`/`scores`/`marts` stay table. The horizon is data-derived
+`max(server_upload_time)` (no clock), the reprocess window is
+`timestamp_diff('day', partition, horizon) <= lookback_days` and `final` is
+`>= lookback_days` (var `lookback_days: 5`; pinned identity `lookback_days · 24 >
+late_arrival_max_hours` on every profile). `attribution` gains a `status`
+(`provisional`/`final`) column kept out of the golden export, so
+`fixtures/tiny/` did not move (no re-freeze). A landing is a raw-table state:
+`make load … [THROUGH=<date>]` lands a file subset, `make dbt-build …
+[FULL=yes]` rebuilds from scratch (`$(origin)`-gated). Two landings converge to
+one (all three table hashes and the frozen `attribution.csv`), landing 2 twice
+is a no-op, no `final` label changes, a duplicate straddling a landing dedupes
+to one, and every Phase 3–6 number is byte-identical. tiny: 80 final / 60
+provisional after the full landing.
+
 ---
 
 ## Phase 8 — Local orchestration ⭐ checkpoint

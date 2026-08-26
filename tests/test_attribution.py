@@ -79,6 +79,7 @@ def test_skew_var_equals_generator_pin() -> None:
         "max_user_shift_min",
         "shrinkage_pseudo_count",
         "model_version",
+        "lookback_days",  # Phase 7
     }
 
 

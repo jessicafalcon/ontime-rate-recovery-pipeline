@@ -35,6 +35,52 @@ def test_load_twice_gives_the_same_row_count(tmp_path: Path) -> None:
     assert loader.load("tiny", db) == loader.load("tiny", db)
 
 
+def test_through_loads_only_files_on_or_before(tmp_path: Path) -> None:
+    """Phase 7: THROUGH filters landing files by upload date (a landing is the
+    raw-table state); None loads them all."""
+    kept = loader.event_files(TINY, through=pins.LANDING_SPLIT_TINY)
+    assert [f.name for f in kept] == [
+        f"events_{d}.jsonl"
+        for d in (
+            "2026-01-04",
+            "2026-01-05",
+            "2026-01-06",
+            "2026-01-07",
+            "2026-01-08",
+            "2026-01-09",
+            "2026-01-10",
+            "2026-01-11",
+            "2026-01-12",
+        )
+    ]
+    assert loader.event_files(TINY, through="2025-12-31") == []  # before every file
+    assert loader.event_files(TINY, through=None) == loader.event_files(TINY)
+    n_files, _, _ = loader.load(
+        "tiny", tmp_path / "t.duckdb", through=pins.LANDING_SPLIT_TINY
+    )
+    assert n_files == pins.RAW_FILES - 1  # the late file (01-13) is not landed
+
+
+def test_load_refuses_bad_through() -> None:
+    """THROUGH must be an upload date and never becomes a path."""
+    for bad in ("../x", 'a"; b', "2026-1-1", "13", "yesterday"):
+        with pytest.raises(SystemExit) as e:
+            cli.load("tiny", bad)
+        assert e.value.code == 2
+
+
+def test_full_refresh_only_on_command_line_yes() -> None:
+    """FULL=yes adds --full-refresh only from the command line; an env FULL is
+    ignored; a non-yes value is refused."""
+    assert cli.full_refresh_args("yes", "command line") == ["--full-refresh"]
+    assert cli.full_refresh_args("yes", "environment") == []
+    assert cli.full_refresh_args("", "command line") == []
+    assert cli.full_refresh_args("no", "command line") == []
+    with pytest.raises(SystemExit) as e:  # a non-empty non-yes FULL is refused
+        cli.dbt_build("tiny", "duckdb", full='"; rm', full_origin="command line")
+    assert e.value.code == 2
+
+
 def test_empty_valid_to_loads_as_null(tmp_path: Path) -> None:
     loader.load("tiny", tmp_path / "t.duckdb")
     con = duckdb.connect(str(tmp_path / "t.duckdb"))

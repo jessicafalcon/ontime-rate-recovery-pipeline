@@ -12,7 +12,7 @@
 # environment is `$(origin VAR)`; every future CONFIRM knob tests
 # `$(origin CONFIRM)` = `command line` inside its recipe (spec threat model,
 # corrected in review round 1; pinned by tests/test_makefile.py).
-unexport SPEC BASE DELETED CONFIRM PROFILE TARGET WRITE
+unexport SPEC BASE DELETED CONFIRM PROFILE TARGET WRITE THROUGH FULL
 _Q = '$(subst ','\'',$(1))'
 
 setup:
@@ -70,16 +70,21 @@ freeze:
 
 # ------------------------------------------------------------------ Phase 2
 # Raw landing (loader/cli.py): validates PROFILE, loads fixtures/<PROFILE>/{raw,dims}
-# into data/<PROFILE>.duckdb schema `raw`. Idempotent (tables recreated).
+# into data/<PROFILE>.duckdb schema `raw`. Idempotent (tables recreated). THROUGH
+# (an upload date YYYY-MM-DD) lands only the files uploaded on or before it — a
+# landing is the raw-table state (Phase 7); empty loads them all.
 load:
-	uv run python -m loader.cli load $(call _Q,$(value PROFILE))
+	uv run python -m loader.cli load $(call _Q,$(value PROFILE)) --through $(call _Q,$(value THROUGH))
 
-# load, then `dbt build` (sources tests → staging models → their tests) against
-# data/<PROFILE>.duckdb. TARGET selects the dbt target (default duckdb); any
-# other target is a cloud-cost command and needs CONFIRM=yes from the COMMAND
-# LINE ($(origin CONFIRM)). Both names validated in Python before any path.
+# load, then `dbt build` (sources tests → staging → attribution → their tests)
+# against data/<PROFILE>.duckdb. The event-level models are incremental with a
+# LOOKBACK_DAYS reprocessing window (Phase 7). TARGET selects the dbt target
+# (default duckdb); any other is a cloud-cost command needing CONFIRM=yes from
+# the COMMAND LINE ($(origin CONFIRM)). FULL=yes from the COMMAND LINE
+# ($(origin FULL)) passes --full-refresh (rebuild-from-scratch). Names validated
+# in Python before any path.
 dbt-build:
-	uv run python -m loader.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
+	uv run python -m loader.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --full $(call _Q,$(value FULL)) --full-origin '$(origin FULL)'
 
 # Deletes data/<PROFILE>.duckdb and its .wal (gitignored; `make load` recreates it). The only
 # deleter this phase adds: CONFIRM=yes must have COMMAND-LINE origin.

@@ -17,6 +17,18 @@
 -- existence flags are max(case … 1 else 0 end) = 1 — ANSI on both dialects
 -- (the boolean aggregate is DuckDB/Postgres-only; a dialect call belongs behind a macro or not
 -- in a model: tests/test_dbt_conventions.py).
+--
+-- Incremental (Phase 7) on prompt_date (moved upstream from the mart). status is
+-- `final` once the partition is >= lookback_days behind the data-derived horizon
+-- (max(server_upload_time)), else `provisional`; a final label never changes
+-- (§2.5) because a closed partition is out of the reprocessing window.
+
+{{ config(
+    materialized='incremental',
+    incremental_strategy='partition_overwrite',
+    partition_by='prompt_date',
+    unique_key='prompt_id',
+) }}
 
 with prompts as (
 
@@ -99,6 +111,7 @@ labelled as (
         p.window_minutes,
         p.sent_at,
         p.sent_at_local,
+        cast(p.sent_at_local as date) as prompt_date,
         p.delivered_at,
         p.delivered_at is not null
         and {{ timestamp_diff('second', 'p.sent_at', 'p.delivered_at') }}
@@ -116,32 +129,51 @@ labelled as (
     left join evidence as v
         on v.prompt_id = p.prompt_id
 
+),
+
+attributed as (
+
+    select
+        prompt_id,
+        user_id,
+        cohort_id,
+        tz,
+        window_minutes,
+        sent_at,
+        sent_at_local,
+        prompt_date,
+        delivered_at,
+        delivered_in_grace,
+        min_upload_delay_seconds,
+        response_on_time,
+        captured_in_window_received_late,
+        has_response,
+        has_response_in_window,
+        has_capture_in_window,
+        has_upload_failed,
+        has_upload_event,
+        case
+            when not delivered_in_grace then 'delivery_fault'
+            when min_upload_delay_seconds < -{{ var('skew_max_min') }} * 60 then 'unattributed'
+            when response_on_time then 'on_time'
+            when (has_response and captured_in_window_received_late) or (has_upload_failed and not has_response) then 'upload_fault'
+            when not has_capture_in_window and not has_response_in_window and not has_upload_event then 'timing_gap'
+            else 'unattributed'
+        end as label
+    from labelled
+
 )
 
+{% set horizon = "(select cast(max(server_upload_time) as date) from " ~ ref('stg_events') ~ ")" %}
+
 select
-    prompt_id,
-    user_id,
-    cohort_id,
-    tz,
-    window_minutes,
-    sent_at,
-    sent_at_local,
-    delivered_at,
-    delivered_in_grace,
-    min_upload_delay_seconds,
-    response_on_time,
-    captured_in_window_received_late,
-    has_response,
-    has_response_in_window,
-    has_capture_in_window,
-    has_upload_failed,
-    has_upload_event,
+    *,
     case
-        when not delivered_in_grace then 'delivery_fault'
-        when min_upload_delay_seconds < -{{ var('skew_max_min') }} * 60 then 'unattributed'
-        when response_on_time then 'on_time'
-        when (has_response and captured_in_window_received_late) or (has_upload_failed and not has_response) then 'upload_fault'
-        when not has_capture_in_window and not has_response_in_window and not has_upload_event then 'timing_gap'
-        else 'unattributed'
-    end as label
-from labelled
+        when {{ timestamp_diff('day', 'prompt_date', horizon) }} >= {{ var('lookback_days') }} then 'final'
+        else 'provisional'
+    end as status
+from attributed
+{% if is_incremental() %}
+-- reprocess only partitions inside the lookback of the landing high-water mark
+where {{ timestamp_diff('day', 'prompt_date', horizon) }} <= {{ var('lookback_days') }}
+{% endif %}

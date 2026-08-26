@@ -94,6 +94,94 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### Phase 7
+
+*Incrementality and late arrival (`phase-7-incremental`).*
+
+- **A landing is a raw-table state; the loader stays whole-table-recreate and
+  gains a `THROUGH` file filter.** `make load PROFILE=<p> [THROUGH=<date>]`
+  lands only the files uploaded on or before that date; dbt's incremental state
+  lives in the `staging`/`attribution` schemas, not in `raw`, so recreating
+  `raw` each load is harmless and "two landings" is load-subset → build, then
+  load-full → build. `THROUGH` is validated `YYYY-MM-DD` (a subset of `[0-9-]+`)
+  and only ever filters file names already under `fixtures/<p>/raw/` — it never
+  becomes a path. Rejected: a `landing_file` raw column (a column the Amplitude
+  export does not carry and `generator/models.py` does not model — a
+  `gen-sources` schema change for nothing, since the partition + upload
+  high-water mark already drive reprocessing); an append-per-file loader (dbt
+  owns the incremental state).
+- **`stg_events` (partition `event_date`), `stg_prompts` and `attribution`
+  (partition `prompt_date`) are incremental; the marts/features/scores stay
+  table.** An incremental table accumulates, so the aggregates always read the
+  full inputs and have nothing to reprocess. The dedupe `qualify` runs over the
+  WHOLE raw source before the lookback filter, and both copies of a duplicate
+  share `client_event_time` (hence the same partition), so a duplicate is never
+  split across landings; because files are keyed by `server_upload_time` date
+  and the dedupe keeps the earliest upload, the winning copy never lands later
+  than a loser (`e-0000259` on tiny, copies on 2026-01-05/06). Rejected:
+  incremental marts (nothing to reprocess in an aggregate of the full inputs).
+- **`LOOKBACK_DAYS = 5`, horizon = data-derived `max(server_upload_time)`, the
+  reprocess window is `timestamp_diff('day', partition, horizon) <= lookback_days`
+  and `final` is `>= lookback_days`.** The `<=` (not `<`) is load-bearing: a
+  partition crossing to `final` sits at distance exactly `lookback_days`, so a
+  strict `<` would never reprocess it to stamp `final` and the two-landing build
+  would leave it `provisional` while a single build marked it `final` — a
+  convergence break found on the first two-landing run. The horizon is
+  data-derived (the "no clock on the data path" rule, as `computed_as_of`
+  already is), not a `run_date` var; day arithmetic is `timestamp_diff('day', …)`
+  so no `date − int` dialect and no sixth macro enter a model. Pinned identity
+  `lookback_days · 24 > late_arrival_max_hours` (medium's 72 h is the floor, so
+  `≥ 4`; 5 gives a 48 h margin that also absorbs the local-`event_date`-vs-UTC-
+  `server_upload_time` day smear). Rejected: `run_date` (a clock); `< lookback`
+  (never finalizes the boundary partition).
+- **`partition_overwrite` completed as the single seam, in the set-based
+  subquery form, and wired as a custom incremental strategy.** `delete … where
+  <part> in (select distinct <part> from <batch>); insert … (<cols>) select
+  <cols> from <batch>` — no partition list to mis-quote (the BACKLOG row's
+  defect is removed by construction, not patched), and dbt resolves
+  `incremental_strategy='partition_overwrite'` to
+  `get_incremental_partition_overwrite_sql`, which reads the model's
+  `partition_by` and `dest_columns` and calls the one dispatched macro. The
+  strategy macro is plumbing, not an `adapter.dispatch`, so the seam stays five
+  dispatch macros; the BigQuery body still raises until Phase 9. Closes the
+  BACKLOG row "`partition_overwrite` has a DuckDB body no test renders and no
+  model calls". Rejected: the built-in `delete+insert` (deletes by `unique_key`
+  match, not by partition; and no place for the render test) / `insert_overwrite`
+  (unavailable on DuckDB 1.5.5); a sixth macro.
+- **`status` (`provisional`/`final`) is a `case` on `attribution`, kept OUT of
+  the golden export.** `eval/golden.py::ATTRIBUTION` stays the four columns
+  `prompt_id,user_id,cohort_id,label`, so `expected/attribution.csv` does not
+  move — no `Freeze:` line, no re-freeze. Pinned by the final/provisional counts
+  (tiny after the full landing: 80 final / 60 provisional; `prompt_date ≤
+  2026-01-08`) and the final-never-changes per-prompt test. To bind the status
+  horizon under `is_incremental: false`, the attribution unit-test mocks of
+  `stg_events` gained a `server_upload_time` column (null → horizon null →
+  `provisional`, which the label-only `expect` rows ignore). Rejected: `status`
+  in the golden (a re-freeze for a column derivable from `prompt_date` and the
+  horizon).
+- **`prompt_date` lives on `attribution` for partitioning; the mart keeps its
+  own `cast(sent_at_local as date)`.** The spec's "moved upstream from the mart"
+  is satisfied for the purpose that needed it (the partition key); the mart is
+  left recomputing the identical local date so its report golden stays trivially
+  byte-identical and its `ontime_rate_daily_prompt_date_is_local` derivation
+  unit test keeps its meaning (moving it upstream would hollow the test into "the
+  mart reads a column" and churn six mart mocks). The expression is the same
+  deterministic cast on the same column; each model stays self-contained for its
+  own unit tests. Rejected: the mart reading `attribution.prompt_date` (lower
+  value, higher churn, against the "downstream unchanged" central constraint).
+- **`make dbt-build … [FULL=yes]` passes `--full-refresh`, `$(origin)`-gated.**
+  A full rebuild-from-scratch of the incremental tables (drops-and-recreates
+  them), so `FULL=yes` counts only from the command line (the `CONFIRM` shape);
+  an env `FULL=yes` is ignored and leaves a normal incremental build, visible in
+  the console. It is the path that reproduces `main` (the first incremental run
+  is a full build). Rejected: a separate `--full-refresh` target (one build
+  entry point, one validated knob).
+- **The dialect `%` denylist excludes a `%` adjacent to a Jinja brace.**
+  Phase 7's incremental models are the first to use `{% … %}` statement blocks;
+  the `%` denylist alternative is SQL modulo (Phase 5), never a Jinja delimiter,
+  so `(?<!\{)%(?!\})` keeps the `x % 24` negative control while passing the
+  blocks. Not a weakening — the test's intent is unchanged.
+
 ### Phase 6
 
 *Counterfactual simulation and A/B spec (`phase-6-simulation`).*

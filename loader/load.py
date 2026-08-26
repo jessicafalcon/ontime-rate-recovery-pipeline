@@ -77,9 +77,19 @@ def conflicting_duplicates(con: duckdb.DuckDBPyConnection) -> list[str]:
     return [r[0] for r in rows]
 
 
-def event_files(fixture: Path) -> list[Path]:
-    """Every landing file, sorted by name (= by upload date); never `days`."""
-    return sorted((fixture / "raw").glob("events_*.jsonl"))
+def _file_date(name: str) -> str:
+    """The upload date in `events_YYYY-MM-DD.jsonl` (the landing key)."""
+    return name[len("events_") : -len(".jsonl")]
+
+
+def event_files(fixture: Path, through: str | None = None) -> list[Path]:
+    """Every landing file, sorted by name (= by upload date); never `days`.
+    `through` keeps only files uploaded on or before that date — a landing is
+    the raw-table state after loading a subset (Phase 7); None loads them all."""
+    files = sorted((fixture / "raw").glob("events_*.jsonl"))
+    if through is None:
+        return files
+    return [f for f in files if _file_date(f.name) <= through]
 
 
 def connect(path: Path) -> duckdb.DuckDBPyConnection:
@@ -138,11 +148,15 @@ class ConflictingDuplicates(ValueError):
     pass
 
 
-def load(profile: str, db: Path | None = None) -> tuple[int, int, int]:
-    """(files, event rows, dim rows). Recreates `raw.*` from the fixture;
-    raises ConflictingDuplicates (tables dropped again) on a payload conflict."""
+def load(
+    profile: str, db: Path | None = None, through: str | None = None
+) -> tuple[int, int, int]:
+    """(files, event rows, dim rows). Recreates `raw.*` from the fixture (the
+    files uploaded on or before `through`, all of them when None — a landing is
+    the raw-table state, Phase 7); raises ConflictingDuplicates (tables dropped
+    again) on a payload conflict."""
     fixture = fixture_dir(profile)
-    files = event_files(fixture)
+    files = event_files(fixture, through)
     con = connect(db or db_path(profile))
     try:
         create_raw_tables(con)

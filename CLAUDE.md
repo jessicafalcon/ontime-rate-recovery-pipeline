@@ -145,18 +145,25 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   cannot drop `expected/`). `CONFIRM=yes` must have command-line origin
   (`$(origin CONFIRM)`); a re-freeze also needs a DECISIONS entry and a
   `Freeze: fixtures/<p>/MANIFEST.sha256` line in the spec
-- `make load PROFILE=<p>` — validates `[a-z0-9_]+`, loads
+- `make load PROFILE=<p> [THROUGH=<upload-date>]` — validates `[a-z0-9_]+`, loads
   `fixtures/<p>/{raw/events_*.jsonl,dims/dim_user.csv}` into `data/<p>.duckdb`
   schema `raw`; prints `load: source=…` (falls back to `data/out/<p>/`,
   marked `(unfrozen)`), verifies `MANIFEST.sha256` first when one exists
   (`load DRIFT`, exit 1); types come from the generated `loader/ddl.sql`, never
-  inferred. Idempotent: tables are recreated
-- `make dbt-build PROFILE=<p> [TARGET=duckdb] [CONFIRM=yes]` — `load`, then
-  `dbt build` (source tests → `stg_events`, `stg_prompts`, `attribution` →
+  inferred. Idempotent: tables are recreated. `THROUGH` (an upload date
+  `YYYY-MM-DD`, validated, never a path) lands only the files uploaded on or
+  before it — a landing is the raw-table state (Phase 7); empty loads them all
+- `make dbt-build PROFILE=<p> [TARGET=duckdb] [CONFIRM=yes] [FULL=yes]` — `load`,
+  then `dbt build` (source tests → `stg_events`, `stg_prompts`, `attribution` →
   data, unit and singular tests) against `data/<p>.duckdb`; prints `dbt-build OK:
-  <p>/<target>`, exit 1 on any failure. Any `TARGET` other than `duckdb` is a
-  cloud-cost command: refused unless `CONFIRM=yes` has command-line origin.
-  dbt telemetry is off (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`)
+  <p>/<target>`, exit 1 on any failure. The three event-level models are
+  incremental (Phase 7): a first run is a full build, a later run reprocesses
+  only partitions inside the `lookback_days` window of the data-derived horizon
+  (`max(server_upload_time)`) via the `partition_overwrite` strategy.
+  `FULL=yes` (command-line origin, `$(origin)`-gated) passes `--full-refresh`
+  (rebuild from scratch). Any `TARGET` other than `duckdb` is a cloud-cost
+  command: refused unless `CONFIRM=yes` has command-line origin. dbt telemetry
+  is off (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`)
 - `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` and its
   `.wal` (nothing else); `CONFIRM=yes` must have command-line origin
 - `make gen-sources` — re-renders `loader/ddl.sql` and
@@ -233,11 +240,14 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   signal lives on `capture_started`/`upload_*` (`response_recorded` is
   backend-stamped). `attribution.cohort_id` is the prompt's own
   (`prompt_cohort_id`). `provisional` until `LOOKBACK_DAYS` closes, then
-  `final` forever (Phase 7). Vars `skew_max_min` (5 = `generator/models.py`),
+  `final` forever (Phase 7: `status` column on `attribution`, out of the golden;
+  incremental partition `prompt_date` = local send date, computed on
+  `attribution`). Vars `skew_max_min` (5 = `generator/models.py`),
   `delivery_grace_min` (10), `unattributed_max` (0.10), `retention_days` (28),
-  and the send-time model's `feature_window_days` (30), `max_user_shift_min`
-  (120), `shrinkage_pseudo_count` (5), `model_version` (`v1`) in
-  `dbt_project.yml`.
+  the send-time model's `feature_window_days` (30), `max_user_shift_min`
+  (120), `shrinkage_pseudo_count` (5), `model_version` (`v1`), and the
+  incremental `lookback_days` (5 — Phase 7; `lookback_days·24 >
+  late_arrival_max_hours` on every profile) in `dbt_project.yml`.
 - Send-time model (Phase 5, `docs/METRICS.md` § scores_send_time):
   `features_user_hour` counts ORGANIC `app_opened` only (responses are
   exposure-biased), per `user_id` on each event's own local hour — a
@@ -525,15 +535,20 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 6 implemented, in review (`phase-6-simulation`).** Phases 0–5 merged
-(PRs #1, #2, #4, #5, #6, #7), round-tag fix merged (PR #3). `make simulate
-PROFILE=medium` (seeded, unfrozen) → recommended on-time 0.623291 vs
-baseline 0.460920 (+0.162371; `timing_gap` −10,216; `delivery_fault` and
-`unattributed` unchanged by construction), block matches; `make simulate
-PROFILE=tiny` → block matches (tiny's lift is negative — the `c-morning`
-bin-3/10 tie, 20 users: a regression pin, not a proof); `make power` → 6
-rows, block matches. No dbt, generator or fixture change; tiny manifest
-still 16 lines. Next: review rounds, then Phase 7 (incrementality).
-Open BACKLOG rows: **10**.
+**Phase 7 implemented, in review (`phase-7-incremental`).** Phases 0–6 merged
+(PRs #1–#8, round-tag fix #3). `stg_events`/`stg_prompts`/`attribution` are
+incremental via the `partition_overwrite` custom strategy (delete-and-insert
+seam completed, BACKLOG row closed); horizon = data-derived
+`max(server_upload_time)`, reprocess window `<= lookback_days` (5), `final` at
+`>= lookback_days`; `attribution` gains `status` (`provisional`/`final`) out of
+the golden. `make load … [THROUGH=<date>]` lands a file subset, `make dbt-build
+… [FULL=yes]` rebuilds. Two landings converge to one (all three table hashes +
+frozen `attribution.csv`), landing 2 twice is a no-op, no `final` label changes,
+the straddling duplicate `e-0000259` dedupes; every Phase 3–6 gate byte-
+identical (report 0.609756, eval MAE 0.816201/0.352354, simulate +0.162371,
+power 6 rows). `make mutate` 5/5. tiny 80 final / 60 provisional; `fixtures/tiny/`
+untouched (no re-freeze). Review round 1: 4 findings (1 staging-boundary test
+gap, 1 test strengthening, 1 record, 1 accepted THROUGH-calendar row) — fixed /
+accepted. Next: Phase 8 (orchestration). Open BACKLOG rows: **10**.
 
 (Update this section at the end of every working day.)

@@ -152,11 +152,16 @@ null policy, pinning test); the marts' `schema.yml` links there.
 
 Upload-fault events arrive hours or days after the prompt — the events the
 project is about. Every event-level model is incremental with a **reprocessing
-lookback window** of `LOOKBACK_DAYS` (spec-pinned, 3–7) partitioned by
-`prompt_date`: BigQuery `insert_overwrite`, DuckDB delete-and-insert per
-partition, both behind one macro. Running the lookback twice over the same raw
-converges (idempotent). Loads are driven by the partitions a landing touched,
-never by the wall clock.
+lookback window** of `LOOKBACK_DAYS` (spec-pinned, 3–7; 5 in Phase 7) partitioned
+by the local event date: `prompt_date` (the local send date) for `stg_prompts`
+and `attribution`, and `event_date` (the local `client_event_time` date) for
+`stg_events`, whose `app_opened` rows carry no `prompt_id`. BigQuery
+`insert_overwrite`, DuckDB delete-and-insert per partition, both behind one
+macro. The horizon is data-derived (`max(server_upload_time)`), never the clock;
+`final` once a partition is ≥ `LOOKBACK_DAYS` behind it, and
+`LOOKBACK_DAYS · 24 > late_arrival_max_hours` keeps a late event off a closed
+partition. Running the lookback twice over the same raw converges (idempotent).
+Loads are driven by the partitions a landing touched, never by the wall clock.
 
 ### 2.8 Features and scores *(Phase 5)*
 
@@ -235,7 +240,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | component | reads | writes | may NOT |
 |---|---|---|---|
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
-| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked) | `raw.events`, `raw.dim_user` | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
+| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
 | eval | dbt outputs, truth, the profile JSON (the generator's input) | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), the marker-confined blocks of `docs/RESULTS.md` and `docs/AB_DESIGN.md` *(Phase 6; `WRITE=yes` only)* | write any table the pipeline reads; write under `fixtures/`; create or append to a doc |
 | write-back | `scores_send_time` | `send_schedule` | read truth; read raw |
@@ -339,3 +344,16 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
 - **`dbt/target/` compiles `schema.yml` into a directory named `schema.yml`**
   (Phase 2). A grep that treats every `.yml` path as a file raises
   `IsADirectoryError`; `test_truth_isolation.py` now checks `is_file()`.
+- **A model turning `table` → `incremental` (or gaining a column) needs a
+  full-refresh against a pre-existing DuckDB file** (Phase 7). The first Phase 7
+  `dbt build` on a db left by an earlier phase runs `is_incremental()` = true
+  against the old-schema table and fails — `Binder Error: Referenced column
+  "event_date" not found`. A fresh checkout / CI is unaffected (no db yet, so
+  the first run is a full build); the remedy on an existing db is `make dbt-build
+  … FULL=yes` (or `make drop-db … CONFIRM=yes`) once. dbt unit tests on an
+  incremental model must also pin `overrides: {macros: {is_incremental: false}}`
+  (dbt-core 1.12 refuses to parse them otherwise).
+- **A `%` in a Jinja `{% … %}` block trips a naive SQL-modulo denylist**
+  (Phase 7). `tests/test_dbt_conventions.py`'s dialect check flagged the
+  incremental models' statement blocks; the `%` alternative now excludes a `%`
+  adjacent to a brace (`(?<!\{)%(?!\})`), keeping the `x % 24` control.
