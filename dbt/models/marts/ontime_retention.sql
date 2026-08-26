@@ -1,7 +1,8 @@
 -- One row per user (docs/METRICS.md). Descriptive only: the retention gap in
 -- synthetic data is a designed property, never a finding (ARCHITECTURE §7).
 -- anchor_date = the user's first local prompt date; ontime_rate = the user's
--- on-time share over the prompts delivered within retention_days of the anchor;
+-- on-time share over prompts with prompt_date in [anchor, anchor + retention_days)
+-- — half-open; the close day is the first day of retained's window;
 -- observed_through = the data-derived horizon (max local event time — never the
 -- clock); retained = NULL while the horizon is before anchor + retention_days
 -- (unobservable — on tiny every row), else whether an organic app_opened falls

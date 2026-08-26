@@ -11,7 +11,9 @@ import duckdb
 RELATION = "main_marts.ontime_rate_daily"
 
 
-def overall_rate(db: Path) -> float:
+def overall_rate(db: Path) -> float | None:
+    """None when nothing was delivered — the same undefined-not-error contract
+    safe_divide gives each cohort-day (review round 1)."""
     con = duckdb.connect(str(db))
     try:
         on_time, delivered = con.execute(
@@ -19,4 +21,6 @@ def overall_rate(db: Path) -> float:
         ).fetchone()
     finally:
         con.close()
+    if not delivered:
+        return None
     return float(on_time) / float(delivered)

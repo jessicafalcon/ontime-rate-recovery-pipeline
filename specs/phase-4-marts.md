@@ -99,7 +99,7 @@ PROFILE=tiny` on `main`).
 5. **`make report` and the rate reading** — three parts.
    - *What it prints, where.* Console only (§3.1 eval row; `docs/RESULTS.md`
      is Phase 6's): one line `report OK: tiny, 14 cohort-days, 0 differ,
-     ontime_rate 0.610 (pin 0.610)` — the golden diff of `ontime_rate_daily`
+     ontime_rate 0.609756 (pin 0.609756)` — the golden diff of `ontime_rate_daily`
      against `fixtures/<p>/expected/ontime_rate_daily.csv` plus the overall
      on-time rate `sum(on_time) / sum(prompts_delivered)` over the mart
      (tiny: 75 / 123 = 0.6098), asserted against `tests/pins.py::
@@ -204,7 +204,7 @@ make review-gate SPEC=specs/phase-4-marts.md && make dbt-build PROFILE=tiny && m
   `dbt-build OK: tiny/duckdb`.
 - `make report PROFILE=tiny` — the mart vs `fixtures/tiny/expected/
   ontime_rate_daily.csv` and the overall rate vs the pin; prints `report OK:
-  tiny, 14 cohort-days, 0 differ, ontime_rate 0.610 (pin 0.610)`; exit 1 on
+  tiny, 14 cohort-days, 0 differ, ontime_rate 0.609756 (pin 0.609756)`; exit 1 on
   a differing row or a rate off the pin.
 
 ## Done-when
@@ -240,7 +240,7 @@ make review-gate SPEC=specs/phase-4-marts.md && make dbt-build PROFILE=tiny && m
 | Done-when | Proof (test file / `make` target / command output) |
 |---|---|
 | 1 | `dbt/tests/assert_cohort_day_partition.sql` (in `make dbt-build`; zero rows where either identity fails); unit test `ontime_rate_daily_five_labels_one_day` in `dbt/models/marts/schema.yml`; `tests/test_marts.py::test_partition_holds_on_every_tiny_cohort_day` (the identity recomputed from `attribution` in Python and compared row for row) |
-| 2 | `make report PROFILE=tiny` → `report OK: tiny, 14 cohort-days, 0 differ, ontime_rate 0.610 (pin 0.610)`; `tests/test_marts.py::test_daily_golden_matches_fixture` (byte-identical render); `tests/test_marts.py::test_overall_rate_matches_pin`; `tests/test_eval.py::test_report_reports_a_planted_difference` (one changed count in a tmp copy → 1 differ, exit 1); `tests/test_eval.py::test_report_fails_when_the_rate_is_off_the_pin` |
+| 2 | `make report PROFILE=tiny` → `report OK: tiny, 14 cohort-days, 0 differ, ontime_rate 0.609756 (pin 0.609756)`; `tests/test_marts.py::test_daily_golden_matches_fixture` (byte-identical render); `tests/test_marts.py::test_overall_rate_matches_pin`; `tests/test_eval.py::test_report_reports_a_planted_difference` (one changed count in a tmp copy → 1 differ, exit 1); `tests/test_eval.py::test_report_fails_when_the_rate_is_off_the_pin` |
 | 3 | unit tests `ontime_rate_daily_zero_on_time_is_zero`, `ontime_rate_daily_nothing_delivered_is_null`; `tests/test_dbt_conventions.py::test_safe_divide_is_called_by_a_model` (the macro name appears in `models/marts/`; its DuckDB body renders in the built SQL under `dbt/target/`) |
 | 4 | unit tests `ontime_rate_daily_prompt_date_is_local` (23:00 UTC / 08:00 JST → the local day), `ontime_rate_daily_counts_prompts_not_user_days` (one user, two prompts, one day → `prompts_sent = 2`); `schema.yml` `unique` on the combination of `cohort_id, prompt_date` (dbt `unique_combination`-free: a singular test `assert_cohort_day_key_unique.sql`) + `not_null` on both; `tests/test_marts.py::test_prompt_date_is_local_on_tiny` (34 rows where the UTC date differs, none misplaced) |
 | 5 | unit test `ontime_retention_three_states` (30-day synthetic input: retained / churned / unobservable); `tests/test_marts.py::test_retention_is_all_null_on_tiny` (`RETENTION_ROWS = 20`, `retained` NULL on every row, `ontime_rate` never NULL); `tests/test_marts.py::test_two_builds_give_the_same_marts`; `::test_marts_under_a_non_utc_host_zone_are_identical`; `tests/test_dbt_conventions.py::test_no_clock_call_in_any_model_or_macro` |
@@ -286,6 +286,18 @@ Equivalent-mutant exclusions, named up front:
   golden (a dropped or mis-aimed count changes a frozen row).
 - Both exclusions were run once through `make mutate` on a scratch copy of
   the block: `swap-arms:1,2` → SURVIVED, the single-arm drop → refused.
+
+## Review round 1 fixes (2026-08-25)
+
+`eval/report.py::overall_rate` returns `None` when nothing was delivered
+(the report prints `ontime_rate undefined`, exit 1) instead of raising —
+`tests/test_marts.py::test_overall_rate_is_none_when_nothing_delivered`.
+The readout is `.6f` so a pin miss shows distinct numbers. The retention
+rate window is pinned half-open, `[anchor, anchor + retention_days)`: the
+three-state unit test gained a `u-a` prompt on the close day (excluded), so
+the hand mutation `<` → `<=` on the window predicate now dies. Accepted to
+BACKLOG: the two-column sort key in `export_rows` (trigger: a `Golden` with
+`key_width > 2`).
 
 ## Pinned decisions (do not re-litigate)
 

@@ -160,8 +160,8 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   (ten columns, sorted by `(cohort_id, prompt_date)`) vs
   `fixtures/<p>/expected/ontime_rate_daily.csv` plus the overall rate
   `sum(on_time) / sum(prompts_delivered)` vs `tests/pins.py::ONTIME_RATE`;
-  prints `report OK: <p>, N cohort-days, 0 differ, ontime_rate 0.610 (pin
-  0.610)`, exit 1 on a differing row or a rate off the pin; console only
+  prints `report OK: <p>, N cohort-days, 0 differ, ontime_rate 0.609756 (pin
+  0.609756)`, exit 1 on a differing row or a rate off the pin; console only
   (`docs/RESULTS.md` is Phase 6's). `WRITE=yes` (the literal only) writes
   `data/out/<p>/expected/ontime_rate_daily.csv` instead — `make freeze` is the
   only way it reaches `fixtures/`. Needs `dbt-build` first
@@ -465,6 +465,6 @@ against the frozen `expected/ontime_rate_daily.csv`, overall rate 75 / 123 =
 `docs/METRICS.md` defines every metric once; `ontime_retention` is all-NULL on
 tiny by design (7 days < `retention_days` 28). Next: review rounds, then
 Phase 5 (send-time model).
-Open BACKLOG rows: **7**.
+Open BACKLOG rows: **8**.
 
 (Update this section at the end of every working day.)

@@ -66,6 +66,23 @@ def test_overall_rate_matches_pin(built: Path) -> None:  # noqa: F811
     assert pins.ONTIME_RATE == 75 / 123
 
 
+def test_overall_rate_is_none_when_nothing_delivered(tmp_path: Path) -> None:
+    """Review round 1: a profile whose every cohort-day is delivery-fault-only
+    has an undefined rate, never a ZeroDivisionError."""
+    import duckdb
+
+    db = tmp_path / "empty.duckdb"
+    con = duckdb.connect(str(db))
+    con.execute("create schema main_marts")
+    con.execute(
+        "create table main_marts.ontime_rate_daily as "
+        "select 'c-morning' as cohort_id, date '2026-01-05' as prompt_date, "
+        "2 as prompts_sent, 0 as prompts_delivered, 0 as on_time"
+    )
+    con.close()
+    assert report.overall_rate(db) is None
+
+
 def test_prompt_date_is_local_on_tiny(built: Path) -> None:  # noqa: F811
     """Invariant 4: 34 prompts straddle the UTC date (Tokyo mornings); every
     one is counted on its local date, and no cohort-day row is dated by UTC."""

@@ -118,7 +118,9 @@ annotated **Superseded by …** in place and never deleted.
   tiny is 7 days, so a boolean would read "all churned" — the artefact §7
   says synthetic data must not produce. NULL while the data-derived horizon
   (`max` local event time — never the clock) is before the close; true /
-  false only after. Day arithmetic is `timestamp_diff('day', …)` on
+  false only after. The user's rate covers prompts in the half-open
+  `[anchor, anchor + retention_days)`; the close day opens `retained`'s
+  window (review round 1 pinned the boundary). Day arithmetic is `timestamp_diff('day', …)` on
   midnight timestamps, so no date-add dialect (and no sixth macro) entered
   the model. Not golden-frozen (all-NULL pins nothing); row and organic-open
   counts are the pins. Rejected: a fixture-sized default (the definition

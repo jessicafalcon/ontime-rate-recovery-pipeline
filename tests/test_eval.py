@@ -132,12 +132,15 @@ def test_report_fails_when_the_rate_is_off_the_pin(built: Path, monkeypatch, cap
     monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
     assert cli.report_cmd("tiny") == 0
     assert (
-        "report OK: tiny, 14 cohort-days, 0 differ, ontime_rate 0.610 (pin 0.610)"
+        "report OK: tiny, 14 cohort-days, 0 differ, ontime_rate 0.609756 (pin 0.609756)"
         in (capsys.readouterr().out)
     )
     monkeypatch.setattr(report, "overall_rate", lambda db: pins.ONTIME_RATE + 1e-6)
     assert cli.report_cmd("tiny") == 1
-    assert "report FAIL" in capsys.readouterr().out
+    assert "ontime_rate 0.609757 (pin 0.609756)" in capsys.readouterr().out  # distinct
+    monkeypatch.setattr(report, "overall_rate", lambda db: None)
+    assert cli.report_cmd("tiny") == 1
+    assert "ontime_rate undefined (pin 0.609756)" in capsys.readouterr().out
 
 
 def test_report_write_only_on_literal_yes(

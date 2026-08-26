@@ -142,7 +142,9 @@ tiny (7 days) every `retained` is NULL, so the frozen file would pin nothing;
 Columns `anchor_date` (the user's first `prompt_date`), `observed_through`
 (the data-derived horizon — `max` local event time over `stg_events`, never
 the clock), `prompts_delivered` and `on_time` (the user's counts over prompts
-whose `prompt_date` is within `retention_days` of the anchor), and the user's
+whose `prompt_date` is in the half-open `[anchor_date, anchor_date +
+retention_days)` — day 0 … day 27; the close day is excluded because it is
+the first day of `retained`'s window, so the two windows partition), and the user's
 `ontime_rate` (`safe_divide(on_time, prompts_delivered)`, the same null
 policy as above) are the inputs to:
 

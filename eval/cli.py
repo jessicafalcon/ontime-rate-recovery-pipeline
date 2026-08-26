@@ -84,11 +84,12 @@ def report_cmd(profile: str, write: str = "") -> int:
     from tests.pins import ONTIME_RATE  # the pin lives with every other pin
 
     rate = report.overall_rate(_db(profile))
-    on_pin = abs(rate - ONTIME_RATE) < 1e-9
+    on_pin = rate is not None and abs(rate - ONTIME_RATE) < 1e-9
     verdict = "OK" if code == 0 and on_pin else "FAIL"
+    shown = "undefined" if rate is None else f"{rate:.6f}"
     print(
         f"report {verdict}: {profile}, {rows} cohort-days, {differ} differ, "
-        f"ontime_rate {rate:.3f} (pin {ONTIME_RATE:.3f})"
+        f"ontime_rate {shown} (pin {ONTIME_RATE:.6f})"
     )
     return 0 if verdict == "OK" else 1
 

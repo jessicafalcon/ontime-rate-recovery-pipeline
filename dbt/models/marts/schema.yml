@@ -138,13 +138,16 @@ unit_tests:
       Invariant 7 at retention_days = 28. u-a (anchor 01-01) opens on 01-29 = day 28 → retained;
       u-b (anchor 01-01) never opens and the horizon (01-29) closes its window → churned;
       u-c (anchor 01-05) closes on 02-02, past the horizon → NULL. u-a's rate counts only
-      the prompt inside the window (its 01-30 prompt is day 29, excluded).
+      prompts inside the half-open window [anchor, anchor + 28): its 01-29 prompt (day 28,
+      the close day — the first day of retained's window) and its 01-30 prompt (day 29)
+      are both excluded (review round 1: the < vs <= boundary).
     model: ontime_retention
     given:
       - input: ref('attribution')
         format: sql
         rows: |
           select 'u-a' as user_id, timestamp '2026-01-01 08:00:00' as sent_at_local, 'on_time' as label, true as delivered_in_grace
+          union all select 'u-a', timestamp '2026-01-29 08:00:00', 'timing_gap', true
           union all select 'u-a', timestamp '2026-01-30 08:00:00', 'timing_gap', true
           union all select 'u-b', timestamp '2026-01-01 08:00:00', 'timing_gap', true
           union all select 'u-c', timestamp '2026-01-05 08:00:00', 'on_time', true
