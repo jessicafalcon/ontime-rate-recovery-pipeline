@@ -370,6 +370,9 @@ committed consequence, the same class as `PROFILE` from the environment.
 - `provisional`/`final` status and the lookback — Phase 7 (PHASES).
 - `medium` profile golden — not frozen (PHASES Phase 1: defined, not
   committed); tiny only.
+- An exhaustive dialect guard for models — the denylist test approximates it;
+  the BigQuery build is the real check (BACKLOG "Model dialect denylist is
+  non-exhaustive", Phase 9; review round 2 accept).
 - A SQL operator beyond `case` arms (`drop-where`, predicate swaps) —
   BACKLOG row if a survivor class is found that arms cannot express.
 - Staging row-hash pins — closed by the golden (a staging content change that
