@@ -179,7 +179,7 @@ never by the wall clock.
   `SHRINKAGE_PSEUDO_COUNT` opens, the centre is the combined direction and
   `confidence` its mean resultant length (`[0, 1]`; a zero-open user gets the
   prior's exactly). Circular hour arithmetic (23:00 and 01:00 are 2 h apart)
-  in plain ANSI `floor`/`atan2`, plus integer `mod` on hour bins only — not a
+  in plain ANSI `floor`/`atan2`, plus integer `mod` on hour bins and on the minute-of-day — not a
   dispatch macro (nothing diverges).
   Ties broken by explicit key order, never by insertion order.
 - Columns: `user_id`, `cohort_id`, `send_hour_local`, `send_minute_local`,

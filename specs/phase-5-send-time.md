@@ -414,6 +414,14 @@ wider than one bin — unreachable at `window_minutes` 60 on every profile);
 accepted to BACKLOG with trigger "a profile ships `window_minutes > 60`".
 §2.8 names the integer `mod` beside `floor`/`atan2`.
 
+## Review round 2 fixes (2026-08-25)
+
+Records only: the BACKLOG table rows split by the round-1 edit repaired
+(the `order by` row has its trigger back, the argmax row lost the stray
+cell); §2.8 names both integer `mod`s (hour bins, minute-of-day); the
+`scores_send_time.sql` header carries the "opened bins" qualifier (missed
+in round 1).
+
 ## Pinned decisions (do not re-litigate)
 
 - **`features_user_hour` = one row per `(user_id, hour_local)` with
