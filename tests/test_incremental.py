@@ -93,6 +93,10 @@ def status_counts(db: Path) -> dict[str, int]:
     )
 
 
+def status_by_prompt(db: Path) -> dict[str, str]:
+    return dict(q(db, "select prompt_id, status from main_attribution.attribution"))
+
+
 @dataclass
 class TwoLanding:
     one: Path  # single whole-set build
@@ -104,6 +108,8 @@ class TwoLanding:
     landing1_status: dict[str, int]
     landing2_status: dict[str, int]
     landing2_labels: dict[str, str]
+    landing1_status_by_prompt: dict[str, str]
+    landing2_status_by_prompt: dict[str, str]
 
 
 @pytest.fixture(scope="module")
@@ -115,9 +121,11 @@ def landings(tmp_path_factory: pytest.TempPathFactory) -> TwoLanding:
     run_landing(two, through=pins.LANDING_SPLIT_TINY)  # bulk landing
     landing1_final = labels(two, "final")
     landing1_status = status_counts(two)
+    landing1_status_by_prompt = status_by_prompt(two)
     run_landing(two)  # the late tail (full set)
     landing2_status = status_counts(two)
     landing2_labels = labels(two)
+    landing2_status_by_prompt = status_by_prompt(two)
     h_two = hashes(two)
     run_landing(two)  # again — idempotence
     return TwoLanding(
@@ -130,6 +138,8 @@ def landings(tmp_path_factory: pytest.TempPathFactory) -> TwoLanding:
         landing1_status=landing1_status,
         landing2_status=landing2_status,
         landing2_labels=landing2_labels,
+        landing1_status_by_prompt=landing1_status_by_prompt,
+        landing2_status_by_prompt=landing2_status_by_prompt,
     )
 
 
@@ -177,6 +187,10 @@ def test_status_advances_provisional_to_final_only(landings: TwoLanding) -> None
         "provisional": pins.PROVISIONAL_PROMPTS_TINY,
     }
     assert landings.landing2_status["final"] >= landings.landing1_status["final"]
+    # per-prompt (not only the aggregate): no prompt goes final -> provisional
+    for prompt_id, s1 in landings.landing1_status_by_prompt.items():
+        s2 = landings.landing2_status_by_prompt[prompt_id]
+        assert not (s1 == "final" and s2 == "provisional"), prompt_id
 
 
 def test_single_landing_final_count_matches_pin(landings: TwoLanding) -> None:
@@ -296,3 +310,126 @@ def test_build_under_tokyo_is_identical(tmp_path: Path, landings: TwoLanding) ->
     )
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert hashes(db) == landings.h_one
+
+
+# --- invariant 1 at the exact lookback boundary (the `<=` vs `<` seam) ---------
+# tiny/medium can't exercise it: their late tails (48/72 h) land >= 2 days inside
+# the boundary, so the reprocess window narrowed to `<` is behaviourally
+# equivalent there. This hand-made fixture lands a late row at distance exactly
+# lookback_days (a 112 h-late delivery, still < lookback*24 = 120 h so the
+# identity holds), which `<` would drop from a closed-looking boundary partition.
+
+
+def _boundary_event(insert_id: str, event_type: str, upload: str, props: dict) -> dict:
+    client = (
+        "2026-01-05 08:00:00.000000"
+        if event_type == "prompt_sent"
+        else ("2026-01-05 08:00:05.000000")
+    )
+    return {
+        "insert_id": insert_id,
+        "event_type": event_type,
+        "user_id": "u-000001",
+        "device_id": "d-000001",
+        "client_event_time": client,
+        "server_received_time": client,
+        "server_upload_time": upload,
+        "event_properties": props,
+    }
+
+
+def _boundary_fixture(root: Path) -> None:
+    """One prompt p-2 sent 2026-01-05 (partition 2026-01-05), its prompt_delivered
+    uploaded 2026-01-10 00:00 (112 h late) — so with the whole set the horizon is
+    2026-01-10 and the partition sits at distance lookback_days (5)."""
+    fx = root / "fixtures" / "boundary"
+    (fx / "raw").mkdir(parents=True)
+    (fx / "dims").mkdir()
+    files = {
+        "events_2026-01-05.jsonl": [
+            _boundary_event(
+                "e-1",
+                "prompt_sent",
+                "2026-01-05 08:00:00.000000",
+                {"prompt_id": "p-2", "cohort_id": "c-morning", "window_minutes": 60},
+            )
+        ],
+        "events_2026-01-10.jsonl": [
+            _boundary_event(
+                "e-2",
+                "prompt_delivered",
+                "2026-01-10 00:00:00.000000",
+                {"prompt_id": "p-2"},
+            )
+        ],
+    }
+    for name, rows in files.items():
+        (fx / "raw" / name).write_text(
+            "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows)
+        )
+    (fx / "dims" / "dim_user.csv").write_text(
+        "user_id,tz,cohort_id,signup_date,valid_from,valid_to\n"
+        "u-000001,UTC,c-morning,2025-12-01,2025-12-01 00:00:00.000000,\n"
+    )
+
+
+def run_staging(db: Path, profile: str, through: str | None = None) -> None:
+    """Load `profile` and dbt-run ONLY the staging models into `db`."""
+    os.environ.setdefault("DO_NOT_TRACK", "1")
+    from dbt.cli.main import dbtRunner
+
+    loader.load(profile, db, through=through)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("OTR_DUCKDB_PATH", str(db))
+        res = dbtRunner().invoke(
+            [
+                "run",
+                "--project-dir",
+                str(DBT),
+                "--profiles-dir",
+                str(DBT),
+                "--target",
+                "duckdb",
+                "--quiet",
+                "--target-path",
+                str(db.parent / "t"),
+                "--select",
+                "stg_events",
+                "stg_prompts",
+            ]
+        )
+    assert res.success, "dbt run (staging) failed"
+
+
+def test_staging_lookback_boundary_reprocesses_a_late_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invariant 1 at the boundary: a late row whose partition is at distance
+    exactly lookback_days must be reprocessed — the window is `<= lookback_days`,
+    not `<`. Falsifies stg_events/stg_prompts narrowed to `<`."""
+    root = tmp_path / "repo"
+    _boundary_fixture(root)
+    monkeypatch.setattr(loader, "ROOT", root)
+    monkeypatch.setattr(loader, "DATA", root / "data")
+
+    one = tmp_path / "one.duckdb"
+    run_staging(one, "boundary")  # whole set: horizon 2026-01-10, distance 5
+
+    two = tmp_path / "two.duckdb"
+    run_staging(two, "boundary", through="2026-01-09")  # the late delivery absent
+    run_staging(two, "boundary")  # it arrives on the boundary partition
+
+    for rel in ("main_staging.stg_events", "main_staging.stg_prompts"):
+        assert table_hash(two, rel) == table_hash(one, rel), rel
+    # the late delivery — the row `<` would drop — is present after convergence
+    delivered = q(
+        two,
+        "select delivered_at from main_staging.stg_prompts where prompt_id = 'p-2'",
+    )[0][0]
+    assert delivered is not None
+    assert (
+        q(two, "select count(*) from main_staging.stg_events where insert_id = 'e-2'")[
+            0
+        ][0]
+        == 1
+    )

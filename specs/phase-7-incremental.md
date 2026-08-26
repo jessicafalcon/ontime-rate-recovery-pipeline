@@ -252,7 +252,7 @@ authoritative if the landing diverges.)
 
 | Invariant ("for all …, … holds") | Falsified by (scenario test) |
 |---|---|
-| 1. **Convergence.** For all splits of a raw set into a `≤ THROUGH` landing then the late tail, the incremental `stg_events`/`stg_prompts`/`attribution` equal the single-build tables (row content, table hash) and the exported `attribution.csv` is byte-identical. | `test_two_landings_equal_one_landing`; mutation `loader/load.py::event_files invert-guard` (landing 1 ignores `THROUGH` → loads all → the split degenerates) |
+| 1. **Convergence.** For all splits of a raw set into a `≤ THROUGH` landing then the late tail, the incremental `stg_events`/`stg_prompts`/`attribution` equal the single-build tables (row content, table hash) and the exported `attribution.csv` is byte-identical. | `test_two_landings_equal_one_landing`; `test_staging_lookback_boundary_reprocesses_a_late_row` (the `<= lookback_days` reprocess boundary); mutation `loader/load.py::event_files invert-guard` (landing 1 ignores `THROUGH` → loads all → the split degenerates) |
 | 2. **Idempotence.** For all landings, applying it twice equals applying it once — the partition-overwrite delete-and-insert converges. | `test_landing_two_twice_is_a_noop` |
 | 3. **Final never changes.** For all prompts whose partition is `final` after a landing, the label is identical on every later landing; `status` advances `provisional → final` only. | `test_final_labels_never_change`; `test_status_advances_provisional_to_final_only`; mutation `dbt/models/attribution/attribution.sql::status drop-arm:1` (kills the `final` arm → the final count and freeze both move) |
 | 4. **Lookback covers late arrival.** For all profiles, `LOOKBACK_DAYS · 24 > late_arrival_max_hours`, so a late event's own partition is still inside the reprocessing window when it arrives and never lands on a closed one. | `test_identity_lookback_exceeds_late_arrival` (over every `profiles/*.json`) |
@@ -266,10 +266,15 @@ authoritative if the landing diverges.)
 
 Rules — the horizon expression, the incremental `where`, and `partition_overwrite`'s
 body are SQL predicates/DDL that no mutation operator addresses (the SQL
-operators act on `case` arms only); they are pinned by the convergence,
-idempotence, final-count, planted-closed-partition and identity tests above,
-and killed in the sweep by the two-landing in-process build going red. Every
-Python invariant gets a mutation line; the `status` case is the one SQL line.
+operators act on `case` arms only); they are pinned by tests, not the sweep:
+convergence, idempotence, final-count, planted-closed-partition and the identity
+above. The reprocess boundary `<= lookback_days` is load-bearing only at distance
+= `lookback_days`, which no shipped profile reaches (tiny/medium late tails land
+≥ 2 days inside, so `<` is equivalent there and the real two-landing build cannot
+falsify it); `test_staging_lookback_boundary_reprocesses_a_late_row` is a
+synthetic fixture — a 112 h-late row, still inside the 120 h identity — that
+lands on the boundary partition and goes red under `<`. Every Python invariant
+gets a mutation line; the `status` case is the one SQL line.
 
 ```mutations
 loader/load.py::event_files                       invert-guard

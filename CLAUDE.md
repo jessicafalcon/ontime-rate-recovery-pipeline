@@ -547,7 +547,8 @@ frozen `attribution.csv`), landing 2 twice is a no-op, no `final` label changes,
 the straddling duplicate `e-0000259` dedupes; every Phase 3–6 gate byte-
 identical (report 0.609756, eval MAE 0.816201/0.352354, simulate +0.162371,
 power 6 rows). `make mutate` 5/5. tiny 80 final / 60 provisional; `fixtures/tiny/`
-untouched (no re-freeze). Next: review rounds, then Phase 8 (orchestration).
-Open BACKLOG rows: **9**.
+untouched (no re-freeze). Review round 1: 4 findings (1 staging-boundary test
+gap, 1 test strengthening, 1 record, 1 accepted THROUGH-calendar row) — fixed /
+accepted. Next: Phase 8 (orchestration). Open BACKLOG rows: **10**.
 
 (Update this section at the end of every working day.)
