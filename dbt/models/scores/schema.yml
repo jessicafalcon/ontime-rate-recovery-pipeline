@@ -1,0 +1,179 @@
+version: 2
+
+models:
+  - name: scores_send_time
+    description: >
+      One row per user (the open dim_user row): the served send time inside
+      the cohort band, the unclamped posterior centre, the confidence, and
+      the version/as-of pair the write-back compares (ARCHITECTURE §2.8, §2.9).
+      Every column is defined once in docs/METRICS.md (§ scores_send_time);
+      this file links, never restates. The band is a singular test
+      (assert_send_time_within_band). A cohort with no organic opens at all
+      cannot be scored — its rows fail not_null, loudly.
+    columns:
+      - name: user_id
+        data_tests: [unique, not_null]
+      - name: cohort_id
+        data_tests: [not_null]
+      - name: send_hour_local
+        description: docs/METRICS.md § send time — local hour, 0–23.
+        data_tests: [not_null]
+      - name: send_minute_local
+        description: docs/METRICS.md § send time — 0–59.
+        data_tests: [not_null]
+      - name: cohort_hour_local
+        description: docs/METRICS.md § cohort_hour_local — the cohort moment the band is anchored on.
+        data_tests: [not_null]
+      - name: center_hour_local
+        description: docs/METRICS.md § center_hour_local — the unclamped posterior centre eval measures MAE against.
+        data_tests: [not_null]
+      - name: confidence
+        description: docs/METRICS.md § confidence — mean resultant length after shrinkage, in [0, 1].
+        data_tests: [not_null]
+      - name: model_version
+        description: The literal var model_version.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [v1]
+      - name: computed_as_of
+        description: max client_event_time of the opens in the feature window — data-derived, never the clock.
+        data_tests: [not_null]
+
+unit_tests:
+  - name: scores_send_time_zero_opens_is_the_prior
+    description: >
+      Invariant 4 at n = 0 (Done-when 2). u-z has no features row: its centre
+      is the cohort's pooled direction mu_c and its confidence the pooled mean
+      resultant length rbar_c, exactly; u-a and u-b, who have opens, differ
+      from it. The cohort moment is bin 8 (mass 3 vs 2, 1).
+    model: scores_send_time
+    given:
+      - input: source('raw', 'dim_user')
+        format: sql
+        rows: |
+          select 'u-a' as user_id, 'UTC' as tz, 'c' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
+          union all select 'u-b', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
+          union all select 'u-z', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
+      - input: ref('features_user_hour')
+        format: sql
+        rows: |
+          select 'u-a' as user_id, 8 as hour_local, 3 as n_opens, timestamp '2026-01-10 08:30:00' as last_open_at
+          union all select 'u-a', 10, 1, timestamp '2026-01-11 10:30:00'
+          union all select 'u-b', 6, 2, timestamp '2026-01-09 06:30:00'
+      - input: ref('stg_prompts')
+        format: sql
+        rows: |
+          select 'c' as cohort_id, 60 as window_minutes
+    expect:
+      rows:
+        - {user_id: u-a, cohort_hour_local: 8, center_hour_local: 8.537311, confidence: 0.947944, send_hour_local: 8, send_minute_local: 32, computed_as_of: "2026-01-11 10:30:00"}
+        - {user_id: u-b, cohort_hour_local: 8, center_hour_local: 7.667543, confidence: 0.936014, send_hour_local: 7, send_minute_local: 40, computed_as_of: "2026-01-11 10:30:00"}
+        - {user_id: u-z, cohort_hour_local: 8, center_hour_local: 8.159739, confidence: 0.936727, send_hour_local: 8, send_minute_local: 10, computed_as_of: "2026-01-11 10:30:00"}
+  - name: scores_send_time_shrinks_monotonically
+    description: >
+      Invariant 4 as n grows. u-bg (10 opens at 14) sets the prior off the
+      others' hour; u-0 (no opens) sits at mu_c, u-1 (one open at 20) moves
+      toward 20.5, u-30 (thirty opens at 20) sits next to it; confidence rises
+      with n. Centres: 19.308 < 19.546 < 20.362.
+    model: scores_send_time
+    given:
+      - input: source('raw', 'dim_user')
+        format: sql
+        rows: |
+          select 'u-0' as user_id, 'UTC' as tz, 'c' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
+          union all select 'u-1', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
+          union all select 'u-30', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
+          union all select 'u-bg', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
+      - input: ref('features_user_hour')
+        format: sql
+        rows: |
+          select 'u-1' as user_id, 20 as hour_local, 1 as n_opens, timestamp '2026-01-10 20:30:00' as last_open_at
+          union all select 'u-30', 20, 30, timestamp '2026-01-10 20:40:00'
+          union all select 'u-bg', 14, 10, timestamp '2026-01-10 14:30:00'
+      - input: ref('stg_prompts')
+        format: sql
+        rows: |
+          select 'c' as cohort_id, 60 as window_minutes
+    expect:
+      rows:
+        - {user_id: u-0, cohort_hour_local: 20, center_hour_local: 19.308087, confidence: 0.794463, send_hour_local: 19, send_minute_local: 18}
+        - {user_id: u-1, cohort_hour_local: 20, center_hour_local: 19.545931, confidence: 0.822264, send_hour_local: 19, send_minute_local: 33}
+        - {user_id: u-30, cohort_hour_local: 20, center_hour_local: 20.362164, confidence: 0.965786, send_hour_local: 20, send_minute_local: 22}
+        - {user_id: u-bg, cohort_hour_local: 20, center_hour_local: 15.741439, confidence: 0.789288, send_hour_local: 18, send_minute_local: 0}
+  - name: scores_send_time_clamps_to_the_band_edge
+    description: >
+      Invariant 5 at max_user_shift_min = 120. u-bg (60 opens at 8) fixes the
+      cohort moment at 8; u-ahead's centre (11.29) is served at the +2 h edge
+      (10:00), u-behind's (4.73) at the −2 h edge (06:00); u-bg is inside the
+      band and served at its own centre.
+    model: scores_send_time
+    given:
+      - input: source('raw', 'dim_user')
+        format: sql
+        rows: |
+          select 'u-ahead' as user_id, 'UTC' as tz, 'c' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
+          union all select 'u-behind', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
+          union all select 'u-bg', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
+      - input: ref('features_user_hour')
+        format: sql
+        rows: |
+          select 'u-ahead' as user_id, 11 as hour_local, 50 as n_opens, timestamp '2026-01-10 11:30:00' as last_open_at
+          union all select 'u-behind', 4, 50, timestamp '2026-01-10 04:30:00'
+          union all select 'u-bg', 8, 60, timestamp '2026-01-10 08:30:00'
+      - input: ref('stg_prompts')
+        format: sql
+        rows: |
+          select 'c' as cohort_id, 60 as window_minutes
+    expect:
+      rows:
+        - {user_id: u-ahead, cohort_hour_local: 8, center_hour_local: 11.293866, send_hour_local: 10, send_minute_local: 0}
+        - {user_id: u-behind, cohort_hour_local: 8, center_hour_local: 4.729444, send_hour_local: 6, send_minute_local: 0}
+        - {user_id: u-bg, cohort_hour_local: 8, center_hour_local: 8.485125, send_hour_local: 8, send_minute_local: 29}
+  - name: scores_send_time_is_circular
+    description: >
+      Invariant 6. Opens at 23:xx and 01:xx (bin centres 23.5 and 1.5) centre
+      at 0.5 — the short arc — never 12.5; the moment is the tie's smaller
+      hour (1), the served time 00:30.
+    model: scores_send_time
+    given:
+      - input: source('raw', 'dim_user')
+        format: sql
+        rows: |
+          select 'u-c' as user_id, 'UTC' as tz, 'c' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
+      - input: ref('features_user_hour')
+        format: sql
+        rows: |
+          select 'u-c' as user_id, 23 as hour_local, 1 as n_opens, timestamp '2026-01-10 23:30:00' as last_open_at
+          union all select 'u-c', 1, 1, timestamp '2026-01-11 01:30:00'
+      - input: ref('stg_prompts')
+        format: sql
+        rows: |
+          select 'c' as cohort_id, 60 as window_minutes
+    expect:
+      rows:
+        - {user_id: u-c, cohort_hour_local: 1, center_hour_local: 0.5, confidence: 0.965926, send_hour_local: 0, send_minute_local: 30}
+  - name: scores_send_time_breaks_a_window_tie_by_smaller_hour
+    description: >
+      Invariant 7. Bins 7 and 9 hold equal pooled mass (2 each): the cohort
+      moment is 7 — the declared key order (mass desc, hour asc), never
+      insertion order (bin 9 is listed first).
+    model: scores_send_time
+    given:
+      - input: source('raw', 'dim_user')
+        format: sql
+        rows: |
+          select 'u-t' as user_id, 'UTC' as tz, 'c' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
+      - input: ref('features_user_hour')
+        format: sql
+        rows: |
+          select 'u-t' as user_id, 9 as hour_local, 2 as n_opens, timestamp '2026-01-10 09:30:00' as last_open_at
+          union all select 'u-t', 7, 2, timestamp '2026-01-10 07:30:00'
+      - input: ref('stg_prompts')
+        format: sql
+        rows: |
+          select 'c' as cohort_id, 60 as window_minutes
+    expect:
+      rows:
+        - {user_id: u-t, cohort_hour_local: 7, center_hour_local: 8.5, send_hour_local: 8, send_minute_local: 30}

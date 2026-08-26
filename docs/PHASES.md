@@ -143,17 +143,36 @@ caller. Re-freeze: one manifest line added, fourteen unchanged.
 tie-break); vars `FEATURE_WINDOW_DAYS`, `MAX_USER_SHIFT_MIN`. `eval` reports reachable-center MAE (hours) and coverage vs truth on
 tiny and medium.
 
-**Done when.** MAE ≤ pin on medium; a user with zero organic opens gets the
-cohort default with `confidence` at the prior; two runs of `make dbt-build`
-give byte-identical `scores_send_time`; no model input references truth.
+**Done when.** MAE ≤ pin on medium (seeded and unfrozen — `data/out/medium/`
+is the generator's byte-identical output and the pins in `tests/pins.py`
+are its manifest; tiny carries the regression pin); a user with zero organic
+opens gets the cohort default with `confidence` at the prior; two runs of
+`make dbt-build` give byte-identical `scores_send_time`; no model input
+references truth.
+
+**Delivered** (`phase-5-send-time`, spec `specs/phase-5-send-time.md`): as
+planned, with `medium` run unfrozen (109 MB was not worth a fixture the
+read-only rule binds forever; `eval` resolves `truth/` fixtures-then-
+`data/out`, printed `(unfrozen)`), one extra column `center_hour_local` (the
+unclamped centre `eval` measures MAE against — without it Python would have
+to re-derive the model) plus `cohort_hour_local` (the band's anchor, so the
+band is a singular test), a third frozen golden `expected/scores_send_time.csv`
+(tiny manifest 15 → 16), circular hours as ANSI `floor`/`atan2` with no
+sixth macro, the tz-change BACKLOG row closed (per-user pooling on local
+hours). tiny: MAE 0.816201 h, coverage 0.6 (20 users, 9–14 opens each);
+medium: MAE 0.352354 h, coverage 0.7345 (2,000 users, ≥ 30 opens each); 8
+unit tests, 1 singular test; `%` joined the dialect denylist.
 
 ---
 
 ## Phase 6 — Counterfactual simulation and A/B spec ⭐ checkpoint
 
 **Goal.** `eval/simulate.py`: re-run the generator's response function under
-the recommended schedule (seeded); report simulated on-time rate vs baseline,
-by cause. `docs/AB_DESIGN.md`: randomization unit, persistent holdout, power
+the recommended schedule (seeded) — the SERVED `scores_send_time.
+send_hour_local` / `send_minute_local`, never the unclamped
+`center_hour_local` (Phase 5 exit audit; an invariant with a test); `medium`
+is unfrozen, so `simulate` resolves `data/out/medium/` the way `eval` does.
+Report simulated on-time rate vs baseline, by cause. `docs/AB_DESIGN.md`: randomization unit, persistent holdout, power
 calculation, primary metric, guardrails, jitter. `docs/RESULTS.md` generated
 block.
 

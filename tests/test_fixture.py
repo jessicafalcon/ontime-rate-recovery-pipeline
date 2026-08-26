@@ -28,6 +28,7 @@ def test_regenerated_tiny_matches_manifest(tmp_path: Path) -> None:
     assert manifest.diff(tmp_path, TINY / manifest.NAME) == [
         "expected/attribution.csv: missing",
         "expected/ontime_rate_daily.csv: missing",
+        "expected/scores_send_time.csv: missing",
     ]
 
 
@@ -58,17 +59,22 @@ def test_raw_dims_truth_hashes_are_the_phase_1_hashes() -> None:
     assert set(lines) - set(generated) == {
         "expected/attribution.csv",
         "expected/ontime_rate_daily.csv",
+        "expected/scores_send_time.csv",
     }
     assert {k.split("/")[0] for k in generated} == {"raw", "dims", "truth"}
 
 
-def test_phase_3_expected_hash_is_unchanged() -> None:
-    """The Phase 4 re-freeze added expected/ontime_rate_daily.csv and moved
-    nothing: the attribution golden's hash is the Phase 3 one, and the
-    manifest is exactly the Phase 3 lines plus one."""
+def test_phase_3_and_4_expected_hashes_are_unchanged() -> None:
+    """The Phase 5 re-freeze added expected/scores_send_time.csv and moved
+    nothing: the attribution and daily-mart goldens hash as frozen in Phases
+    3 and 4, and the manifest is exactly the Phase 4 lines plus one."""
     lines = manifest.parse((TINY / manifest.NAME).read_text())
-    assert len(lines) == pins.PHASE3_MANIFEST_LINES + 1
+    assert len(lines) == pins.PHASE4_MANIFEST_LINES + 1
     assert (
         lines["expected/attribution.csv"]
         == "d90f26c4ef5b88b73b34aa8b7e872ba0fc2577e08461bca6d932896eae275b9a"
+    )
+    assert (
+        lines["expected/ontime_rate_daily.csv"]
+        == "d69ae841a753db1288ba042e7573eafc4b9ed9c3970c830931300a99263495c9"
     )

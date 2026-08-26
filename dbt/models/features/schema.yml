@@ -1,0 +1,81 @@
+version: 2
+
+models:
+  - name: features_user_hour
+    description: >
+      Per user, the local-hour histogram of ORGANIC app_opened events inside
+      the feature window (docs/METRICS.md § features_user_hour). Sparse — no
+      row for an empty bin. Prompt-linked events never contribute (exposure
+      bias, ARCHITECTURE §2.8); each open counts at its own local hour, so a
+      tz change mid-window keeps one histogram per user (Phase 5 item 2).
+    columns:
+      - name: user_id
+        data_tests: [not_null]
+      - name: hour_local
+        description: 0–23, extract(hour) of client_event_time_local.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+                quote: false
+      - name: n_opens
+        description: Organic opens in the bin; sums to the staged app_opened count inside the window.
+        data_tests: [not_null]
+      - name: last_open_at
+        description: max client_event_time in the bin — scores_send_time.computed_as_of is the max over all bins.
+        data_tests: [not_null]
+
+unit_tests:
+  - name: features_user_hour_is_organic_only
+    description: >
+      Invariant 1. u-1 responds, opens a prompt and captures at 10:00 local
+      and opens the app organically twice at 14:xx — one row, hour 14, n = 2.
+    model: features_user_hour
+    given:
+      - input: ref('stg_events')
+        format: sql
+        rows: |
+          select 'u-1' as user_id, 'response_recorded' as event_type, timestamp '2026-01-05 10:00:00' as client_event_time, timestamp '2026-01-05 10:00:00' as client_event_time_local
+          union all select 'u-1', 'prompt_opened', timestamp '2026-01-05 10:01:00', timestamp '2026-01-05 10:01:00'
+          union all select 'u-1', 'capture_started', timestamp '2026-01-05 10:02:00', timestamp '2026-01-05 10:02:00'
+          union all select 'u-1', 'app_opened', timestamp '2026-01-05 14:10:00', timestamp '2026-01-05 14:10:00'
+          union all select 'u-1', 'app_opened', timestamp '2026-01-06 14:50:00', timestamp '2026-01-06 14:50:00'
+    expect:
+      rows:
+        - {user_id: u-1, hour_local: 14, n_opens: 2, last_open_at: "2026-01-06 14:50:00"}
+  - name: features_user_hour_pools_a_tz_change
+    description: >
+      Invariant 2 (BACKLOG row, Phase 5 item 2). u-8 opens at 08:00 local in
+      Tokyo (23:00 UTC the day before) and, after moving, at 08:00 local in
+      London (08:00 UTC): one row keyed by user_id, hour 8, n = 2 — never a
+      row per tz, never a UTC hour.
+    model: features_user_hour
+    given:
+      - input: ref('stg_events')
+        format: sql
+        rows: |
+          select 'u-8' as user_id, 'app_opened' as event_type, 'Asia/Tokyo' as tz, timestamp '2026-01-09 23:00:00' as client_event_time, timestamp '2026-01-10 08:00:00' as client_event_time_local
+          union all select 'u-8', 'app_opened', 'Europe/London', timestamp '2026-01-11 08:00:00', timestamp '2026-01-11 08:00:00'
+    expect:
+      rows:
+        - {user_id: u-8, hour_local: 8, n_opens: 2, last_open_at: "2026-01-11 08:00:00"}
+  - name: features_user_hour_respects_the_window
+    description: >
+      Invariant 3 at feature_window_days = 30. The horizon is the max
+      client_event_time over ALL events (a prompt_sent on 03-01 12:00); an
+      open 31 days before it is excluded, one 28 days before is counted, and
+      one at EXACTLY 30 days before (01-30 12:00) is excluded — the window is
+      half-open (horizon − 30 d, horizon] (review round 1: `<` vs `<=`).
+    model: features_user_hour
+    given:
+      - input: ref('stg_events')
+        format: sql
+        rows: |
+          select 'u-1' as user_id, 'prompt_sent' as event_type, timestamp '2026-03-01 12:00:00' as client_event_time, timestamp '2026-03-01 12:00:00' as client_event_time_local
+          union all select 'u-1', 'app_opened', timestamp '2026-01-29 09:00:00', timestamp '2026-01-29 09:00:00'
+          union all select 'u-1', 'app_opened', timestamp '2026-01-30 12:00:00', timestamp '2026-01-30 12:00:00'
+          union all select 'u-1', 'app_opened', timestamp '2026-02-01 09:00:00', timestamp '2026-02-01 09:00:00'
+    expect:
+      rows:
+        - {user_id: u-1, hour_local: 9, n_opens: 1, last_open_at: "2026-02-01 09:00:00"}

@@ -43,3 +43,28 @@ RETENTION_ROWS = 20  # one per user; every `retained` NULL (7 days < retention_d
 ORGANIC_OPEN_ROWS = 211  # staged app_opened — the column no label reads (BACKLOG)
 RETENTION_DAYS = 28  # == dbt var retention_days (ARCHITECTURE §2.6)
 PHASE3_MANIFEST_LINES = PHASE1_MANIFEST_LINES + 1  # + expected/attribution.csv
+
+# fixtures/tiny + data/out/medium — Phase 5 (send-time model). Read off the
+# first green build. medium is seeded (`seed: 2`), never frozen: the pins ARE
+# its manifest (specs/phase-5-send-time.md, reconciliation item 1).
+SCORES_ROWS = 20  # one per user
+COHORT_HOUR_TINY = {
+    "c-morning": 3,
+    "c-evening": 16,
+}  # c-morning: bins 3 and 10 tie at 12 → 3
+COMPUTED_AS_OF_TINY = (
+    "2026-01-12 00:47:00"  # max client_event_time of opens in the window
+)
+MAE_TINY = 0.81620145  # reachable-centre MAE, circular hours (the regression pin)
+COVERAGE_TINY = 0.6  # served time inside centre ± width/2
+MEDIUM_USERS = 2000
+MAE_MEDIUM = 0.352353856  # the proof: 2,000 users, ~36 opens each
+COVERAGE_MEDIUM = 0.7345
+SEND_TIME_PINS = {
+    "tiny": (MAE_TINY, COVERAGE_TINY),
+    "medium": (MAE_MEDIUM, COVERAGE_MEDIUM),
+}
+FEATURE_WINDOW_DAYS = 30  # == dbt var feature_window_days
+MAX_USER_SHIFT_MIN = 120  # == dbt var max_user_shift_min
+SHRINKAGE_PSEUDO_COUNT = 5  # == dbt var shrinkage_pseudo_count
+PHASE4_MANIFEST_LINES = PHASE3_MANIFEST_LINES + 1  # + expected/ontime_rate_daily.csv

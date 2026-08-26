@@ -87,7 +87,12 @@ def test_golden_write_only_on_literal_yes(
 
 def test_cli_refuses_bad_profile_before_any_path(monkeypatch) -> None:
     for name in ("../x", "", "a b", "Tiny"):
-        for fn in (cli.golden_cmd, cli.score_cmd, cli.report_cmd):
+        for fn in (
+            cli.golden_cmd,
+            cli.score_cmd,
+            cli.report_cmd,
+            cli.scores_golden_cmd,
+        ):
             with pytest.raises(SystemExit) as e:
                 fn(name)
             assert e.value.code == 2
@@ -159,3 +164,124 @@ def test_report_write_only_on_literal_yes(
     assert out.read_text() == golden.render(golden.export_rows(built, DAILY), DAILY)
     assert not (tmp_path / "fix").exists()  # never fixtures/
     assert "report WROTE" in capsys.readouterr().out
+
+
+# ------------------------------------------------- Phase 5: MAE, coverage, golden
+
+SCORES = golden.SCORES_SEND_TIME
+USERS = ROOT / "fixtures" / "tiny" / "truth" / "users.jsonl"
+
+
+def test_circular_diff_is_the_short_arc() -> None:
+    assert score.circular_abs_diff_hours(23, 1) == 2
+    assert score.circular_abs_diff_hours(1, 23) == 2
+    assert score.circular_abs_diff_hours(0.5, 12.5) == 12
+    assert score.circular_abs_diff_hours(8.25, 8.0) == pytest.approx(0.25)
+
+
+def test_score_cli_prints_mae_and_coverage(built: Path, monkeypatch, capsys) -> None:  # noqa: F811
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    assert cli.score_cmd("tiny") == 0
+    out = capsys.readouterr().out
+    assert "eval truth: fixtures/tiny/truth\n" in out
+    assert (
+        f"eval OK: tiny, mae {pins.MAE_TINY:.6f} h (pin {pins.MAE_TINY:.6f}), "
+        f"coverage {pins.COVERAGE_TINY:.6f} (pin {pins.COVERAGE_TINY:.6f}), 20 users"
+    ) in out
+
+
+def test_planted_center_shift_raises_mae(
+    built: Path, tmp_path: Path, monkeypatch, capsys
+):  # noqa: F811
+    """Every truth centre + 3 h: MAE moves off the pin, exit 1; coverage of
+    the served time drops too (a 6 h window shifted by 3 h)."""
+    import json
+
+    fix = tmp_path / "fix" / "tiny" / "truth"
+    fix.mkdir(parents=True)
+    fix.joinpath("prompts.jsonl").write_text(TRUTH.read_text())
+    shifted = []
+    for line in USERS.read_text().splitlines():
+        rec = json.loads(line)
+        rec["reachable_center_local_hour"] = (
+            rec["reachable_center_local_hour"] + 3
+        ) % 24
+        shifted.append(json.dumps(rec))
+    fix.joinpath("users.jsonl").write_text("\n".join(shifted) + "\n")
+    monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    assert cli.score_cmd("tiny") == 1
+    out = capsys.readouterr().out
+    assert "accuracy 1.000" in out  # labels untouched
+    assert "eval FAIL: tiny, mae" in out
+    windows = score.truth_windows(fix / "users.jsonl")
+    scores = score.built_scores(built)
+    assert score.reachable_center_mae(scores, windows) > pins.MAE_TINY + 1
+    assert score.coverage(scores, windows) < pins.COVERAGE_TINY
+
+
+def test_a_missing_user_counts_as_the_worst_case() -> None:
+    truth = {"u-1": (8.0, 6.0), "u-2": (20.0, 6.0)}
+    built = {"u-1": (8.0, 8.0)}
+    assert score.reachable_center_mae(built, truth) == 6.0  # (0 + 12) / 2
+    assert score.coverage(built, truth) == 0.5
+    with pytest.raises(ValueError, match="no truth users"):
+        score.reachable_center_mae(built, {})
+
+
+def test_eval_reads_unfrozen_truth_and_says_so(
+    built: Path, tmp_path: Path, monkeypatch, capsys
+):  # noqa: F811
+    """No fixtures/<p>/truth → data/out/<p>/truth, printed `(unfrozen)`; the
+    two roots are the only candidates (invariant 10)."""
+    out_dir = tmp_path / "out" / "tiny" / "truth"
+    out_dir.mkdir(parents=True)
+    out_dir.joinpath("prompts.jsonl").write_text(TRUTH.read_text())
+    out_dir.joinpath("users.jsonl").write_text(USERS.read_text())
+    monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
+    monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    assert cli.truth_dir("tiny") == out_dir
+    assert cli.score_cmd("tiny") == 0
+    out = capsys.readouterr().out
+    assert "(unfrozen)" in out and "eval OK: tiny, mae" in out
+    (tmp_path / "fix" / "tiny" / "truth").mkdir(parents=True)
+    assert cli.truth_dir("tiny") == tmp_path / "fix" / "tiny" / "truth"  # frozen wins
+    with pytest.raises(SystemExit) as e:
+        cli.score_cmd("tiny")  # frozen dir exists but is empty: refused, no fallback
+    assert e.value.code == 2
+
+
+def test_scores_golden_reports_a_planted_difference(
+    built: Path, tmp_path: Path, monkeypatch, capsys
+):  # noqa: F811
+    rows = golden.export_rows(built, SCORES)
+    assert golden.parse(golden.render(rows, SCORES), SCORES) == rows
+    fix = tmp_path / "fix" / "tiny" / "expected"
+    fix.mkdir(parents=True)
+    planted = list(rows)
+    planted[0] = (*planted[0][:2], "23", *planted[0][3:])  # one send hour changed
+    fix.joinpath("scores_send_time.csv").write_text(golden.render(planted, SCORES))
+    monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    assert cli.scores_golden_cmd("tiny") == 1
+    out = capsys.readouterr().out
+    assert f"{rows[0][0]}: changed" in out
+    assert "scores-golden FAIL: tiny, 20 rows, 1 differ" in out
+
+
+def test_scores_golden_write_only_on_literal_yes(
+    built: Path, tmp_path: Path, monkeypatch, capsys
+):  # noqa: F811
+    monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
+    monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
+    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    for bad in ("YES", "true", "1", " yes"):
+        with pytest.raises(SystemExit) as e:
+            cli.scores_golden_cmd("tiny", bad)
+        assert e.value.code == 2
+    assert not (tmp_path / "out").exists()
+    assert cli.scores_golden_cmd("tiny", "yes") == 0
+    out = tmp_path / "out" / "tiny" / "expected" / "scores_send_time.csv"
+    assert out.read_text() == golden.render(golden.export_rows(built, SCORES), SCORES)
+    assert not (tmp_path / "fix").exists()  # never fixtures/

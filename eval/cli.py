@@ -5,8 +5,13 @@ golden — diff the built attribution table (data/<p>.duckdb) against
          fixtures/<p>/expected/attribution.csv; exit 1 on any differing row.
          With --write yes: write data/out/<p>/expected/attribution.csv instead
          (never fixtures/ — `make freeze` is the only writer there).
-score  — label accuracy vs fixtures/<p>/truth/prompts.jsonl; exit 1 below the
-         pin (tests/pins.py::LABEL_ACCURACY).
+score  — label accuracy vs <p>/truth/prompts.jsonl; exit 1 below the pin
+         (tests/pins.py::LABEL_ACCURACY). Phase 5: plus reachable-centre MAE
+         and coverage vs <p>/truth/users.jsonl against the MAE_*/COVERAGE_*
+         pins. truth/ is fixtures/<p>/ when frozen, else data/out/<p>/
+         (printed `(unfrozen)`) — the only two roots eval ever reads.
+scores-golden — the golden shape over scores_send_time
+         (expected/scores_send_time.csv).
 report — the same golden shape over ontime_rate_daily
          (expected/ontime_rate_daily.csv) plus the overall on-time rate vs
          tests/pins.py::ONTIME_RATE; console only."""
@@ -15,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from eval import golden, report, score
 from loader import load as loader
@@ -31,6 +37,15 @@ def _rel(path) -> str:
         if path.is_relative_to(loader.ROOT)
         else str(path)
     )
+
+
+def truth_dir(profile: str) -> Path:
+    """fixtures/<p>/truth when the profile is frozen, else data/out/<p>/truth
+    — the generator's own output, still the side-file only eval reads."""
+    frozen = FIXTURES / profile / "truth"
+    if frozen.is_dir():
+        return frozen
+    return DATA_OUT / profile / "truth"
 
 
 def _db(profile: str):
@@ -94,24 +109,54 @@ def report_cmd(profile: str, write: str = "") -> int:
     return 0 if verdict == "OK" else 1
 
 
+def scores_golden_cmd(profile: str, write: str = "") -> int:
+    code, rows, differ = _golden(
+        profile, write, golden.SCORES_SEND_TIME, "scores-golden"
+    )
+    if differ >= 0:
+        verdict = "FAIL" if code else "OK"
+        print(f"scores-golden {verdict}: {profile}, {rows} rows, {differ} differ")
+    return code
+
+
 def score_cmd(profile: str) -> int:
     validate_name("PROFILE", profile)
-    from tests.pins import LABEL_ACCURACY  # the pin lives with every other pin
+    from tests import pins  # every pin lives there
 
-    truth_path = FIXTURES / profile / "truth" / "prompts.jsonl"
-    if not truth_path.is_file():
-        die(f"eval: refused — no {truth_path.relative_to(loader.ROOT)}")
-    built = score.built_labels(_db(profile))
-    truth = score.truth_labels(truth_path)
-    acc = score.label_accuracy(built, truth)
+    truth = truth_dir(profile)
+    tag = "" if truth.is_relative_to(FIXTURES) else " (unfrozen)"
+    prompts_path = truth / "prompts.jsonl"
+    users_path = truth / "users.jsonl"
+    for path in (prompts_path, users_path):
+        if not path.is_file():
+            die(f"eval: refused — no {_rel(path)}")
+    db = _db(profile)
+    built = score.built_labels(db)
+    truth_labels = score.truth_labels(prompts_path)
+    acc = score.label_accuracy(built, truth_labels)
     counts = score.label_counts(built)
+    print(f"eval truth: {_rel(truth)}{tag}")
     print("eval labels: " + ", ".join(f"{k}={v}" for k, v in counts.items()))
-    verdict = "OK" if acc >= LABEL_ACCURACY else "FAIL"
+    verdict = "OK" if acc >= pins.LABEL_ACCURACY else "FAIL"
     print(
-        f"eval {verdict}: {profile}, accuracy {acc:.3f} (pin {LABEL_ACCURACY:.3f}), "
-        f"{len(truth)} prompts"
+        f"eval {verdict}: {profile}, accuracy {acc:.3f} "
+        f"(pin {pins.LABEL_ACCURACY:.3f}), {len(truth_labels)} prompts"
     )
-    return 0 if verdict == "OK" else 1
+    windows = score.truth_windows(users_path)
+    scores = score.built_scores(db)
+    mae = score.reachable_center_mae(scores, windows)
+    cov = score.coverage(scores, windows)
+    mae_pin, cov_pin = pins.SEND_TIME_PINS.get(profile, (None, None))
+    if mae_pin is None:
+        print(f"eval FAIL: {profile}, no MAE/coverage pin in tests/pins.py")
+        return 1
+    on_pin = abs(mae - mae_pin) < 1e-9 and abs(cov - cov_pin) < 1e-9
+    verdict2 = "OK" if on_pin else "FAIL"
+    print(
+        f"eval {verdict2}: {profile}, mae {mae:.6f} h (pin {mae_pin:.6f}), "
+        f"coverage {cov:.6f} (pin {cov_pin:.6f}), {len(windows)} users"
+    )
+    return 0 if verdict == "OK" and verdict2 == "OK" else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -124,11 +169,16 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("report")
     r.add_argument("profile")
     r.add_argument("--write", default="")
+    sg = sub.add_parser("scores-golden")
+    sg.add_argument("profile")
+    sg.add_argument("--write", default="")
     a = ap.parse_args(argv)
     if a.cmd == "golden":
         return golden_cmd(a.profile, a.write)
     if a.cmd == "report":
         return report_cmd(a.profile, a.write)
+    if a.cmd == "scores-golden":
+        return scores_golden_cmd(a.profile, a.write)
     return score_cmd(a.profile)
 
 

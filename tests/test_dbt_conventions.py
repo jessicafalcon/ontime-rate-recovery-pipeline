@@ -53,7 +53,7 @@ def test_no_clock_call_in_any_model_or_macro(tmp_path: Path) -> None:
 # dispatch macro body or to an ANSI rewrite). Unit-test fixtures in schema.yml
 # may type their rows with them; macros are the seam by definition.
 DIALECT = re.compile(
-    r"(\bbool_or\b|\blogical_or\b|\bdate_diff\b|\btimezone\(|->>|::)", re.I
+    r"(\bbool_or\b|\blogical_or\b|\bdate_diff\b|\btimezone\(|->>|::|%)", re.I
 )
 
 
@@ -71,10 +71,11 @@ def test_no_dialect_function_in_any_model(tmp_path: Path) -> None:
     assert dialect_hits(DBT) == []
     (tmp_path / "models").mkdir()
     (tmp_path / "models" / "bad.sql").write_text("select bool_or(x) as y from t")
+    (tmp_path / "models" / "mod.sql").write_text("select x % 24 as y from t")  # Phase 5
     (tmp_path / "models" / "ok.sql").write_text(
         "select max(case when x then 1 else 0 end) = 1 as y from t"
     )
-    assert dialect_hits(tmp_path) == ["models/bad.sql"]
+    assert dialect_hits(tmp_path) == ["models/bad.sql", "models/mod.sql"]
 
 
 def test_no_freshness_block() -> None:
@@ -139,6 +140,7 @@ SINGULAR = {
     "assert_prompt_cohort_matches_dim.sql": "ref('stg_prompts')",
     "assert_cohort_day_partition.sql": "ref('ontime_rate_daily')",
     "assert_cohort_day_key_unique.sql": "ref('ontime_rate_daily')",
+    "assert_send_time_within_band.sql": "ref('scores_send_time')",
 }
 
 
@@ -165,7 +167,7 @@ def test_no_dbt_packages() -> None:
 
 
 def test_every_model_has_description_and_a_test() -> None:
-    for folder in ("staging", "attribution", "marts"):
+    for folder in ("staging", "attribution", "marts", "features", "scores"):
         schema = (DBT / "models" / folder / "schema.yml").read_text()
         for model in (p.stem for p in (DBT / "models" / folder).glob("*.sql")):
             block = schema.split(f"- name: {model}\n", 1)[1]

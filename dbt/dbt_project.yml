@@ -19,12 +19,17 @@ clean-targets: ["target", "dbt_packages"]
 
 # Phase 3 (specs/phase-3-attribution.md). skew_max_min equals
 # generator/models.py::SKEW_MAX_MIN (equality-tested); only a NEGATIVE upload
-# delay past it is skew (ARCHITECTURE §8).
+# delay past it is skew (ARCHITECTURE §8). Phase 5 adds the send-time model's
+# hyper-parameters (specs/phase-5-send-time.md).
 vars:
   skew_max_min: 5
   delivery_grace_min: 10
   unattributed_max: 0.10
   retention_days: 28
+  feature_window_days: 30
+  max_user_shift_min: 120
+  shrinkage_pseudo_count: 5
+  model_version: v1
 
 models:
   ontime:
@@ -37,3 +42,9 @@ models:
     marts:
       +materialized: table
       +schema: marts
+    features:
+      +materialized: table
+      +schema: features
+    scores:
+      +materialized: table
+      +schema: scores

@@ -2,7 +2,9 @@
 copy. Row content only — every golden sorts by its first two columns, the
 declared key: attribution (prompt_id, user_id) — prompt_id is unique, user_id
 names the tie-break; ontime_rate_daily (cohort_id, prompt_date) — unique
-together. Never insertion order (Phase 3 invariant 5, Phase 4 invariant 5)."""
+together; scores_send_time (user_id, cohort_id) — user_id is unique.
+Never insertion order (Phase 3 invariant 5, Phase 4 invariant 5, Phase 5
+invariant 8)."""
 
 from __future__ import annotations
 
@@ -47,6 +49,22 @@ ONTIME_RATE_DAILY = Golden(
     ),
     key_width=2,
     file="expected/ontime_rate_daily.csv",
+)
+SCORES_SEND_TIME = Golden(
+    relation="main_scores.scores_send_time",
+    columns=(
+        "user_id",
+        "cohort_id",
+        "send_hour_local",
+        "send_minute_local",
+        "cohort_hour_local",
+        "center_hour_local",
+        "confidence",
+        "model_version",
+        "computed_as_of",
+    ),
+    key_width=1,
+    file="expected/scores_send_time.csv",
 )
 COLUMNS = ATTRIBUTION.columns  # the Phase 3 name, kept for its readers
 
