@@ -180,6 +180,26 @@ block.
 deterministically (byte-identical on re-run); the simulated lift is reported
 per cause and upload-fault lateness is unchanged by construction.
 
+**Delivered** (`phase-6-simulation`, spec `specs/phase-6-simulation.md`): as
+planned, with common random numbers (four uniforms per prompt from one
+seeded stream, applied in the generator's draw order through
+`open_probability` — `responds` owns its own draw and is not reused; the
+generator is untouched), so `delivery_fault` and `unattributed` are
+identical across arms by construction and only `timing_gap` ↔ {`on_time`,
+`upload_fault`} moves at the prompt level; a third arm `cohort` (the band
+anchor, no per-user shift) beside `baseline` (the prompt's own hour) and
+`recommended` (the served pair), and a `data` row (built `attribution`
+counts) as the anchor the simulated baseline sits near; both arms
+simulated, so the lift is the schedules' alone. `docs/RESULTS.md` carries
+one generated block per profile (tiny the regression pin, medium the proof
+from `data/out/medium/`); `docs/AB_DESIGN.md` carries a generated power
+table (`eval/power.py`, `math.erf` + bisection, no scipy); `make simulate`
+/ `make power` check mode diffs a block byte-for-byte, `WRITE=yes`
+replaces the marked bytes only. medium: recommended 0.623291 vs baseline
+0.460920 (+0.162371, `timing_gap` −10,216). tiny: −0.033 — the `c-morning`
+bin-3/10 tie (20 users), a pin, not a claim. No dbt, generator or fixture
+change; `eval/` gains `simulate.py`, `power.py`, `blocks.py`.
+
 ---
 
 ## Phase 7 — Incrementality and late arrival

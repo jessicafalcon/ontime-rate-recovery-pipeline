@@ -68,3 +68,50 @@ FEATURE_WINDOW_DAYS = 30  # == dbt var feature_window_days
 MAX_USER_SHIFT_MIN = 120  # == dbt var max_user_shift_min
 SHRINKAGE_PSEUDO_COUNT = 5  # == dbt var shrinkage_pseudo_count
 PHASE4_MANIFEST_LINES = PHASE3_MANIFEST_LINES + 1  # + expected/ontime_rate_daily.csv
+
+# fixtures/tiny + data/out/medium — Phase 6 (counterfactual simulation and
+# the A/B power table). Read off the first green run; the committed blocks in
+# docs/RESULTS.md and docs/AB_DESIGN.md are the byte-level pins.
+SIMULATE_SEED = 6  # the common-random-numbers stream; a parameter, never a knob
+SIMULATED_TINY = {  # docs/RESULTS.md tiny block; "data" == ATTRIBUTION_LABEL_COUNTS
+    "baseline": {
+        "on_time": 66,
+        "upload_fault": 18,
+        "delivery_fault": 20,
+        "timing_gap": 33,
+        "unattributed": 3,
+    },
+    "cohort": {
+        "on_time": 37,
+        "upload_fault": 7,
+        "delivery_fault": 20,
+        "timing_gap": 73,
+        "unattributed": 3,
+    },
+    "recommended": {
+        "on_time": 62,
+        "upload_fault": 17,
+        "delivery_fault": 20,
+        "timing_gap": 38,
+        "unattributed": 3,
+    },
+}  # tiny's c-morning anchor is the bin-3/10 tie (Phase 5), so its lift is
+# negative: a regression pin, not a proof
+SIMULATED_MEDIUM_ONTIME_RATE = (
+    0.460920,
+    0.457732,
+    0.623291,
+)  # baseline, cohort, recommended
+ONTIME_MEDIUM = 25498  # sum(on_time) over the medium mart
+PROMPTS_SENT_MEDIUM = 60000  # 2,000 users × 30 days
+PROMPTS_DELIVERED_MEDIUM = 55293  # sum(prompts_delivered) over the medium mart
+ONTIME_RATE_MEDIUM = ONTIME_MEDIUM / PROMPTS_DELIVERED_MEDIUM  # 0.461143
+# (profile, MDE pp, delivered prompts per arm, days at half the users per arm)
+POWER_TABLE = [
+    ("tiny", 1, 37174, 4232),
+    ("tiny", 2, 9245, 1053),
+    ("tiny", 5, 1452, 166),
+    ("medium", 1, 39061, 43),
+    ("medium", 2, 9775, 11),
+    ("medium", 5, 1565, 2),
+]

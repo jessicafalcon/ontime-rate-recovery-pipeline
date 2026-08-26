@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -122,3 +122,18 @@ scores-golden:
 # ontime_rate_daily.csv instead — never fixtures/. Needs `make dbt-build` first.
 report:
 	uv run python -m eval.cli report $(call _Q,$(value PROFILE)) --write $(call _Q,$(value WRITE))
+
+# The counterfactual simulation (eval/cli.py simulate): three arms under
+# common random numbers, per cause, rendered as the <PROFILE> block of
+# docs/RESULTS.md. Check mode diffs the committed block byte-for-byte (exit 1
+# on drift); WRITE=yes (the literal only) replaces the bytes between the
+# profile's markers and nothing else (a missing pair refuses). truth/ resolves
+# as `eval` does (`(unfrozen)` for medium). Needs `make dbt-build` first.
+simulate:
+	uv run python -m eval.cli simulate $(call _Q,$(value PROFILE)) --write $(call _Q,$(value WRITE))
+
+# The A/B power table (eval/cli.py power): users per arm and days to power
+# from the pinned baseline rates, rendered as the block of docs/AB_DESIGN.md;
+# same check / WRITE=yes shape as simulate. No PROFILE — both profiles' rows.
+power:
+	uv run python -m eval.cli power --write $(call _Q,$(value WRITE))

@@ -48,6 +48,8 @@ TRACES: list[tuple[str, str]] = [
     ("Makefile", "unexport SPEC BASE DELETED CONFIRM PROFILE TARGET WRITE"),
     ("scripts/review_common.py", "resolve_spec"),
     ("scripts/mutate.py", "OPERATORS"),
+    ("eval/simulate.py", "simulate:begin"),
+    ("eval/power.py", "power:begin"),
     ("scripts/review_gate.py", "check_fixtures"),
     ("scripts/review_gate.py", "freeze_declarations"),
     ("generator/manifest.py", "MANIFEST.sha256"),

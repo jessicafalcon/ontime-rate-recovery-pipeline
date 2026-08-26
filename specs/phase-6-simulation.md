@@ -1,9 +1,9 @@
-# Phase 6 — Counterfactual simulation and A/B spec (PROPOSED)
+# Phase 6 — Counterfactual simulation and A/B spec (APPROVED 2026-08-26 — implemented, in review)
 
 Contract for the `phase-6-simulation` branch. Source: `docs/PHASES.md` Phase 6
 (⭐ checkpoint). Depends on Phase 5 merged (PR #7, `0b467c1`).
 
-**Status: PROPOSED — do not start until approved.** No new dependencies:
+**Status: APPROVED 2026-08-26; implemented on `phase-6-simulation`.** No new dependencies:
 Phase 6 has no allowlist entry; the simulation is `random.Random` +
 `generator.response.open_probability` (imported, unchanged), the power
 calculation is `math.erf` + a bisection; `duckdb` (Phase 2) reads the built

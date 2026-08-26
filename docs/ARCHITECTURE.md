@@ -237,7 +237,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
 | loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked) | `raw.events`, `raw.dim_user` | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
-| eval | dbt outputs, truth | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), `docs/RESULTS.md` blocks *(Phase 6)* | write any table the pipeline reads; write under `fixtures/` |
+| eval | dbt outputs, truth, the profile JSON (the generator's input) | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), the marker-confined blocks of `docs/RESULTS.md` and `docs/AB_DESIGN.md` *(Phase 6; `WRITE=yes` only)* | write any table the pipeline reads; write under `fixtures/`; create or append to a doc |
 | write-back | `scores_send_time` | `send_schedule` | read truth; read raw |
 | Airflow | — | — | contain logic (it orders `make` targets / dbt commands) |
 

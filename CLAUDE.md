@@ -66,9 +66,15 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   `ontime_rate_daily`, `scores_send_time`), `report.py` (the overall rate
   off the mart), `cli.py` (`golden`, `score`, `report`, `scores-golden`;
   `truth_dir` = `fixtures/<p>/truth` when frozen, else
-  `data/out/<p>/truth`, printed `(unfrozen)`); later `simulate.py`. Writes
-  console and `data/out/<p>/expected/` only — never a table, never
-  `fixtures/`.
+  `data/out/<p>/truth`, printed `(unfrozen)`; Phase 6: `simulate`,
+  `power`), `simulate.py` (Phase 6: the counterfactual simulation — three
+  arms under common random numbers through
+  `generator.response.open_probability`, reading the SERVED pair and the
+  band anchor, never `center_hour_local`), `power.py` (the A/B power
+  table, `math.erf` + bisection), `blocks.py` (the marker-confined writer
+  of generated doc blocks). Writes console, `data/out/<p>/expected/` and
+  the marked blocks of `docs/RESULTS.md` / `docs/AB_DESIGN.md` only —
+  never a table, never `fixtures/`.
 - `serving/` *(Phase 8; Spanner target Phase 10)* — write-back to
   `send_schedule`.
 - `orchestration/` *(Phase 8)* — the Airflow DAG. No logic, only ordering.
@@ -88,8 +94,10 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   (`make gen-sources`: raw DDL + `sources.yml` from `generator/models.py`).
 - `docs/` — ARCHITECTURE.md (spec), PHASES.md (plan), METRICS.md (Phase 4:
   the single definition of every served metric — grain, numerator,
-  denominator, null policy, pinning test); later AB_DESIGN.md, RESULTS.md,
-  DEPLOYMENT.md (all under `docs/`).
+  denominator, null policy, pinning test), RESULTS.md (Phase 6: the
+  counterfactual simulation — one generated block per profile, tiny and
+  medium), AB_DESIGN.md (Phase 6: the production experiment; its power
+  table is a generated block); later DEPLOYMENT.md (all under `docs/`).
 - `DECISIONS.md` — why-not-X log. One entry per non-obvious choice.
 - `BACKLOG.md` — deferred findings with revisit triggers. Reviewed at every
   phase exit: do due items or re-defer with a new trigger, never drop.
@@ -185,7 +193,24 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   (`docs/RESULTS.md` is Phase 6's). `WRITE=yes` (the literal only) writes
   `data/out/<p>/expected/ontime_rate_daily.csv` instead — `make freeze` is the
   only way it reaches `fixtures/`. Needs `dbt-build` first
-- Later phases add: `simulate` (6),
+- `make simulate PROFILE=<p> [WRITE=yes]` — the counterfactual simulation
+  (`eval/cli.py simulate`): every prompt re-drawn under `baseline` (its own
+  send hour), `cohort` (the band anchor) and `recommended` (the served
+  pair) with four common uniforms per prompt from `tests/pins.py::
+  SIMULATE_SEED`, beside the `data` row (built `attribution` counts);
+  rendered as the `<!-- simulate:begin <p> -->` block of `docs/RESULTS.md`.
+  Check mode diffs the committed block byte-for-byte, prints `simulate OK:
+  <p>, N prompts, 3 arms, block matches`, exit 1 on drift; `WRITE=yes` (the
+  literal only) replaces the bytes between the profile's markers and
+  nothing else (a missing pair is a refusal — the writer never creates or
+  appends). `truth/` resolves as `eval` does (`(unfrozen)` for medium).
+  Needs `dbt-build` first
+- `make power [WRITE=yes]` — the A/B power table (`eval/cli.py power`):
+  users per arm and days to power for `(tiny, medium) × MDE {1, 2, 5} pp`
+  at α 0.05 / power 0.8 off the pinned baseline rates, rendered as the
+  `<!-- power:begin -->` block of `docs/AB_DESIGN.md`; same check /
+  `WRITE=yes` shape; prints `power OK: 6 rows, block matches`
+- Later phases add:
   `writeback`, `pipeline`, `test-int-airflow` (8), `tf-plan | tf-apply |
   tf-destroy`, `test-int-bigquery` (9). Each lands with its phase and is
   listed here in the same PR.
@@ -264,8 +289,12 @@ DECISIONS.md or fix it.
   `generator/` only `truth.py` (the writer), `models.py` (record types) and
   `cli.py` (the entry point that calls the writer) may name it — generation
   logic never does.
-- Model scoring and simulation are seeded; RESULTS blocks regenerate
-  byte-identically.
+- Model scoring and simulation are seeded; the generated blocks of
+  `docs/RESULTS.md` and `docs/AB_DESIGN.md` regenerate byte-identically
+  (`make simulate` / `make power` check mode is the CI proof). The
+  simulation uses common random numbers (four uniforms per prompt, one
+  seeded stream, `prompt_id` order), so the lift is a function of the
+  schedules alone.
 - Non-deterministic by nature and carved out: dbt run ids and timings,
   Airflow run ids, Terraform apply output, BigQuery job ids. Nothing asserted
   reads them.
@@ -496,16 +525,15 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 5 implemented, in review (`phase-5-send-time`).** Phases 0–4 merged
-(PRs #1, #2, #4, #5, #6), round-tag fix merged (PR #3). `make dbt-build
-PROFILE=tiny` is green (7 models, 117 items: 32 unit tests, the rest data and
-singular tests); `make scores-golden PROFILE=tiny` → 20 rows, 0 differ
-against the frozen `expected/scores_send_time.csv` (tiny re-frozen, 15 → 16
-manifest lines); `make eval PROFILE=tiny` → accuracy 1.000, MAE 0.816201 h,
-coverage 0.6; `make eval PROFILE=medium` (seeded, unfrozen: 2,000 users ×
-30 days, 5 s to seed, 5 s to build) → MAE 0.352354 h, coverage 0.7345 —
-the recovery proof. `report` and `attribution-golden` unchanged. Next:
-review rounds, then Phase 6 (counterfactual simulation).
+**Phase 6 implemented, in review (`phase-6-simulation`).** Phases 0–5 merged
+(PRs #1, #2, #4, #5, #6, #7), round-tag fix merged (PR #3). `make simulate
+PROFILE=medium` (seeded, unfrozen) → recommended on-time 0.623291 vs
+baseline 0.460920 (+0.162371; `timing_gap` −10,216; `delivery_fault` and
+`unattributed` unchanged by construction), block matches; `make simulate
+PROFILE=tiny` → block matches (tiny's lift is negative — the `c-morning`
+bin-3/10 tie, 20 users: a regression pin, not a proof); `make power` → 6
+rows, block matches. No dbt, generator or fixture change; tiny manifest
+still 16 lines. Next: review rounds, then Phase 7 (incrementality).
 Open BACKLOG rows: **10**.
 
 (Update this section at the end of every working day.)

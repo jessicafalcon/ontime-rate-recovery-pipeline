@@ -237,3 +237,36 @@ def test_scores_golden_passes_profile_as_one_literal(value: str) -> None:
         assert f"eval.cli scores-golden {quoted}" in out, (origin, out)
         assert f"--write {quoted}" in out  # env-exported WRITE: stated residual
         assert "pwned" not in out.replace(value, "")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""],
+)
+def test_simulate_passes_profile_as_one_literal(value: str) -> None:
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for origin in ("cmdline", "env"):
+        kv = {"PROFILE": value, "WRITE": value}
+        out = _make_n(
+            "simulate",
+            kv if origin == "cmdline" else {},
+            kv if origin == "env" else {},
+        )
+        assert f"eval.cli simulate {quoted}" in out, (origin, out)
+        assert f"--write {quoted}" in out  # env-exported WRITE: stated residual
+        assert "pwned" not in out.replace(value, "")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""],
+)
+def test_power_passes_write_as_one_literal(value: str) -> None:
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for origin in ("cmdline", "env"):
+        kv = {"WRITE": value}
+        out = _make_n(
+            "power", kv if origin == "cmdline" else {}, kv if origin == "env" else {}
+        )
+        assert f"eval.cli power --write {quoted}" in out, (origin, out)
+        assert "pwned" not in out.replace(value, "")
