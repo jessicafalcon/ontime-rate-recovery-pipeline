@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -100,10 +100,20 @@ gen-sources:
 attribution-golden:
 	uv run python -m eval.cli golden $(call _Q,$(value PROFILE)) --write $(call _Q,$(value WRITE))
 
-# Label accuracy vs fixtures/<PROFILE>/truth/prompts.jsonl (eval/cli.py score —
-# the ONLY truth reader); exit 1 below tests/pins.py::LABEL_ACCURACY.
+# Label accuracy vs <PROFILE>/truth/prompts.jsonl plus reachable-centre MAE and
+# coverage vs <PROFILE>/truth/users.jsonl (eval/cli.py score — the ONLY truth
+# reader; fixtures/<PROFILE>/ when frozen, else data/out/<PROFILE>/, marked
+# `(unfrozen)`); exit 1 below LABEL_ACCURACY or off the SEND_TIME_PINS.
 eval:
 	uv run python -m eval.cli score $(call _Q,$(value PROFILE))
+
+# The scores golden (eval/cli.py scores-golden): the built scores_send_time
+# table vs fixtures/<PROFILE>/expected/scores_send_time.csv, sorted by
+# (user_id, cohort_id); exit 1 on any differing row. WRITE=yes (the literal
+# only) writes data/out/<PROFILE>/expected/scores_send_time.csv instead — never
+# fixtures/. Needs `make dbt-build` first.
+scores-golden:
+	uv run python -m eval.cli scores-golden $(call _Q,$(value PROFILE)) --write $(call _Q,$(value WRITE))
 
 # The on-time report (eval/cli.py report): the built ontime_rate_daily mart vs
 # fixtures/<PROFILE>/expected/ontime_rate_daily.csv, sorted by (cohort_id,

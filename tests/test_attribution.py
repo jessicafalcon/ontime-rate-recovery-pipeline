@@ -29,14 +29,19 @@ def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return db
 
 
-def project_vars() -> dict[str, float]:
+def _var(v: str) -> float | str:
+    try:
+        return float(v)
+    except ValueError:  # Phase 5: model_version is a string literal
+        return v.strip()
+
+
+def project_vars() -> dict[str, float | str]:
     """The `vars:` block of dbt_project.yml, without a YAML package (pyyaml is
     dbt's transitive dependency, not ours)."""
     text = (DBT / "dbt_project.yml").read_text()
     block = text.split("\nvars:\n", 1)[1].split("\n\n", 1)[0]
-    return {
-        k.strip(): float(v) for k, v in (ln.split(":") for ln in block.splitlines())
-    }
+    return {k.strip(): _var(v) for k, v in (ln.split(":") for ln in block.splitlines())}
 
 
 def label_counts(db: Path) -> dict[str, int]:
@@ -70,6 +75,10 @@ def test_skew_var_equals_generator_pin() -> None:
         "delivery_grace_min",
         "unattributed_max",
         "retention_days",
+        "feature_window_days",  # Phase 5
+        "max_user_shift_min",
+        "shrinkage_pseudo_count",
+        "model_version",
     }
 
 

@@ -217,3 +217,23 @@ def test_report_passes_profile_as_one_literal(value: str) -> None:
         assert (
             f"--write {quoted}" in out
         )  # env-exported WRITE reaches Python (stated residual)
+
+
+# ------------------------------------------------- Phase 5: scores-golden
+
+
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_scores_golden_passes_profile_as_one_literal(value: str) -> None:
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for origin in ("cmdline", "env"):
+        kv = {"PROFILE": value, "WRITE": value}
+        out = _make_n(
+            "scores-golden",
+            kv if origin == "cmdline" else {},
+            kv if origin == "env" else {},
+        )
+        assert f"eval.cli scores-golden {quoted}" in out, (origin, out)
+        assert f"--write {quoted}" in out  # env-exported WRITE: stated residual
+        assert "pwned" not in out.replace(value, "")

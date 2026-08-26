@@ -166,3 +166,118 @@ policy as above) are the inputs to:
   `tests/test_marts.py::test_retention_is_all_null_on_tiny`;
   `tests/test_marts.py::test_retention_var_equals_pin` (`retention_days`
   = 28, ARCHITECTURE §2.6).
+
+## features_user_hour
+
+Model `dbt/models/features/features_user_hour.sql`, one row per
+`(user_id, hour_local)` with organic opens in the bin — sparse, no row for
+an empty bin. Spec: `ARCHITECTURE.md` §2.8; landed in
+`../specs/phase-5-send-time.md`. Not a served metric (the score's input);
+pinned by `tests/pins.py::ORGANIC_OPEN_ROWS` (the histogram sums to the
+staged organic opens inside the window) and the three feature unit tests.
+
+### `n_opens`
+
+- **Grain:** user × local hour (`extract(hour from client_event_time_local)`
+  — each open on its own local clock, so a tz change mid-window keeps one
+  histogram per user).
+- **Numerator:** organic `app_opened` events (the one event with no
+  `prompt_id`; prompt responses are exposure-biased and never count) with
+  `client_event_time` in the half-open window `(horizon −
+  feature_window_days, horizon]`, `horizon = max(client_event_time)` over
+  all staged events — never the clock.
+- **Denominator:** n/a (a count).
+- **Null policy:** never NULL; a user with no opens has no rows.
+- **Pinned by:** unit tests `features_user_hour_is_organic_only`,
+  `features_user_hour_pools_a_tz_change`,
+  `features_user_hour_respects_the_window`;
+  `tests/test_scores.py::test_tiny_features_match_organic_open_pin`.
+
+## scores_send_time
+
+Model `dbt/models/scores/scores_send_time.sql`, one row per `user_id` (the
+open `dim_user` row). **The model is a dbt model** — Python never computes a
+score; `eval/` measures the columns below against `truth/users.jsonl`
+(reachable-centre MAE off `center_hour_local`, coverage off the served
+time) and prints them with `make eval`. Golden:
+`fixtures/tiny/expected/scores_send_time.csv`, checked by `make
+scores-golden PROFILE=tiny`. Vars (`dbt_project.yml`): `feature_window_days`
+30, `max_user_shift_min` 120, `shrinkage_pseudo_count` 5, `model_version`
+`v1`. `computed_as_of` = `max(client_event_time)` of the opens in the window
+(one value per build; the write-back replaces only on a strictly greater
+`(model_version, computed_as_of)`, ARCHITECTURE §2.9).
+
+Circular arithmetic throughout: an hour bin's centre `h + 0.5` is the angle
+`θ = 2π (h + 0.5) / 24`; a set of opens is its resultant vector
+`(Σ cos θ, Σ sin θ)`; the wrap is `x − 24·floor(x / 24)` and the signed
+short-arc difference `d − 24·floor((d + 12) / 24)` — ANSI on both engines,
+no `%`, no `mod` on floats.
+
+### `cohort_hour_local`
+
+- **Grain:** cohort (repeated on every user row — the band's anchor).
+- **Numerator:** the integer local hour `h` whose window
+  `[h, h + window_minutes)` (circular; `window_minutes` = the cohort's
+  prompts' value, `max` over `stg_prompts`) holds the most pooled organic
+  opens of the cohort's users; ties → the smaller `h` (`order by mass desc,
+  hour_local asc`, never insertion order).
+- **Denominator:** n/a.
+- **Null policy:** never NULL; a cohort with no opens at all cannot be scored
+  and fails `not_null` loudly.
+- **Pinned by:** unit test
+  `scores_send_time_breaks_a_window_tie_by_smaller_hour`;
+  `tests/test_scores.py::test_cohort_moments_and_as_of_match_pins` (tiny's
+  `c-morning` bins 3 and 10 tie at 12 → 3).
+
+### `center_hour_local`
+
+- **Grain:** user.
+- **Numerator:** the posterior direction, in hours `[0, 24)`, of `user
+  vector + k · R̄_c · (cos μ_c, sin μ_c)` — the user's resultant vector plus
+  the cohort prior (pooled direction `μ_c`, mean resultant length `R̄_c`)
+  weighted as `k = shrinkage_pseudo_count` pseudo-opens. With no opens it is
+  `μ_c` exactly. Unclamped — the estimate `eval` scores MAE against;
+  rounded to 6 places.
+- **Denominator:** n/a.
+- **Null policy:** never NULL (see `cohort_hour_local`).
+- **Pinned by:** unit tests `scores_send_time_zero_opens_is_the_prior`,
+  `scores_send_time_shrinks_monotonically`, `scores_send_time_is_circular`
+  (23:xx and 01:xx → 0.5, never 12.5);
+  `tests/test_scores.py::test_tiny_mae_and_coverage_match_pins`,
+  `::test_medium_mae_and_coverage_match_pins`.
+
+### `confidence`
+
+- **Grain:** user.
+- **Numerator:** the mean resultant length of the combined vector,
+  `|user vector + k · R̄_c · (cos μ_c, sin μ_c)|`.
+- **Denominator:** `n_opens + k`. In `[0, 1]`: 1 = every open (and the
+  prior) in one direction, 0 = uniform. With no opens it is `R̄_c` exactly —
+  the prior's own value (Done-when 2). Rounded to 6 places.
+- **Null policy:** never NULL (see `cohort_hour_local`).
+- **Pinned by:** unit tests `scores_send_time_zero_opens_is_the_prior`,
+  `scores_send_time_shrinks_monotonically` (rises with `n`);
+  `tests/test_scores.py::test_every_served_time_is_inside_the_band_and_in_range`.
+
+### `send_hour_local`
+
+- **Grain:** user (with `send_minute_local`, the served time).
+- **Numerator:** `cohort_hour_local + clamp(shift, ±max_user_shift_min /
+  60)` where `shift` is the signed short-arc difference `center_hour_local −
+  cohort_hour_local`; wrapped to `[0, 24)`, then rounded to whole minutes on
+  the 1440-minute circle and split: `send_hour_local = floor(minutes / 60)`,
+  `send_minute_local = minutes − 60·send_hour_local`.
+- **Denominator:** n/a.
+- **Null policy:** never NULL; `0–23` and `0–59` (singular test).
+- **Pinned by:** `dbt/tests/assert_send_time_within_band.sql`; unit test
+  `scores_send_time_clamps_to_the_band_edge`;
+  `tests/test_scores.py::test_every_served_time_is_inside_the_band_and_in_range`;
+  the golden.
+
+### `send_minute_local`
+
+- **Grain:** user — the minute half of `send_hour_local`'s definition.
+- **Numerator:** see `send_hour_local`.
+- **Denominator:** n/a.
+- **Null policy:** never NULL; `0–59`.
+- **Pinned by:** as `send_hour_local`.
