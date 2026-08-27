@@ -245,7 +245,7 @@ authoritative if the landing diverges.)
 | 2 | `tests/test_writeback.py::test_writeback_twice_is_a_noop` (second run writes 0 rows, `send_schedule` hash identical); `make writeback PROFILE=tiny` run twice in the DONE command → `20 written` then `0 written` |
 | 3 | `tests/test_writeback.py::test_send_schedule_has_the_nine_columns` (DDL vs §2.9); `::test_tz_is_the_open_dim_user_row`; `::test_written_at_equals_computed_as_of`; `::test_writeback_under_tokyo_is_identical`; `tests/pins.py::SEND_SCHEDULE_ROWS_TINY` (20) |
 | 4 | `tests/test_pipeline.py::test_pipeline_send_schedule_matches_pin` (`make pipeline` → `send_schedule` == the pinned hash); `::test_pipeline_equals_standalone_writeback` (the chained write-back == the standalone one after dropping the table); `::test_pipeline_scores_equal_frozen_golden` (scores unchanged — the chain re-derives no score); `make pipeline PROFILE=tiny` → `pipeline OK: tiny` |
-| 5 | `tests/test_truth_isolation.py` (now covers `serving/`); `tests/test_writeback.py::test_writeback_reads_only_scores_and_dim_current`; `make attribution-golden/report/scores-golden/eval PROFILE=tiny` all `0 differ`/pins; `dbt/models/marts/schema.yml` `dim_user_current` `unique`/`not_null` tests green |
+| 5 | `tests/test_truth_isolation.py` (now covers `serving/`); `tests/test_writeback.py::test_writeback_reads_only_scores_and_dim_current`; `::test_writeback_refuses_without_a_db` (the `_require_db` guard); `make attribution-golden/report/scores-golden/eval PROFILE=tiny` all `0 differ`/pins; `dbt/models/marts/schema.yml` `dim_user_current` `unique`/`not_null` tests green |
 | 6 | `git diff main --stat -- generator/ fixtures/` empty; `uv.lock` unchanged; `tests/test_dbt_conventions.py::test_exactly_five_dispatch_macros`; review-gate `PASS fixtures` |
 
 ## Invariants (REQUIRED)
@@ -265,12 +265,15 @@ operator addresses (the SQL operators act on `case` arms only); they are pinned
 by tests (the nine-column, tz, written_at and non-UTC tests), not the sweep. The
 `dim_user_current` model is one CTE with no `case`, so it has no SQL mutation
 line; its uniqueness/not-null are dbt tests. Every Python invariant gets a
-mutation line:
+mutation line; `_require_db` (round 1, finding 1) is a robustness precondition
+rather than a core data invariant — it refuses when the build has not run, pinned
+by `test_writeback_refuses_without_a_db` and its `invert-guard` line:
 
 ```mutations
 serving/writeback.py::should_replace     invert-guard
 serving/writeback.py::apply_writeback    delete-call
 serving/cli.py::validate_name            invert-guard
+serving/cli.py::_require_db              invert-guard
 ```
 
 Equivalent-mutant / refused exclusions, named up front and verified once at

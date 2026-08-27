@@ -285,3 +285,14 @@ def test_cli_refuses_bad_profile() -> None:
         with pytest.raises(SystemExit) as e:
             cli.writeback(bad)
         assert e.value.code == 2
+
+
+def test_writeback_refuses_without_a_db() -> None:
+    """No data/<p>.duckdb → the guard refuses (SystemExit 2), not a confusing
+    downstream failure (round 1, finding 1)."""
+    from serving import cli
+
+    assert not loader.db_path("nodbabsent").is_file()  # precondition
+    with pytest.raises(SystemExit) as e:
+        cli.writeback("nodbabsent")
+    assert e.value.code == 2
