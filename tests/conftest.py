@@ -7,8 +7,9 @@
    marker every `tests/integration` test is SKIPPED, loudly (Phase 8b added the
    directory — `test_int_airflow.py`; the guard predates it so adding it could
    not forget the rule).
-2. CONFIRM / MAKEFLAGS / PROFILE / TARGET are scrubbed so the Makefile-invoking
-   tests (tests/test_makefile.py) see a clean env.
+2. The make user-variables (CONFIRM, PROFILE, TARGET, THROUGH, WRITE, FULL) and
+   MAKEFLAGS are scrubbed so the Makefile-invoking tests (tests/test_makefile.py)
+   see a clean env.
 """
 
 import os
@@ -34,7 +35,8 @@ def pytest_collection_modifyitems(
 
 @pytest.fixture(autouse=True)
 def _scrub_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    # Keep in step with tests/test_makefile.py::SCRUB (round 3 #12).
+    # The make user-variables + MAKEFLAGS. tests/test_makefile.py::SCRUB is a
+    # superset (it also drops the gate vars SPEC/BASE/DELETED and MFLAGS).
     for var in (
         "CONFIRM",
         "MAKEFLAGS",

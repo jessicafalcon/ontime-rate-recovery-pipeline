@@ -56,15 +56,18 @@ def _exec(
 
 @pytest.fixture(scope="module")
 def airflow_container() -> Iterator[None]:
-    # Positive control (round 3 #5): plant a secret-shaped file in the build
-    # context; .dockerignore (`**/*-key.json`) must keep it OUT of the image, so
-    # test_image_has_no_secrets is not vacuous. Removed right after the build.
-    canary = ROOT / "otr-canary-key.json"
-    canary.write_text("{}\n")
+    # Positive control (round 3 #5, round 4 #3): plant secret-shaped files in the
+    # build context — a `*-key.json` and a `credentials*` — so .dockerignore must
+    # keep BOTH out of the image (test_image_has_no_secrets is not vacuous).
+    # .gitignored (`*otr-canary*`); removed right after the build regardless.
+    canaries = [ROOT / "otr-canary-key.json", ROOT / "credentials-otr-canary.yaml"]
+    for c in canaries:
+        c.write_text("{}\n")
     try:
         build = _compose(["build"], timeout=1800)
     finally:
-        canary.unlink(missing_ok=True)
+        for c in canaries:
+            c.unlink(missing_ok=True)
     assert build.returncode == 0, build.stderr[-4000:]
     up = _compose(["up", "-d"], timeout=300)
     assert up.returncode == 0, up.stderr[-2000:]
@@ -144,18 +147,18 @@ def test_dag_edges_and_operators(airflow_container: None) -> None:
 
 
 def test_image_has_no_secrets(airflow_container: None) -> None:
-    """Round 2/3 #1/#2/#5: `COPY . /opt/otr` must bake no secret file from the repo
-    — `.dockerignore`'s `**/`-anchored patterns exclude them. The repo IS in the
-    image (Makefile present), so an empty result is meaningful; the planted
-    `otr-canary-key.json` (a `**/*-key.json`) proves the exclusion bites. The scan
-    is over the REPO's files, pruning the build-created `.venv` (library code like
-    dbt's `credentials.py` is not a repo secret)."""
+    """Round 2/3/4 #1/#2/#5/#3: `COPY . /opt/otr` must bake no secret file from the
+    repo — `.dockerignore`'s `**/`-anchored patterns exclude them. The repo IS in
+    the image (Makefile present), so an empty result is meaningful; the planted
+    canaries (a `**/*-key.json` and a `**/credentials*`) prove the exclusion bites.
+    The scan is over the REPO's files, pruning the build-created `.venv` (library
+    code like dbt's `credentials.py` is not a repo secret)."""
     assert _exec("test -f /opt/otr/Makefile && echo yes").stdout.strip() == "yes"
     r = _exec(
         r"find /opt/otr -path /opt/otr/.venv -prune -o \( "
         r"-name '.env' -o -name '.env.*' -o -name '*.tfvars' -o -name '*.tfstate*' "
         r"-o -name '*-key.json' -o -name '*-credentials.json' "
-        r"-o -name 'credentials.json' -o -name 'service-account*.json' "
+        r"-o -name 'credentials*' -o -name 'service-account*.json' "
         r"-o -name '.terraform' \) -print 2>/dev/null; true"
     )
     assert r.stdout.strip() == "", f"secrets baked into the image:\n{r.stdout}"
@@ -197,7 +200,7 @@ def test_backfill_equals_union(airflow_container: None, tmp_path: Path) -> None:
 
 
 def test_backfill_runs_green(airflow_container: None) -> None:
-    """The three-interval catchup completes all tasks green (each BashOperator a
+    """The three-interval backfill completes all tasks green (each BashOperator a
     separate subprocess on data/<p>.duckdb) — the single-writer hand-off. The
     final send_schedule has one row per scored user."""
     _reset_db()

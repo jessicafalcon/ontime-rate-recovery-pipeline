@@ -23,16 +23,23 @@ from typing import Any
 
 from orchestration import tasks
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parent.parent  # resolve: match the DAG's REPO (#6)
 DAG_FILE = ROOT / "orchestration" / "dags" / "pipeline_dag.py"
 
 PIPELINE_WRITING_STEPS = ["dbt_build", "writeback"]
 
 
 class _StubOp:
-    """A BashOperator stand-in that records its kwargs and `>>` edges."""
+    """A BashOperator stand-in that records its kwargs and `>>` edges. Every
+    instance is registered so the test can assert the TOTAL operator count — a
+    third operator built anywhere (not only in `steps`) is caught offline (#1).
+    (DAG↔task attachment itself — an op attached to a different dag — is the
+    container test's job; the stub does not model Airflow's registration.)"""
+
+    instances: list[_StubOp] = []
 
     def __init__(self, **kw: Any) -> None:
+        _StubOp.instances.append(self)
         self.kw = kw
         self.task_id = kw.get("task_id")
         self.downstream: list[_StubOp] = []
@@ -66,6 +73,7 @@ def _load_dag() -> tuple[_StubDAG, list[_StubOp]]:
     bash.BashOperator = _StubOp  # type: ignore[attr-defined]
     operators.bash = bash  # type: ignore[attr-defined]
     airflow.operators = operators  # type: ignore[attr-defined]
+    _StubOp.instances = []  # reset the registry for this load (#1)
     names = ("airflow", "airflow.operators", "airflow.operators.bash")
     saved = {n: sys.modules.get(n) for n in names}
     sys.modules.update(
@@ -126,6 +134,7 @@ def test_dag_object_config_is_the_safe_scheduling() -> None:
     assert dag.kw["is_paused_upon_creation"] is True
     assert dag.kw["max_active_runs"] == 1
     assert dag.kw["start_date"] == datetime(2026, 1, 6)
+    assert dag.kw["default_args"] == {"retries": 0}  # determinism lever (#2)
 
 
 def test_dag_object_tasks_edges_and_operator_kwargs() -> None:
@@ -133,6 +142,8 @@ def test_dag_object_tasks_edges_and_operator_kwargs() -> None:
     command and `cwd` = the repo root (exact value), and the edge dbt_build →
     writeback with DIRECTION (reversing it fails here; round 3 #1/#4)."""
     _, steps = _load_dag()
+    # exactly two operators constructed in total — a third built anywhere fails (#1)
+    assert len(_StubOp.instances) == 2
     assert [op.task_id for op in steps] == PIPELINE_WRITING_STEPS
     for op in steps:
         assert isinstance(op, _StubOp)

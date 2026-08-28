@@ -7,7 +7,7 @@ byte-identical to a single union run. It holds because scores/marts are table
 (recomputed each build), stg/attribution converge to the union at the final
 landing (Phase 7, gaps ≤ lookback_days), and the write-back replaces a row only
 on a strictly greater — monotone — (model_version, computed_as_of), so the union
-interval's rows win. This is the make-level analogue of the DAG's catchup, which
+interval's rows win. This is the make-level analogue of the DAG's backfill, which
 test_int_airflow proves in the container. Real in-process builds into tmp DBs
 (loader.DATA redirected); no service, no network."""
 
@@ -56,12 +56,14 @@ def _scores_state(db: Path) -> tuple[str, object]:
     """(content hash of the served score columns, max computed_as_of)."""
     con = duckdb.connect(str(db))
     try:
+        # the served columns the write-back writes — incl. confidence (#4)
         h = con.execute(
             "select md5(string_agg(r, '|' order by r)) from ("
             "select user_id || '/' || cohort_id || '/' "
             "|| cast(center_hour_local as varchar) || '/' "
             "|| cast(send_hour_local as varchar) || ':' "
-            "|| cast(send_minute_local as varchar) as r "
+            "|| cast(send_minute_local as varchar) || '/' "
+            "|| cast(confidence as varchar) as r "
             "from main_scores.scores_send_time)"
         ).fetchone()[0]
         as_of = con.execute(
