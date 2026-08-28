@@ -81,10 +81,11 @@ overlap (a race turned into an exception is not a guarantee).
 
 **4. `make pipeline` ≡ the DAG (Done-when clause 1) — fact (two tests).** An
 **offline structure test** (`tests/test_dag_structure.py::
-test_dag_tasks_are_the_pipeline_steps_in_order`) imports the Airflow-free
+test_dag_tasks_are_the_pipeline_writing_steps_in_order`) imports the Airflow-free
 `orchestration/tasks.py` manifest and asserts its ordered commands are `make
-pipeline`'s three steps in order (the build carrying `THROUGH`); the DAG is built
-from the same manifest, so DAG == manifest by construction. A **container test**
+pipeline`'s writing steps in order (`dbt build → write-back`, the build carrying
+`THROUGH`; eval excluded — Amendment 1); the DAG is built from the same manifest,
+so DAG == manifest by construction. A **container test**
 (`tests/integration/test_int_airflow.py::test_dag_run_matches_make_pipeline`,
 behind `OTR_INT`) asserts a real `airflow dags test` run's `scores_send_time`
 **and** `send_schedule` are byte-identical to `make pipeline`'s (pinned
