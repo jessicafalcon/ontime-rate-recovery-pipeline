@@ -12,6 +12,7 @@
 """
 
 import os
+from collections.abc import Iterator
 
 import pytest
 
@@ -32,7 +33,7 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(autouse=True)
-def _scrub_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _scrub_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     for var in ("CONFIRM", "MAKEFLAGS", "PROFILE", "TARGET"):
         monkeypatch.delenv(var, raising=False)
     yield

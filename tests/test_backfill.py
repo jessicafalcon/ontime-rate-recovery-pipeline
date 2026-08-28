@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+import duckdb
 import pytest
 
 from loader import cli
@@ -49,6 +50,30 @@ def test_three_through_landings_equal_the_union(
         db_union = _run_chain(tmp_path / "union", [""], m)  # "" = one full landing
         h_union = send_schedule_hash(db_union)
     assert h_backfill == h_union == pins.SEND_SCHEDULE_SHA256_TINY
+
+
+def test_computed_as_of_is_non_decreasing_across_landings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invariant 5's precondition (Amendment 2): every backfill landing advances
+    (or ties) `max(computed_as_of)` — the write-back's replace-iff-*greater*
+    discriminator. This is what makes each landing's scores overtake the stale
+    row and the union interval win; a landing that changed scores while
+    `computed_as_of` receded would break backfill≡union (BACKLOG)."""
+    monkeypatch.setattr(loader, "DATA", tmp_path / "mono")
+    seen: list[object] = []
+    for through in pins.BACKFILL_THROUGHS_TINY:
+        assert cli.dbt_build("tiny", "", through=through) == 0
+        con = duckdb.connect(str(loader.db_path("tiny")))
+        try:
+            seen.append(
+                con.execute(
+                    "select max(computed_as_of) from main_scores.scores_send_time"
+                ).fetchone()[0]
+            )
+        finally:
+            con.close()
+    assert seen == sorted(seen), seen  # non-decreasing across the three landings
 
 
 def test_backfill_interval_twice_is_a_noop(

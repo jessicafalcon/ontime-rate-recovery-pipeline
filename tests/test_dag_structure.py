@@ -1,14 +1,19 @@
 """Phase 8b (specs/phase-8b-airflow-dag.md): the DAG is `make pipeline` minus the
-scheduler, with no logic (Done-when 1, invariants 1 and 6).
+scheduler, with no logic and the safe scheduling config (Done-when 1, invariants
+1 and 6; Amendment 2).
 
 Offline and Airflow-free: it imports the `orchestration.tasks` manifest (pure
-Python) and text-scans `orchestration/dags/pipeline_dag.py` — it never imports
-airflow, because apache-airflow is Docker-only and absent from the venv. The
-container proof that the DAG RUN equals `make pipeline` is
-`tests/integration/test_int_airflow.py`."""
+Python) and **parses `orchestration/dags/pipeline_dag.py` with `ast`** — asserting
+the actual `DAG(...)` kwarg VALUES (`catchup`, `max_active_runs`, `start_date`)
+and operator structure, not substring matches (round 2: a substring scan let
+`catchup=True`/`=16`/`"medium"` survive). It never imports airflow, which is
+Docker-only. The authoritative RUNTIME structural pin — real task set, the
+`dbt_build → writeback` edge, BashOperator-only — is
+`tests/integration/test_int_airflow.py::test_dag_edges_and_operators`."""
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from orchestration import tasks
@@ -21,10 +26,37 @@ DAG_FILE = ROOT / "orchestration" / "dags" / "pipeline_dag.py"
 PIPELINE_WRITING_STEPS = ["dbt_build", "writeback"]
 
 
+def _func_name(func: ast.expr) -> str | None:
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _tree() -> ast.Module:
+    return ast.parse(DAG_FILE.read_text())
+
+
+def _calls(name: str) -> list[ast.Call]:
+    return [
+        n
+        for n in ast.walk(_tree())
+        if isinstance(n, ast.Call) and _func_name(n.func) == name
+    ]
+
+
+def _dag_kwargs() -> dict[str, ast.expr]:
+    dag_calls = _calls("DAG")
+    assert len(dag_calls) == 1, "expected exactly one DAG(...) call"
+    return {kw.arg: kw.value for kw in dag_calls[0].keywords if kw.arg}
+
+
 def test_dag_tasks_are_the_pipeline_writing_steps_in_order() -> None:
     """The manifest's ordered task ids and commands ARE make pipeline's writing
     steps — dbt build → write-back — the build carrying the interval's THROUGH;
-    eval is excluded (it reads truth and asserts full-data pins — Amendment 1)."""
+    eval is excluded (Amendment 1). PROFILE is pinned to tiny (not self-referential)."""
+    assert tasks.PROFILE == "tiny"
     assert [task_id for task_id, _ in tasks.TASKS] == PIPELINE_WRITING_STEPS
     commands = {task_id: cmd for task_id, cmd in tasks.TASKS}
     assert commands["dbt_build"] == (
@@ -36,42 +68,62 @@ def test_dag_tasks_are_the_pipeline_writing_steps_in_order() -> None:
 
 def test_through_token_is_data_interval_end() -> None:
     """The interval reaches THROUGH only as a literal Jinja token Airflow renders
-    — data_interval_END (the window's close), not a date we compute."""
+    — data_interval_END (the window's close), single-quoted, not a date we compute."""
     assert tasks.THROUGH_TEMPLATE == "{{ data_interval_end | ds }}"
     dbt_build_cmd = dict(tasks.TASKS)["dbt_build"]
-    assert "THROUGH='{{ data_interval_end | ds }}'" in dbt_build_cmd  # single-quoted
+    assert "THROUGH='{{ data_interval_end | ds }}'" in dbt_build_cmd
     assert "now(" not in dbt_build_cmd
 
 
-def test_dag_uses_only_bash_operators_and_no_python_callable() -> None:
-    """No logic: the ONLY operator constructed is a BashOperator, built inside the
-    comprehension over TASKS (no standalone/hand-added operator) — so the only
-    computation is Airflow's own templating. (The strong structural pin — task
-    set, edges, operator types via the real DAG object — is
-    tests/integration/test_int_airflow.py::test_dag_edges_and_operators, which can
-    import airflow inside the container.)"""
+def test_dag_config_pins_the_safe_scheduling() -> None:
+    """dag_id, catchup=False (Amendment 2 — no auto-catch-up-to-now), and
+    max_active_runs=1 (single-writer on data/<p>.duckdb) are asserted by their
+    PARSED values, so flipping any literal fails here (round 2 #3/#4)."""
+    kw = _dag_kwargs()
+    assert isinstance(kw["dag_id"], ast.Constant) and kw["dag_id"].value == "pipeline"
+    assert isinstance(kw["catchup"], ast.Constant) and kw["catchup"].value is False
+    assert (
+        isinstance(kw["max_active_runs"], ast.Constant)
+        and kw["max_active_runs"].value == 1
+    )
+    # start_date is a real datetime(...) constant, not now()/today() (round 2 #22)
+    assert "start_date" in kw
+    assert isinstance(kw["start_date"], ast.Call)
+    assert _func_name(kw["start_date"].func) == "datetime"
+    assert "schedule" in kw
+
+
+def test_dag_uses_only_one_bash_operator_over_tasks() -> None:
+    """No logic: exactly one operator is constructed, it is a BashOperator, it is
+    built over TASKS with a cwd, and no Python task appears (round 2 #5/#6/#14)."""
     text = DAG_FILE.read_text()
     assert "from orchestration.tasks import TASKS" in text
-    # exactly one operator constructor, and it iterates TASKS
-    assert text.count("Operator(") == 1, "only one operator should be constructed"
-    assert "BashOperator(task_id=task_id, bash_command=command" in text
-    assert "for task_id, command in TASKS" in text
+    operator_calls = [
+        n
+        for n in ast.walk(_tree())
+        if isinstance(n, ast.Call) and (_func_name(n.func) or "").endswith("Operator")
+    ]
+    assert len(operator_calls) == 1, "exactly one operator should be constructed"
+    op = operator_calls[0]
+    assert _func_name(op.func) == "BashOperator"
+    kw = {k.arg for k in op.keywords}
+    assert {"task_id", "bash_command", "cwd"} <= kw, kw  # cwd wired (round 2 #6)
+    assert "for task_id, command in TASKS" in text  # built over the manifest
     for forbidden in ("PythonOperator", "python_callable", "@task", "datetime.now"):
         assert forbidden not in text, forbidden
 
 
-def test_dag_wires_edges_in_dependency_order() -> None:
-    """The DAG chains the steps (`upstream >> downstream` over consecutive pairs) —
-    deleting the edge loop must fail here (invariant 1: ordered, not just present).
-    The runtime edge check is the container test."""
-    text = DAG_FILE.read_text()
-    assert "for upstream, downstream in zip(steps, steps[1:]" in text
-    assert "upstream >> downstream" in text
-
-
-def test_dag_serialises_writes() -> None:
-    """max_active_runs=1 (one writer on data/<p>.duckdb — DuckDB is single-writer)
-    and catchup=False (no auto-catch-up-to-now; backfill is explicit — Amendment 2)."""
-    text = DAG_FILE.read_text()
-    assert "max_active_runs=1" in text
-    assert "catchup=False" in text
+def test_dag_declares_dependencies() -> None:
+    """The DAG wires edges — a `>>` chain or an explicit `chain(...)` /
+    `cross_downstream(...)` (robust to a refactor; round 2 #20). Deleting all
+    edge-wiring fails here; the ordered runtime edge is the container test."""
+    tree = _tree()
+    has_rshift = any(
+        isinstance(n, ast.BinOp) and isinstance(n.op, ast.RShift)
+        for n in ast.walk(tree)
+    )
+    has_chain = any(
+        isinstance(n, ast.Call) and _func_name(n.func) in {"chain", "cross_downstream"}
+        for n in ast.walk(tree)
+    )
+    assert has_rshift or has_chain, "the DAG declares no task dependencies"

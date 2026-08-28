@@ -14,7 +14,9 @@ full idempotent runs"."""
 
 from __future__ import annotations
 
+import shlex
 import subprocess
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -66,7 +68,13 @@ def airflow_container() -> Iterator[None]:
         assert "pipeline_dag" not in errs.stdout, errs.stdout
         yield
     finally:
-        _compose(["down", "-v"], timeout=180)
+        down = _compose(["down", "-v"], timeout=180)
+        if down.returncode != 0:  # a failed teardown leaks a container (round 2 #17)
+            warnings.warn(
+                f"container teardown failed ({down.returncode}) — may leak "
+                f"otr-airflow-8b: {down.stderr[-500:]}",
+                stacklevel=2,
+            )
 
 
 def _reset_db() -> None:
@@ -86,11 +94,16 @@ def _pull_db(tmp_path: Path) -> Path:
 
 
 def _query(sql: str) -> str:
-    """Run a scalar query against the container's DuckDB via the project venv;
-    return the result as a string (its last stdout line)."""
+    """Scalar query against the container's DuckDB via the project venv — opened
+    READ-ONLY, with the SQL passed as argv (not interpolated into the shell string;
+    round 2 #21). Returns the result's last stdout line."""
+    py = (
+        "import duckdb,sys;"
+        "print(duckdb.connect(sys.argv[1], read_only=True)"
+        ".execute(sys.argv[2]).fetchone()[0])"
+    )
     out = _exec(
-        'uv run python -c "import duckdb;'
-        f"print(duckdb.connect('{CONTAINER_DB}').execute({sql!r}).fetchone()[0])\""
+        f"uv run python -c {shlex.quote(py)} {CONTAINER_DB} {shlex.quote(sql)}"
     ).stdout
     return out.strip().splitlines()[-1]
 
@@ -120,6 +133,20 @@ def test_dag_edges_and_operators(airflow_container: None) -> None:
     )
     out = _exec(f'python -c "{snippet}"').stdout
     assert "EDGES_OK" in out, out
+
+
+def test_image_has_no_secrets(airflow_container: None) -> None:
+    """Round 2 #1/#2: `COPY . /opt/otr` must bake no secret file and no terraform
+    cache — `.dockerignore` (with `**/`-anchored patterns) excludes them. Assert
+    the BUILT image carries none (the pin the .dockerignore lacked)."""
+    r = _exec(
+        r"find /opt/otr \( -name '.env' -o -name '*.tfvars' -o -name '*.tfstate*' "
+        r"-o -name '*-key.json' -o -name 'service-account*.json' -o -name '.terraform' "
+        r"\) -print 2>/dev/null; true"
+    )
+    assert r.stdout.strip() == "", (
+        f"secrets/terraform baked into the image:\n{r.stdout}"
+    )
 
 
 def test_dag_run_matches_make_pipeline(airflow_container: None, tmp_path: Path) -> None:
