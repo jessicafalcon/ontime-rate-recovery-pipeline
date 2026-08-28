@@ -209,7 +209,13 @@ Python is reserved for `eval/`.
 confidence, model_version, computed_as_of, written_at)`. Written by an
 idempotent batch upsert keyed `user_id`; a row is replaced only when
 `(model_version, computed_as_of)` is strictly greater. The notification service
-falls back to the cohort default when no row exists.
+falls back to the cohort default when no row exists. `tz` is the current (open
+SCD2) `dim_user` zone, joined at write-back time from the `dim_user_current`
+model (Phase 8a), not carried on the score. `written_at = computed_as_of` on the
+DuckDB stand-in (Phase 8a): a per-row data-derived value keeps `send_schedule`
+byte-identical on a re-run and under a backfill — a wall clock would break both
+(§4, the determinism policy); a production serving store may stamp a real ingest
+time in a carved-out audit column, never asserted.
 
 ## 3. Components
 
@@ -243,7 +249,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
 | eval | dbt outputs, truth, the profile JSON (the generator's input) | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), the marker-confined blocks of `docs/RESULTS.md` and `docs/AB_DESIGN.md` *(Phase 6; `WRITE=yes` only)* | write any table the pipeline reads; write under `fixtures/`; create or append to a doc |
-| write-back | `scores_send_time` | `send_schedule` | read truth; read raw |
+| write-back | `scores_send_time`, `dim_user_current` (the open `dim_user` row's tz — Phase 8a) | `send_schedule` | read truth; read raw; re-derive a score |
 | Airflow | — | — | contain logic (it orders `make` targets / dbt commands) |
 
 ### 3.2 Local ↔ GCP profile switch

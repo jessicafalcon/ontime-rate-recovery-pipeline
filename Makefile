@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -142,3 +142,17 @@ simulate:
 # same check / WRITE=yes shape as simulate. No PROFILE — both profiles' rows.
 power:
 	uv run python -m eval.cli power --write $(call _Q,$(value WRITE))
+
+# The write-back (serving/cli.py writeback): upsert scores_send_time + the open
+# dim_user tz into serving.send_schedule (the DuckDB stand-in for Spanner, §2.9),
+# replacing a user's row only on a strictly greater (model_version,
+# computed_as_of); idempotent (a re-run writes 0). No CONFIRM: it is
+# `create table if not exists` + upsert, never destructive. Needs `dbt-build`.
+writeback:
+	uv run python -m serving.cli writeback $(call _Q,$(value PROFILE))
+
+# The local pipeline with no scheduler (serving/cli.py pipeline): dbt build →
+# eval → write-back in one validated process, producing scores_send_time and
+# send_schedule. Phase 8b's Airflow DAG orders the same steps as make targets.
+pipeline:
+	uv run python -m serving.cli pipeline $(call _Q,$(value PROFILE))

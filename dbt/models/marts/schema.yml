@@ -61,6 +61,21 @@ models:
       - name: retained
         description: docs/METRICS.md § retained — NULL until the window closes; on tiny every row.
 
+  - name: dim_user_current
+    description: >
+      The current (open SCD2) dim_user row per user — the serving tz the
+      write-back stamps into send_schedule (ARCHITECTURE §2.9). `valid_to is
+      null` is the open row (generator/dims.py); one row per user. The
+      write-back reads this dbt output for tz, never raw.dim_user (§3.1).
+    columns:
+      - name: user_id
+        data_tests: [unique, not_null]
+      - name: cohort_id
+        data_tests: [not_null]
+      - name: tz
+        description: The IANA zone the open dim_user row carries (the user's current zone).
+        data_tests: [not_null]
+
 unit_tests:
   - name: ontime_rate_daily_five_labels_one_day
     description: >

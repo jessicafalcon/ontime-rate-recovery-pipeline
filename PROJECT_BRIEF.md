@@ -279,6 +279,10 @@ day; docs last so the numbers in them are real.
 
 ## 7. Current status & next action
 
+> **Live status is `CLAUDE.md` § Current status**, not this section. This is the
+> origin snapshot (Phase 0 era) kept as the plan's starting point; it is not
+> updated per phase.
+
 - **Done:** premise validation (§5; generator + dataset exist locally, **not
   yet committed**). Architecture and full phase plan agreed. Deployment
   decisions locked (region, dual-path, Composer-once). **Architecture review

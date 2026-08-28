@@ -131,3 +131,12 @@ LANDING1_FINAL_PROMPTS_TINY = 60
 # The one tiny duplicate whose copies land on different upload dates (2026-01-05,
 # 2026-01-06): the dedupe keeps the earliest upload across landings.
 STRADDLING_DUPLICATE_TINY = "e-0000259"
+
+# fixtures/tiny — Phase 8a (write-back to send_schedule). One send_schedule row
+# per scored user (the open dim_user row); tz is the CURRENT zone (the open SCD2
+# row), written_at = computed_as_of (data-derived). The hash is over the nine
+# §2.9 columns rendered as canonical CSV (eval/golden.render), sorted by user_id.
+SEND_SCHEDULE_ROWS_TINY = 20  # == SCORES_ROWS
+SEND_SCHEDULE_SHA256_TINY = (
+    "4dab2540765a776cca8b41634861b34c5e0978a9db19b81dcc7405abc08e491e"
+)

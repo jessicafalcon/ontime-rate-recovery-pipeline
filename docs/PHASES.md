@@ -244,6 +244,24 @@ PROFILE=<p>` runs the same chain without Airflow; `make test-int-airflow`.
 `scores_send_time` and `send_schedule`; a backfill over three intervals equals
 one run over the union.
 
+**Split 8a/8b** (seven pinned decisions exceed the ≤6 cap). **8a** = the
+write-back + `make pipeline` — the byte-identical chain, no scheduler; **8b** =
+the Airflow DAG + `make test-int-airflow` + backfill≡union.
+
+**Delivered — 8a** (`phase-8-orchestration`, spec `specs/phase-8a-write-back.md`):
+`serving/writeback.py` upserts `scores_send_time` + the open-`dim_user` tz (a new
+`dim_user_current` mart) into `serving.send_schedule` (the DuckDB stand-in for
+Spanner, §2.9), replacing a user's row only on a strictly greater
+`(model_version, computed_as_of)` (`should_replace`, key `user_id`);
+`written_at = computed_as_of` (data-derived, no clock); idempotent (a re-run
+writes 0). `make writeback` and `make pipeline` (dbt build → eval → write-back in
+one process) land; no `CONFIRM` (non-destructive). tiny: 20 users, 20 written
+then 0; `send_schedule` byte-identical (pinned hash); every Phase 3–6 gate
+byte-identical (report 0.609756, scores-golden 0 differ, eval MAE 0.816201);
+`make mutate` 3/3. No new package (Airflow is 8b's Docker); `fixtures/tiny/`
+untouched. Phase 9a was set aside to run this checkpoint first. **8b** (Airflow
+DAG, `test-int-airflow`, backfill≡union) is the next PR.
+
 ---
 
 ## Phase 9 — GCP foundation (Terraform, BigQuery)

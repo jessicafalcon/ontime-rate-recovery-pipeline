@@ -47,7 +47,8 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   pipeline.
 - `dbt/` — the dbt project: `models/staging` (Phase 2), `models/attribution`
   (Phase 3), `models/marts` (Phase 4: `ontime_rate_daily`,
-  `ontime_retention`; every metric defined once in `docs/METRICS.md`),
+  `ontime_retention`; every metric defined once in `docs/METRICS.md`; Phase 8a:
+  `dim_user_current` — the open `dim_user` row per user, the write-back's tz),
   `models/features` (Phase 5: `features_user_hour` — organic `app_opened`
   local-hour histogram per user), `models/scores` (Phase 5:
   `scores_send_time` — the send-time model, cohort band + circular
@@ -75,9 +76,15 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   of generated doc blocks). Writes console, `data/out/<p>/expected/` and
   the marked blocks of `docs/RESULTS.md` / `docs/AB_DESIGN.md` only —
   never a table, never `fixtures/`.
-- `serving/` *(Phase 8; Spanner target Phase 10)* — write-back to
-  `send_schedule`.
-- `orchestration/` *(Phase 8)* — the Airflow DAG. No logic, only ordering.
+- `serving/` *(Phase 8a; Spanner target Phase 10)* — the idempotent write-back:
+  `writeback.py` (`should_replace` replace-iff-greater on the row's own
+  `(model_version, computed_as_of)`, key `user_id`; `apply_writeback`
+  delete-and-insert of winners; `written_at = computed_as_of`), `cli.py`
+  (`writeback`, `pipeline`), `ddl.sql` (hand-written 9-column serving DDL, §2.9).
+  Reads `scores_send_time` + `dim_user_current` (tz), writes `serving.send_schedule`;
+  never truth/raw. A pipeline dir — guarded by `test_truth_isolation.py`.
+- `orchestration/` *(Phase 8b)* — the Airflow DAG (Docker-local). No logic, only
+  ordering.
 - `infra/` *(Phase 9+)* — Terraform; `modules/composer`, `modules/spanner`
   behind `enable_*` toggles.
 - `fixtures/tiny/` — golden `raw/events_<upload-date>.jsonl` + `dims/` +
@@ -217,10 +224,22 @@ AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuer
   at α 0.05 / power 0.8 off the pinned baseline rates, rendered as the
   `<!-- power:begin -->` block of `docs/AB_DESIGN.md`; same check /
   `WRITE=yes` shape; prints `power OK: 6 rows, block matches`
+- `make writeback PROFILE=<p>` — the idempotent write-back (`serving/cli.py
+  writeback`): upsert `scores_send_time` + the open-`dim_user` tz
+  (`dim_user_current`) into `serving.send_schedule` (the DuckDB stand-in for
+  Spanner, §2.9), replacing a user's row only on a strictly greater
+  `(model_version, computed_as_of)`; `written_at = computed_as_of`. Prints
+  `writeback OK: <p>, N users, M written` — a re-run over the same scores writes
+  `0` (idempotent). No `CONFIRM` (create-if-not-exists + upsert, never
+  destructive; a reset is `make drop-db … CONFIRM=yes`). Needs `dbt-build` first
+- `make pipeline PROFILE=<p>` — the local chain with no scheduler (`serving/cli.py
+  pipeline`): `dbt build → eval → write-back` in one validated process,
+  producing `scores_send_time` and `send_schedule`; prints `pipeline OK: <p>`.
+  Phase 8b's Airflow DAG orders the same steps as `make` targets
 - Later phases add:
-  `writeback`, `pipeline`, `test-int-airflow` (8), `tf-plan | tf-apply |
-  tf-destroy`, `test-int-bigquery` (9). Each lands with its phase and is
-  listed here in the same PR.
+  `test-int-airflow` (8b), `tf-plan | tf-apply | tf-destroy`,
+  `test-int-bigquery` (9). Each lands with its phase and is listed here in the
+  same PR.
 
 ## Event model facts (from ARCHITECTURE.md §2; update if reality differs)
 
@@ -535,20 +554,20 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 7 implemented, in review (`phase-7-incremental`).** Phases 0–6 merged
-(PRs #1–#8, round-tag fix #3). `stg_events`/`stg_prompts`/`attribution` are
-incremental via the `partition_overwrite` custom strategy (delete-and-insert
-seam completed, BACKLOG row closed); horizon = data-derived
-`max(server_upload_time)`, reprocess window `<= lookback_days` (5), `final` at
-`>= lookback_days`; `attribution` gains `status` (`provisional`/`final`) out of
-the golden. `make load … [THROUGH=<date>]` lands a file subset, `make dbt-build
-… [FULL=yes]` rebuilds. Two landings converge to one (all three table hashes +
-frozen `attribution.csv`), landing 2 twice is a no-op, no `final` label changes,
-the straddling duplicate `e-0000259` dedupes; every Phase 3–6 gate byte-
-identical (report 0.609756, eval MAE 0.816201/0.352354, simulate +0.162371,
-power 6 rows). `make mutate` 5/5. tiny 80 final / 60 provisional; `fixtures/tiny/`
-untouched (no re-freeze). Review round 1: 4 findings (1 staging-boundary test
-gap, 1 test strengthening, 1 record, 1 accepted THROUGH-calendar row) — fixed /
-accepted. Next: Phase 8 (orchestration). Open BACKLOG rows: **10**.
+**Phase 8a implemented, in review (`phase-8-orchestration`).** Phases 0–7 merged
+(PRs #1–#9). Phase 9a (`phase-9-gcp-foundation`, GCP/Terraform) was started out
+of order before Phase 8 and is **parked** (its working-tree leftovers stashed);
+Phase 8 runs first. Phase 8 is split 8a/8b: **8a** = the write-back + `make
+pipeline`; 8b = the Airflow DAG + `test-int-airflow` + backfill≡union. 8a landed:
+`serving/writeback.py` upserts `scores_send_time` + the open-`dim_user` tz (a new
+`dim_user_current` mart) into `serving.send_schedule` (the DuckDB stand-in for
+Spanner), replacing a user's row only on a strictly greater `(model_version,
+computed_as_of)` (`should_replace`, key `user_id`); `written_at = computed_as_of`
+(data-derived, no clock); idempotent (a re-run writes 0). `make pipeline` runs
+dbt build → eval → write-back in one process; `make writeback` alone stands.
+tiny: 20 users, 20 written then 0; send_schedule byte-identical (pin hash);
+every Phase 3–6 gate byte-identical (report 0.609756, scores-golden 0 differ,
+eval MAE 0.816201). `make mutate` 3/3. No new package (Airflow is 8b's Docker);
+`fixtures/tiny/` untouched. Next: Phase 8b (Airflow DAG). Open BACKLOG rows: **11**.
 
 (Update this section at the end of every working day.)
