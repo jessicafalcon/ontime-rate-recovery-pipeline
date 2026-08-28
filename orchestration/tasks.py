@@ -9,9 +9,13 @@ apache-airflow (which is Docker-only, never in the venv / uv.lock). The DAG in
 
 The interval → THROUGH mapping is a **literal Jinja token** Airflow renders at
 run time (`{{ data_interval_end | ds }}`); we compute nothing, so "Airflow
-contains no logic" holds. These three steps ARE `make pipeline`'s
-(serving.cli.pipeline: dbt build → eval → write-back); the build carries the
-interval's THROUGH so a per-interval run lands only files ≤ that date."""
+contains no logic" holds. These two steps ARE `make pipeline`'s WRITING steps
+(serving.cli.pipeline runs dbt build → eval → write-back; `eval` asserts the
+full-data pins and reads the side-file, so it is a union-only validation gate in
+`make pipeline`/CI, never a per-interval task — Amendment 1). The build carries
+the interval's THROUGH so a per-interval run lands only files ≤ that date; eval
+writes no table, so the DAG's two outputs stay byte-identical to `make
+pipeline`'s."""
 
 from __future__ import annotations
 
@@ -23,9 +27,8 @@ PROFILE = "tiny"
 # catchup backfill converges to the union.
 THROUGH_TEMPLATE = "{{ data_interval_end | ds }}"
 
-# (task_id, make command) in dependency order.
+# (task_id, make command) in dependency order — make pipeline's WRITING steps.
 TASKS: list[tuple[str, str]] = [
     ("dbt_build", f"make dbt-build PROFILE={PROFILE} THROUGH={THROUGH_TEMPLATE}"),
-    ("eval", f"make eval PROFILE={PROFILE}"),
     ("writeback", f"make writeback PROFILE={PROFILE}"),
 ]

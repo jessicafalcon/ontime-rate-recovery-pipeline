@@ -16,20 +16,22 @@ from orchestration import tasks
 ROOT = Path(__file__).parent.parent
 DAG_FILE = ROOT / "orchestration" / "dags" / "pipeline_dag.py"
 
-# make pipeline (serving.cli.pipeline) runs exactly these steps, in this order.
-PIPELINE_STEPS = ["dbt_build", "eval", "writeback"]
+# make pipeline (serving.cli.pipeline) runs dbt build → eval → write-back; the DAG
+# runs its two WRITING steps (eval is a union-only gate, Amendment 1).
+PIPELINE_WRITING_STEPS = ["dbt_build", "writeback"]
 
 
-def test_dag_tasks_are_the_pipeline_steps_in_order() -> None:
-    """The manifest's ordered task ids and commands ARE make pipeline's steps —
-    dbt build → eval → write-back — the build carrying the interval's THROUGH."""
-    assert [task_id for task_id, _ in tasks.TASKS] == PIPELINE_STEPS
+def test_dag_tasks_are_the_pipeline_writing_steps_in_order() -> None:
+    """The manifest's ordered task ids and commands ARE make pipeline's writing
+    steps — dbt build → write-back — the build carrying the interval's THROUGH;
+    eval is excluded (it reads truth and asserts full-data pins — Amendment 1)."""
+    assert [task_id for task_id, _ in tasks.TASKS] == PIPELINE_WRITING_STEPS
     commands = {task_id: cmd for task_id, cmd in tasks.TASKS}
     assert commands["dbt_build"] == (
         f"make dbt-build PROFILE={tasks.PROFILE} THROUGH={tasks.THROUGH_TEMPLATE}"
     )
-    assert commands["eval"] == f"make eval PROFILE={tasks.PROFILE}"
     assert commands["writeback"] == f"make writeback PROFILE={tasks.PROFILE}"
+    assert "eval" not in commands
 
 
 def test_through_token_is_data_interval_end() -> None:
