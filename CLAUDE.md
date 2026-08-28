@@ -84,8 +84,14 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   (`writeback`, `pipeline`), `ddl.sql` (hand-written 9-column serving DDL, §2.9).
   Reads `scores_send_time` + `dim_user_current` (tz), writes `serving.send_schedule`;
   never truth/raw. A pipeline dir — guarded by `test_truth_isolation.py`.
-- `orchestration/` *(Phase 8b)* — the Airflow DAG (Docker-local). No logic, only
-  ordering.
+- `orchestration/` *(Phase 8b)* — the Airflow DAG (Docker-local), no logic, only
+  ordering: `dags/pipeline_dag.py` (BashOperators over `make` targets, `dbt_build
+  >> writeback`, `max_active_runs=1`, `catchup`, `THROUGH` via `{{
+  data_interval_end | ds }}`), `tasks.py` (the Airflow-free ordered-command
+  manifest the DAG and the offline structure test share), `Dockerfile` +
+  `docker-compose.yml` (lean `SequentialExecutor`/SQLite; `apache-airflow` never
+  in `uv.lock`). A pipeline dir — `test_truth_isolation.py` covers it. `eval` is
+  NOT a DAG task (union-only gate — reads truth, asserts full-data pins).
 - `infra/` *(Phase 9+)* — Terraform; `modules/composer`, `modules/spanner`
   behind `enable_*` toggles.
 - `fixtures/tiny/` — golden `raw/events_<upload-date>.jsonl` + `dims/` +
@@ -161,7 +167,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   inferred. Idempotent: tables are recreated. `THROUGH` (an upload date
   `YYYY-MM-DD`, validated, never a path) lands only the files uploaded on or
   before it — a landing is the raw-table state (Phase 7); empty loads them all
-- `make dbt-build PROFILE=<p> [TARGET=duckdb] [CONFIRM=yes] [FULL=yes]` — `load`,
+- `make dbt-build PROFILE=<p> [TARGET=duckdb] [CONFIRM=yes] [FULL=yes] [THROUGH=<upload-date>]` — `load`,
   then `dbt build` (source tests → `stg_events`, `stg_prompts`, `attribution` →
   data, unit and singular tests) against `data/<p>.duckdb`; prints `dbt-build OK:
   <p>/<target>`, exit 1 on any failure. The three event-level models are
@@ -169,7 +175,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   only partitions inside the `lookback_days` window of the data-derived horizon
   (`max(server_upload_time)`) via the `partition_overwrite` strategy.
   `FULL=yes` (command-line origin, `$(origin)`-gated) passes `--full-refresh`
-  (rebuild from scratch). Any `TARGET` other than `duckdb` is a cloud-cost
+  (rebuild from scratch). `THROUGH=<upload-date>` (Phase 8b) threads into the
+  internal `load` so the build lands only files uploaded on or before it — a
+  per-interval build the DAG runs; unset loads all (the default build is
+  unchanged). Any `TARGET` other than `duckdb` is a cloud-cost
   command: refused unless `CONFIRM=yes` has command-line origin. dbt telemetry
   is off (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`)
 - `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` and its
@@ -236,9 +245,15 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
 - `make pipeline PROFILE=<p>` — the local chain with no scheduler (`serving/cli.py
   pipeline`): `dbt build → eval → write-back` in one validated process,
   producing `scores_send_time` and `send_schedule`; prints `pipeline OK: <p>`.
-  Phase 8b's Airflow DAG orders the same steps as `make` targets
+  Phase 8b's Airflow DAG orders the WRITING steps (`dbt build → write-back`) as
+  `make` targets; `eval` stays a union-only gate here and in CI
+- `make test-int-airflow` — Phase 8b integration (behind `OTR_INT`, CI never runs
+  it): spins the Docker-local Airflow (`SequentialExecutor`/SQLite), runs the DAG
+  for a union interval and a three-interval catchup, asserts both container tables
+  equal `make pipeline`'s (the `send_schedule` hash), tears down. Takes no
+  variable (`tiny` by definition); needs Docker (Engine + `docker compose`)
 - Later phases add:
-  `test-int-airflow` (8b), `tf-plan | tf-apply | tf-destroy`,
+  `tf-plan | tf-apply | tf-destroy`,
   `test-int-bigquery` (9). Each lands with its phase and is listed here in the
   same PR.
 
@@ -555,20 +570,27 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 8a implemented, in review (`phase-8-orchestration`).** Phases 0–7 merged
-(PRs #1–#9). Phase 9a (`phase-9-gcp-foundation`, GCP/Terraform) was started out
-of order before Phase 8 and is **parked** (its working-tree leftovers stashed);
-Phase 8 runs first. Phase 8 is split 8a/8b: **8a** = the write-back + `make
-pipeline`; 8b = the Airflow DAG + `test-int-airflow` + backfill≡union. 8a landed:
-`serving/writeback.py` upserts `scores_send_time` + the open-`dim_user` tz (a new
-`dim_user_current` mart) into `serving.send_schedule` (the DuckDB stand-in for
-Spanner), replacing a user's row only on a strictly greater `(model_version,
-computed_as_of)` (`should_replace`, key `user_id`); `written_at = computed_as_of`
-(data-derived, no clock); idempotent (a re-run writes 0). `make pipeline` runs
-dbt build → eval → write-back in one process; `make writeback` alone stands.
-tiny: 20 users, 20 written then 0; send_schedule byte-identical (pin hash);
-every Phase 3–6 gate byte-identical (report 0.609756, scores-golden 0 differ,
-eval MAE 0.816201). `make mutate` 3/3. No new package (Airflow is 8b's Docker);
-`fixtures/tiny/` untouched. Next: Phase 8b (Airflow DAG). Open BACKLOG rows: **12**.
+**Phase 8b implemented, in review (`phase-8b-airflow-dag`).** Phases 0–7 merged
+(PRs #1–#9); 8a merged (PR #10). Phase 9a (`phase-9-gcp-foundation`,
+GCP/Terraform) is **parked** (its working-tree leftovers stashed). Phase 8 is
+split 8a/8b: **8a** landed the write-back + `make pipeline`; **8b** is the
+**Airflow DAG** (Docker-local) + `test-int-airflow` + backfill≡union, closing the
+Phase 8 ⭐ checkpoint. 8b landed: `orchestration/dags/pipeline_dag.py` orders the
+chain's WRITING steps as BashOperators over `make` targets (`dbt_build >>
+writeback`, from the Airflow-free `orchestration/tasks.py` manifest),
+`THROUGH={{ data_interval_end | ds }}` so a per-interval run lands only files ≤
+that date, `max_active_runs=1` (single-writer on the DuckDB file), `catchup` for
+backfill. `make dbt-build` gained a `THROUGH` threaded into its internal `load`
+(resolves the re-load clobber; default loads all — no golden moves). **Amendment
+1:** `eval` is NOT a DAG task — it asserts full-data pins and reads truth, so it
+stays a union-only gate in `make pipeline`/CI (writes no table, so the DAG's two
+outputs stay byte-identical to `make pipeline`'s). `make test-int-airflow` (behind
+`OTR_INT`, CI never runs it) spins a lean `SequentialExecutor`/SQLite container
+and proves DAG≡pipeline and backfill≡union across processes: 3 passed in ~50s, the
+container `send_schedule == SEND_SCHEDULE_SHA256_TINY`. Offline: `test_backfill.py`
+(three THROUGH landings → union), `test_dag_structure.py`, `test_through_build.py`,
+`test_airflow_docker_only.py`. `apache-airflow` is **Docker-only** (never in
+`uv.lock`); `fixtures/tiny/` untouched; every Phase 3–8a gate byte-identical.
+Open BACKLOG rows: **12** (one opened: split load from build, trigger Phase 9).
 
 (Update this section at the end of every working day.)

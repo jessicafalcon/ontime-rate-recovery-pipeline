@@ -261,8 +261,27 @@ one process) land; no `CONFIRM` (non-destructive). tiny: 20 users, 20 written
 then 0; `send_schedule` byte-identical (pinned hash); every Phase 3–6 gate
 byte-identical (report 0.609756, scores-golden 0 differ, eval MAE 0.816201);
 `make mutate` 3/3. No new package (Airflow is 8b's Docker); `fixtures/tiny/`
-untouched. Phase 9a was set aside to run this checkpoint first. **8b** (Airflow
-DAG, `test-int-airflow`, backfill≡union) is the next PR.
+untouched. Phase 9a was set aside to run this checkpoint first.
+
+**Delivered — 8b** (`phase-8b-airflow-dag`, spec `specs/phase-8b-airflow-dag.md`):
+the Docker-local Airflow DAG (`orchestration/dags/pipeline_dag.py`) orders the
+chain's WRITING steps as BashOperators over `make` targets (`dbt_build >>
+writeback`, from the Airflow-free `orchestration/tasks.py` manifest the offline
+structure test shares), `THROUGH={{ data_interval_end | ds }}` (a per-interval
+landing), `max_active_runs=1` (single-writer on the DuckDB file), `catchup` for
+backfill. `make dbt-build` gained a `THROUGH` threaded into its internal `load`
+(resolves the re-load clobber; default loads all). **Amendment 1:** `eval` left
+the per-interval DAG — it asserts full-data pins and reads truth, so it is a
+union-only gate in `make pipeline`/CI and writes no table, leaving the DAG's two
+outputs byte-identical to `make pipeline`'s. `make test-int-airflow` (behind
+`OTR_INT`, CI never runs it) spins a lean `SequentialExecutor`/SQLite container
+and proves DAG≡pipeline and the three-interval catchup (`THROUGH` 2026-01-07/12/13)
+≡ union across processes (`send_schedule == SEND_SCHEDULE_SHA256_TINY`, 3 tests
+~50 s); the backfill converges because intervals are spaced ≤ `lookback_days`.
+Offline: `test_backfill.py`, `test_dag_structure.py`, `test_through_build.py`,
+`test_airflow_docker_only.py`. `apache-airflow` is Docker-only (not in `uv.lock`);
+`fixtures/tiny/` untouched; every Phase 3–8a gate byte-identical. **Phase 8 ⭐
+checkpoint closed.** One BACKLOG row opened (split load from build, trigger Phase 9).
 
 ---
 

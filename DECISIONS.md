@@ -139,6 +139,42 @@ annotated **Superseded by …** in place and never deleted.
   implemented, committed shape (the minimal-but-scalable + review-cap rules).
   Rejected: build-only now (a benefit two phases away, a new target and a third
   task for nothing 8b proves).
+- **The DAG is BashOperators over `make` targets, ordered `>>`, from an
+  Airflow-free manifest.** `orchestration/tasks.py` holds the ordered
+  `(task_id, command)` list; `dags/pipeline_dag.py` wraps each in a `BashOperator`
+  and the offline `test_dag_structure.py` imports the same manifest — so "DAG ==
+  pipeline" is a fast structure test, not a container-only claim, and the test
+  needs no `import airflow` (apache-airflow is Docker-only). The interval reaches
+  the build only as the literal token `{{ data_interval_end | ds }}` Airflow
+  renders (`airflow dags test D` gives `data_interval_end = D`, so `THROUGH = D`);
+  we compute nothing, so "Airflow contains no logic" holds. Rejected: a Python
+  callable computing `THROUGH` (logic in the DAG); AST-parsing the DAG file for
+  the command list (more fragile than one shared manifest); `{{ ds }}` (that is
+  `data_interval_start` = D−1, the wrong cut).
+- **Single-writer by construction: `max_active_runs=1` + linear task order.** The
+  DAG runs load/build/write-back as SEPARATE processes on `data/<p>.duckdb`
+  (8a was one process); DuckDB is single-writer, so overlap is *prevented*
+  (`max_active_runs=1` serialises catchup; `dbt_build >> writeback` linearises a
+  run), not caught by a lock error. `test-int-airflow` demonstrates the hand-off
+  by driving a green three-interval catchup where each BashOperator is its own
+  subprocess. Rejected: relying on the file lock to error on overlap (a race
+  turned into an exception is not a guarantee).
+- **Backfill ≡ union holds when intervals are spaced ≤ `lookback_days`.** scores/
+  marts are table (recomputed each build), stg/attribution converge to the union
+  at the final landing (Phase 7), and `computed_as_of = max(client_event_time)` is
+  monotone as opens arrive, so the union interval's rows win the write-back's
+  replace-iff-greater and per-row `written_at = computed_as_of` keeps them
+  byte-identical. The precondition is a consecutive-interval gap ≤ `lookback_days`
+  (verified: `07 → full(13)`, gap 6 > 5, diverges — a partition finalises while
+  its late events sit in a skipped landing; `07 → 12 → 13`, max gap 5 =
+  `lookback_days`, converges exactly, the Phase 7 `<=` boundary). The DAG's
+  `@daily` schedule gives gap 1, always safe; the offline `test_backfill.py` cut
+  sits at the boundary on purpose. `test-int-airflow` is a lean single-service
+  container (`SequentialExecutor` + SQLite, `airflow dags test`) behind `OTR_INT`,
+  CI never running it. Rejected: the upstream heavyweight `apache/airflow` compose
+  (webserver + scheduler + Postgres for a synchronous single-DAG test);
+  catchup-to-`now` (months of runs, a wall-clock dependence — the test uses
+  explicit logical dates).
 
 ### Phase 8a
 
