@@ -591,6 +591,8 @@ container `send_schedule == SEND_SCHEDULE_SHA256_TINY`. Offline: `test_backfill.
 (three THROUGH landings → union), `test_dag_structure.py`, `test_through_build.py`,
 `test_airflow_docker_only.py`. `apache-airflow` is **Docker-only** (never in
 `uv.lock`); `fixtures/tiny/` untouched; every Phase 3–8a gate byte-identical.
-Open BACKLOG rows: **12** (one opened: split load from build, trigger Phase 9).
+Open BACKLOG rows: **13** (8b opened two: split load from build, trigger Phase 9;
+`computed_as_of` not a complete score-change discriminator, an 8a/5 gap — both
+unreachable on the fixture).
 
 (Update this section at the end of every working day.)
