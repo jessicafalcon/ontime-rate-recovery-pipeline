@@ -361,6 +361,9 @@ promoted into the block, a refusal is recorded):
       Gotchas only if a stack surprise lands
 - [ ] `BACKLOG.md` — **open one row**: `model_version` string ordering
       (`'v10' < 'v2'`), trigger Phase 10's first version bump; count 10 → 11
+- [ ] `PROJECT_BRIEF.md` — §7 gains a one-line pointer to `CLAUDE.md` § Current
+      status as the live record (the §7 snapshot is Phase-0-era, not per-phase;
+      exit-audit hygiene, landed in this PR at the developer's call)
 - [ ] Spec amendments — none (8b's spec does not exist yet; it will reconcile
       against a main including 8a)
 - [ ] docs/RESULTS.md, docs/AB_DESIGN.md, docs/METRICS.md — none
