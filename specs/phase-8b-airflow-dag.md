@@ -302,7 +302,7 @@ make review-gate SPEC=specs/phase-8b-airflow-dag.md && make dbt-build PROFILE=ti
 - `make test-int-airflow` — spins the lean Airflow container on a **fresh** DB,
   drives the DAG at explicit dates (`airflow dags test <THROUGH>`), asserts the
   run's `scores_send_time` and `send_schedule` byte-identical to `make
-  pipeline`'s and the three-interval catchup equal to the union
+  pipeline`'s and the three-interval backfill equal to the union
   (`SEND_SCHEDULE_SHA256_TINY`), tears the container down; exports `OTR_INT=1`
   in-recipe so `tests/integration/` collects.
 
@@ -324,7 +324,7 @@ make review-gate SPEC=specs/phase-8b-airflow-dag.md && make dbt-build PROFILE=ti
    `2026-01-07`, `2026-01-12`, `2026-01-13`) lands a `send_schedule`
    byte-identical to one union run, and re-running an interval is a no-op.
    *Evidence: row 4.*
-5. **Single-writer, no clock.** For all catchup runs, `data/<p>.duckdb` is
+5. **Single-writer, no clock.** For all backfill runs, `data/<p>.duckdb` is
    written by one process at a time (`max_active_runs=1` + linear task order);
    nothing asserted reads an Airflow run id, task timing, or log; a build under a
    non-UTC host is identical. *Evidence: row 5.*
@@ -404,7 +404,7 @@ implementation on a scratch copy (the Phase 6/7 pattern):
   separate `make load THROUGH=` task (a longer DAG that diverges from `make
   pipeline`'s chain — more surface, weaker equivalence).
 - **Single-writer by construction: `max_active_runs=1` + `dbt_build >>
-  writeback`; `test-int-airflow` demonstrates the catchup hand-off (item 3)** —
+  writeback`; `test-int-airflow` demonstrates the backfill hand-off (item 3)** —
   satisfies invariant 6. Overlap is prevented, not caught by a DuckDB lock error;
   each `BashOperator` is a separate subprocess opening and closing the file in
   turn. Rejected: relying on the file lock to error on overlap (a race turned
@@ -443,7 +443,8 @@ implementation on a scratch copy (the Phase 6/7 pattern):
   `orchestration/dags/pipeline_dag.py` (BashOperators from the manifest;
   `max_active_runs=1`, `catchup=False` — Amendment 2, `start_date`, `schedule`),
   `orchestration/Dockerfile` + `orchestration/docker-compose.yml` (the lean
-  Airflow image; `SequentialExecutor` + SQLite; repo COPYd, `data/` writable)
+  Airflow image; `SequentialExecutor` + SQLite; repo COPYd, `data/` writable),
+  `.dockerignore` (secret + `.venv`/`data` excludes)
 - `loader/cli.py` (`dbt_build` gains `--through`, threaded to `load`), `Makefile`
   (`dbt-build` forwards `THROUGH`; new `test-int-airflow` target exporting
   `OTR_INT=1`)
@@ -452,7 +453,8 @@ implementation on a scratch copy (the Phase 6/7 pattern):
   `tests/integration/__init__.py` + `tests/integration/test_int_airflow.py` (new,
   `OTR_INT`), `tests/test_airflow_docker_only.py` (new),
   `tests/test_makefile.py` (`dbt-build` `THROUGH` + `test-int-airflow` literal
-  tests), `tests/pins.py` (`BACKFILL_THROUGHS_TINY`)
+  tests), `tests/pins.py` (`BACKFILL_THROUGHS_TINY`), `tests/conftest.py` (scrub
+  `THROUGH`/`WRITE`/`FULL`), `.gitignore` (the test's secret canary)
 - Records: `CLAUDE.md`, `docs/PHASES.md`, `DECISIONS.md`
 - Untouched by contract: `generator/`, `fixtures/`, `dbt/`, `eval/`,
   `serving/writeback.py`, `serving/ddl.sql` (serving **logic**; `serving/cli.py`
@@ -530,7 +532,7 @@ hostile environment" carve-out.
   no committed `data/`/credentials.
 - **functionality-tester** (triggered): the DONE command; DAG structure == `make
   pipeline`; the THROUGH-aware build lands only ≤ the cut; backfill≡union offline;
-  the container DAG == pipeline and catchup == union; both mutation lines KILLED
+  the container DAG == pipeline and backfill == union; both mutation lines KILLED
   and the exclusions reasoned; every Phase 3–8a gate byte-identical.
 - **coherence-auditor** at exit (mandatory, whole repo): CLAUDE.md Repo
   map / Commands / Current status; PHASES "Delivered" (8b; ⭐ closed); DECISIONS

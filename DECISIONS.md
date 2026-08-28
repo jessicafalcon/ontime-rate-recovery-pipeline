@@ -179,8 +179,9 @@ annotated **Superseded by …** in place and never deleted.
   1, 2026-08-28).** As first landed, `catchup=True` + a past `start_date` +
   `DAGS_ARE_PAUSED_AT_CREATION=False` would make any scheduler start backfill every
   day since 2026-01-06 — the catchup-to-`now` this phase rejects. The DAG now sets
-  `catchup=False` and starts paused (the default; `airflow dags test` runs it
-  anyway); a backfill is `airflow dags test <date>` / `airflow dags backfill -s -e`
+  `catchup=False` and starts paused (`is_paused_upon_creation=True`; `airflow dags
+  test` runs it anyway); a backfill is `airflow dags test <date>` / `airflow dags
+  backfill -s -e`
   over a bounded range, which ignores `catchup`. Backfill≡union never depended on
   auto-catchup. Rejected: `catchup=True` (the foot-gun); a report-only `eval` or a
   `trigger_rule` to keep eval in the DAG (Amendment 1 settled that).
@@ -188,7 +189,7 @@ annotated **Superseded by …** in place and never deleted.
   not fixed here (Amendment 2, review round 1).** `backfill ≡ union` relies on
   every score change advancing `computed_as_of = max(client_event_time)` of the
   window's opens — true for the backfill's monotone-superset landings (verified,
-  `test_computed_as_of_is_non_decreasing_across_landings`). A landing that changed
+  `test_computed_as_of_advances_when_scores_change`). A landing that changed
   scores via only back-dated opens would tie it and keep the stale row; that is an
   8a/Phase-5 discriminator gap, unreachable on the fixture, deferred to BACKLOG
   (replace with a content hash / row version when a reproducing case exists). Not
