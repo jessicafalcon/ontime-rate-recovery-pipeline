@@ -1,0 +1,16 @@
+# Keep the Airflow image build context lean and reproducible (Phase 8b). data/ is
+# gitignored working output — the container generates its own; never bake a stale
+# tiny.duckdb. The venv, caches and VCS metadata are irrelevant to the image.
+.git
+data
+.venv
+**/__pycache__
+**/*.pyc
+dbt/target
+dbt/logs
+logs
+*.duckdb
+*.duckdb.wal
+.pytest_cache
+.ruff_cache
+.claude

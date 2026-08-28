@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline test-int-airflow
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -160,3 +160,13 @@ writeback:
 # produces the same two tables byte-identically without gating on partial data.
 pipeline:
 	uv run python -m serving.cli pipeline $(call _Q,$(value PROFILE))
+
+# Phase 8b integration: spin the Docker-local Airflow (SequentialExecutor +
+# SQLite), run the DAG (a union run + a three-interval catchup) and assert both
+# tables == make pipeline (the send_schedule hash), then tear down. Exports
+# OTR_INT=1 in-recipe so tests/integration/ collects (conftest skips it
+# otherwise); CI never runs this. Takes NO variable (tiny by definition — the
+# DAG's PROFILE=tiny is a manifest literal); non-destructive to tracked files
+# (writes only the container's data/ and `docker compose down -v`). Needs Docker.
+test-int-airflow:
+	OTR_INT=1 uv run pytest tests/integration/test_int_airflow.py

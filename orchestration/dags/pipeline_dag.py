@@ -38,5 +38,5 @@ with DAG(
         BashOperator(task_id=task_id, bash_command=command, cwd=str(REPO))
         for task_id, command in TASKS
     ]
-    for upstream, downstream in zip(steps, steps[1:]):
+    for upstream, downstream in zip(steps, steps[1:], strict=False):
         upstream >> downstream

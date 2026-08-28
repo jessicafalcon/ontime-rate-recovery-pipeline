@@ -1,0 +1,15 @@
+# Docker-local Airflow for Phase 8b's `make test-int-airflow` (behind OTR_INT).
+# One service, SequentialExecutor + SQLite; the integration test drives it with
+# `airflow dags test` and tears it down (`docker compose down -v`). Not for a
+# real deployment — Cloud Composer is Phase 11.
+name: otr-airflow-8b
+
+services:
+  airflow:
+    build:
+      context: ..
+      dockerfile: orchestration/Dockerfile
+    image: otr-airflow-8b:latest
+    # Idle so the test can `exec` into it; the test runs `airflow db migrate`
+    # (blocking) itself, so readiness is deterministic (no race with startup).
+    command: ["bash", "-lc", "exec sleep infinity"]
