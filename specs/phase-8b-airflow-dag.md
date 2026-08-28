@@ -148,6 +148,35 @@ ordering (trigger is Phase 10's first version bump).
 Design changes above — items 1, 2, 3, 6 — **approved 2026-08-27**. The sections
 below are the contract.
 
+## Amendment 1 — eval leaves the per-interval DAG (2026-08-28)
+
+Design change (who-runs-what), **approved 2026-08-28**, committed alone before
+implementation. `make eval` asserts the **full-data** MAE/accuracy pins and reads
+`truth/`, so it fails on every partial backfill interval (verified on
+`THROUGH=2026-01-07`: accuracy 0.871, MAE 0.928762) and — being upstream of
+write-back — would skip that interval's write and redden the run. It is **removed
+from the DAG**: the per-interval chain is **`dbt-build
+THROUGH={{ data_interval_end | ds }}` >> `writeback`** (Option A retained — the
+THROUGH-aware build keeps landing and build in one task, so no interval is built
+against a landing it did not load). `eval` stays a **union-only validation gate**
+in `make pipeline` and CI; it writes neither `scores_send_time` nor
+`send_schedule`, so the DAG's two output tables remain **byte-identical** to `make
+pipeline`'s. This reverses the earlier "the DAG steps ARE `make pipeline`'s three
+steps": the DAG steps are `make pipeline`'s two **writing** steps. Invariant
+restored (sharpens invariants 4–5): *for every interval i, the DAG's
+`send_schedule` after i equals `make pipeline` over a landing ≤ THROUGH_i; after
+the last interval it equals the union* — `test_backfill.py` proves the offline
+half, `test-int-airflow` proves it across process boundaries. Records fixed by
+this amendment: the ARCHITECTURE diagram + CLAUDE.md's copy (`AIRFLOW … dbt build
+→ write-back`), `docs/PHASES.md` Phase 8 goal, the `Makefile` pipeline comment, a
+DECISIONS Phase 8b entry, and a BACKLOG row (below). **Deferral recorded:**
+splitting load from build (a build-only target + a separate `load` task) is the
+**Phase 9** shape — there the load is GCS→BigQuery and `dbt_build(TARGET=bigquery)`
+calling the DuckDB `load()` (`loader/cli.py`) is already wrong, so the split earns
+its keep; doing it now is speculative churn against an implemented, committed
+shape (BACKLOG, trigger Phase 9). The pinned decisions, Done-when, invariants and
+Evidence below are updated to this amendment.
+
 ## Teaching notes (first appearance in this project)
 
 - **Airflow data intervals.** A scheduled DAG run stands for a logical time
@@ -169,11 +198,12 @@ below are the contract.
   `send_schedule` as one run over the union of their data.
 - **Scheduler-ordered chain vs `make pipeline`.** `make pipeline` runs `dbt build
   → eval → write-back` as **one** local process in a fixed order. The DAG runs the
-  **same three steps** as separately-scheduled tasks ordered by dependencies
-  (`build >> eval >> writeback`), data-interval-aware and re-runnable, with
-  retries and a run history. Same steps, same outputs — the scheduler adds
-  ordering and bookkeeping, never logic. The pipeline is the DAG minus the
-  scheduler.
+  **writing** steps (`dbt_build >> writeback`) as separately-scheduled tasks
+  ordered by dependencies, data-interval-aware and re-runnable, with retries and a
+  run history. `eval` is a union-only validation gate that reads truth and writes
+  no table (Amendment 1), so it stays in `make pipeline`/CI and the DAG's two
+  output tables still match `make pipeline`'s byte-for-byte — the scheduler adds
+  ordering and bookkeeping, never logic.
 
 ## Why
 
@@ -229,11 +259,12 @@ make review-gate SPEC=specs/phase-8b-airflow-dag.md && make dbt-build PROFILE=ti
 
 ## Done-when
 
-1. **The DAG has no logic; its steps are `make pipeline`'s.** For all tasks, the
-   DAG's ordered commands are `make pipeline`'s three steps (`dbt build → eval →
-   write-back`) in order, the build parameterised by `THROUGH` via Airflow
-   templating; no Python computes the interval and every operator is a
-   `BashOperator`. *Evidence: row 1.*
+1. **The DAG has no logic; its steps are `make pipeline`'s writing steps.** For
+   all tasks, the DAG's ordered commands are `make pipeline`'s two writing steps
+   (`dbt build → write-back`) in order, the build parameterised by `THROUGH` via
+   Airflow templating; `eval` is excluded (a union-only gate that reads truth and
+   writes no table — Amendment 1); no Python computes the interval and every
+   operator is a `BashOperator`. *Evidence: row 1.*
 2. **THROUGH-aware build.** For all `<ds>`, `make dbt-build … THROUGH=<ds>` lands
    and builds only files with upload date ≤ `<ds>`; `THROUGH` unset loads all and
    leaves every Phase 3–6 golden byte-identical. *Evidence: row 2.*
@@ -260,7 +291,7 @@ authoritative if the landing diverges.)
 
 | Done-when | Proof (test file / `make` target / command output) |
 |---|---|
-| 1 | `tests/test_dag_structure.py::test_dag_tasks_are_the_pipeline_steps_in_order` (the `orchestration/tasks.py` manifest's ordered commands == `dbt build → eval → write-back`); `::test_dag_uses_only_bash_operators_and_no_python_callable` (AST/text over `pipeline_dag.py`: no `PythonOperator`/`@task`/`python_callable`); `::test_through_token_is_data_interval_end` (the build command carries the literal `{{ data_interval_end \| ds }}`, not a computed date) |
+| 1 | `tests/test_dag_structure.py::test_dag_tasks_are_the_pipeline_writing_steps_in_order` (the `orchestration/tasks.py` manifest's ordered commands == `dbt build → write-back`, eval excluded — Amendment 1); `::test_dag_uses_only_bash_operators_and_no_python_callable` (AST/text over `pipeline_dag.py`: no `PythonOperator`/`@task`/`python_callable`); `::test_through_token_is_data_interval_end` (the build command carries the literal `{{ data_interval_end \| ds }}`, not a computed date) |
 | 2 | `tests/test_through_build.py::test_dbt_build_through_lands_only_files_le_cut` (after `loader.dbt_build(..., through=<ds>)`, `max(server_upload_time)` in `raw.events` ≤ `<ds>` and the file count matches the subset); `::test_dbt_build_no_through_loads_all`; `make dbt-build PROFILE=tiny THROUGH=2026-01-07` → `landing ≤ 2026-01-07`; `make attribution-golden / report / scores-golden / eval PROFILE=tiny` all `0 differ`/pins after the full build |
 | 3 | `tests/integration/test_int_airflow.py::test_dag_run_matches_make_pipeline` (container `airflow dags test pipeline_dag 2026-01-12` → both tables byte-identical to `make pipeline`; `send_schedule` == `SEND_SCHEDULE_SHA256_TINY`) |
 | 4 | `tests/test_backfill.py::test_three_through_landings_equal_the_union` (offline: the make/write-back chain over `BACKFILL_THROUGHS_TINY` into one DB == a union run, `SEND_SCHEDULE_SHA256_TINY`); `::test_backfill_interval_twice_is_a_noop`; `tests/integration/test_int_airflow.py::test_catchup_backfill_equals_union` (container, three explicit logical dates) |
@@ -271,7 +302,7 @@ authoritative if the landing diverges.)
 
 | Invariant ("for all …, … holds") | Falsified by (scenario test) |
 |---|---|
-| 1. **DAG == pipeline steps, no logic.** For all tasks, the DAG's ordered commands are `make pipeline`'s three steps in order, every operator a `BashOperator`, the interval supplied only by Airflow templating. | `test_dag_tasks_are_the_pipeline_steps_in_order`; `test_dag_uses_only_bash_operators_and_no_python_callable`; `test_through_token_is_data_interval_end` (pinned by the structure test — declarative wiring, no Python guard to mutate) |
+| 1. **DAG == pipeline's writing steps, no logic.** For all tasks, the DAG's ordered commands are `make pipeline`'s two writing steps (`dbt build → write-back`) in order, every operator a `BashOperator`, the interval supplied only by Airflow templating; `eval` is excluded (Amendment 1). | `test_dag_tasks_are_the_pipeline_writing_steps_in_order`; `test_dag_uses_only_bash_operators_and_no_python_callable`; `test_through_token_is_data_interval_end` (pinned by the structure test — declarative wiring, no Python guard to mutate) |
 | 2. **THROUGH-aware build.** For all `<ds>`, a build with `THROUGH=<ds>` sees only files uploaded ≤ `<ds>`; unset sees all. | `test_dbt_build_through_lands_only_files_le_cut`; `test_dbt_build_no_through_loads_all`; mutation `loader/load.py::event_files invert-guard` (flips the `through is None` guard → a per-interval build sees all files / an unset build errors) |
 | 3. **Interval→THROUGH validation.** For all `THROUGH` reaching the build, an ill-formed value is refused before any landing. | `tests/test_makefile.py::test_dbt_build_passes_through_as_one_literal`; `test_through_build.py::test_build_refuses_bad_through`; mutation `loader/cli.py::validate_through invert-guard` (a valid date dies / a malformed one passes) |
 | 4. **DAG ≡ pipeline at runtime.** For a triggered run, `scores_send_time` and `send_schedule` are byte-identical to `make pipeline`'s. | `test_dag_run_matches_make_pipeline` (container) |
@@ -306,14 +337,15 @@ implementation on a scratch copy (the Phase 6/7 pattern):
 
 ## Pinned decisions (do not re-litigate)
 
-- **The DAG is BashOperators over `make` targets, ordered `>>`, `THROUGH` via
-  `{{ data_interval_end | ds }}`; the ordered commands live in the Airflow-free
-  `orchestration/tasks.py` manifest the DAG and the offline structure test share
-  (reconciliation item 1)** — satisfies invariants 1, 4. Airflow renders the
-  interval so the DAG holds no logic; the shared manifest makes "DAG == pipeline"
-  a fast offline structure test, not a container-only claim. Rejected: a Python
-  callable computing `THROUGH` (logic in the DAG); AST-parsing the DAG file for
-  the command list (more fragile than one shared manifest).
+- **The DAG is BashOperators over `make` targets, ordered `>>` (`dbt_build >>
+  writeback` — the two writing steps; `eval` is a union-only gate, Amendment 1),
+  `THROUGH` via `{{ data_interval_end | ds }}`; the ordered commands live in the
+  Airflow-free `orchestration/tasks.py` manifest the DAG and the offline structure
+  test share (reconciliation item 1)** — satisfies invariants 1, 4. Airflow
+  renders the interval so the DAG holds no logic; the shared manifest makes "DAG
+  == pipeline" a fast offline structure test, not a container-only claim.
+  Rejected: a Python callable computing `THROUGH` (logic in the DAG); AST-parsing
+  the DAG file for the command list (more fragile than one shared manifest).
 - **`make dbt-build` gains `THROUGH`, threaded into its internal `load(profile,
   through)`; default `""` ⇒ loads all (item 2)** — satisfies invariant 2.
   Resolves the re-load clobber with Phase 7's existing `event_files` filter and
@@ -382,18 +414,25 @@ implementation on a scratch copy (the Phase 6/7 pattern):
       Commands (`test-int-airflow`; `make dbt-build … [THROUGH=<date>]`); Repo map
       (`orchestration/` present — `dags/pipeline_dag.py`, `tasks.py`, the
       `docker-compose`); Conventions/allowlist (apache-airflow via Docker only,
-      not in `uv.lock`); Open BACKLOG rows: **11** (unchanged)
-- [ ] `docs/PHASES.md` — Phase 8 "Delivered" (8b portion; the ⭐ checkpoint closed)
-- [ ] `DECISIONS.md` — Phase 8b appendix (DAG shape + `THROUGH` templating;
-      THROUGH-aware build; single-writer guarantee; lean `test-int-airflow`;
-      backfill≡union basis)
-- [ ] BACKLOG — none (no row closes or opens; the `THROUGH`-validated-by-shape and
+      not in `uv.lock`); Architecture diagram AIRFLOW row (`dbt build →
+      write-back`, eval out — Amendment 1); Open BACKLOG rows: **12** (one opens)
+- [ ] `docs/PHASES.md` — Phase 8 "Delivered" (8b portion; the ⭐ checkpoint
+      closed); Phase 8 goal line (the DAG chains `dbt build → write-back`, eval a
+      union gate — Amendment 1)
+- [ ] `DECISIONS.md` — Phase 8b appendix (eval out of the DAG — truth isolation +
+      union-only pins; `THROUGH` on `dbt-build`, not a separate load task — one
+      landing owner per run, the split is the Phase 9 shape; DAG shape +
+      templating; single-writer guarantee; lean `test-int-airflow`; backfill≡union
+      basis)
+- [ ] `BACKLOG.md` — **open one row**: split load from `dbt build` (a build-only
+      target), trigger Phase 9 spec reconciliation / first `TARGET≠duckdb` DAG;
+      count **11 → 12**. The `THROUGH`-validated-by-shape and
       `model_version`-string-ordering rows re-checked at 8b exit and re-deferred
-      with triggers unchanged — 8b feeds `THROUGH` from `{{ data_interval_end |
+      with triggers unchanged (8b feeds `THROUGH` from `{{ data_interval_end |
       ds }}` yet it still only string-compares to file names, never a path)
-- [ ] docs/ARCHITECTURE.md — none unless a Docker/Airflow surprise lands live
-      (§8 Gotchas); §3.1 Airflow row and the diagram AIRFLOW row already describe
-      8b
+- [ ] `docs/ARCHITECTURE.md` — the diagram AIRFLOW row (`load → dbt build →
+      write-back`, eval out of the DAG — Amendment 1); §3.1 Airflow row already
+      reads "may NOT contain logic"; §8 Gotchas only if a Docker surprise lands
 - [ ] Spec amendments — none (no later spec is invalidated; Phase 9+ reconcile
       against a main including all of Phase 8 when they start)
 - [ ] docs/RESULTS.md, docs/AB_DESIGN.md, docs/METRICS.md, README — none
@@ -449,6 +488,14 @@ hostile environment" carve-out.
 
 ## Out of scope (deferred, recorded)
 
+- **Split load from `dbt build` (a build-only target + a separate `load` task)** —
+  **Phase 9** (BACKLOG row). Option A (THROUGH on `dbt-build`) keeps landing and
+  build in one task, which is all 8b needs; the split earns its keep only at the
+  BigQuery target, where the load is GCS→BigQuery and `dbt_build(TARGET=bigquery)`
+  calling the DuckDB `load()` (`loader/cli.py`) is already wrong.
+- **`eval` inside the DAG** — **not taken** (Amendment 1). `eval` asserts
+  full-data pins and reads truth, so it is a union-only gate in `make pipeline`/CI,
+  never a per-interval DAG task.
 - **Cloud Composer** (the DAG applied to a managed Airflow) — **Phase 11**
   (`enable_composer` Terraform module, applied once on demo day). 8b is
   Docker-local only.

@@ -108,6 +108,38 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### Phase 8b
+
+*Airflow DAG, `test-int-airflow`, backfill≡union (`phase-8b-airflow-dag`, spec
+`specs/phase-8b-airflow-dag.md`).*
+
+- **`eval` is NOT a per-interval DAG task (Amendment 1, 2026-08-28).** `make eval`
+  asserts the FULL-data MAE/accuracy pins and reads `truth/`, so it fails on every
+  partial backfill interval (`THROUGH=2026-01-07`: accuracy 0.871, MAE 0.928762)
+  and, upstream of write-back, would skip the interval's write and redden the run.
+  The pins are **union properties** (a regression check on the complete build) and
+  truth is not a serving input (a production DAG has no truth), so `eval` belongs
+  in `make pipeline`/CI, not the scheduler chain. It writes neither
+  `scores_send_time` nor `send_schedule`, so removing it leaves the DAG's two
+  output tables byte-identical to `make pipeline`'s. The DAG runs the two writing
+  steps `dbt_build >> writeback`. Rejected: a report-only `eval` in the DAG (a make
+  variant + noise on every partial interval); an Airflow `trigger_rule` letting
+  write-back run past a failed eval (config to paper over a step that does not
+  belong).
+- **`THROUGH` on `make dbt-build`, not a separate `load` task (reconciliation item
+  2, kept 2026-08-28).** The build owns the landing: `make dbt-build … THROUGH=<ds>`
+  lands ≤ `<ds>` and builds it in one task, so no interval is ever built against a
+  landing it did not load, and there is no separate `load` task for the build to
+  clobber (`loader/cli.py::dbt_build` threads `through` into its internal
+  `load`). A build-only target + a separate `load` task is the **Phase 9** shape,
+  not now: there the load is GCS→BigQuery and `dbt_build(TARGET=bigquery)` still
+  calling the DuckDB `load()` (`loader/cli.py`) is already wrong, so the split
+  earns its keep — deferred as a BACKLOG row (trigger: Phase 9 reconciliation /
+  first `TARGET≠duckdb` DAG). Doing it in 8b is speculative churn against an
+  implemented, committed shape (the minimal-but-scalable + review-cap rules).
+  Rejected: build-only now (a benefit two phases away, a new target and a third
+  task for nothing 8b proves).
+
 ### Phase 8a
 
 *Write-back and `make pipeline` (`phase-8-orchestration`, spec

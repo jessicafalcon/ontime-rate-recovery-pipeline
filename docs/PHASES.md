@@ -236,9 +236,11 @@ provisional after the full landing.
 
 **Goal.** `serving/writeback.py` + `make writeback` against the DuckDB
 stand-in `send_schedule` (replace only on strictly greater `(model_version,
-computed_as_of)`); Airflow DAG (Docker, local) chaining load → `dbt build` →
-eval → write-back with data-interval-aware runs and `catchup`; `make pipeline
-PROFILE=<p>` runs the same chain without Airflow; `make test-int-airflow`.
+computed_as_of)`); Airflow DAG (Docker, local) chaining `dbt build` (THROUGH from
+the data interval) → write-back with data-interval-aware runs and `catchup`
+(eval is a union-only validation gate in `make pipeline`/CI, not a per-interval
+DAG task — it reads truth and writes no table, Phase 8b); `make pipeline
+PROFILE=<p>` runs the full chain without Airflow; `make test-int-airflow`.
 
 **Done when.** `make pipeline` and a triggered DAG run produce byte-identical
 `scores_send_time` and `send_schedule`; a backfill over three intervals equals

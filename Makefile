@@ -154,6 +154,9 @@ writeback:
 
 # The local pipeline with no scheduler (serving/cli.py pipeline): dbt build →
 # eval → write-back in one validated process, producing scores_send_time and
-# send_schedule. Phase 8b's Airflow DAG orders the same steps as make targets.
+# send_schedule. eval here is the union-only validation gate (it asserts the
+# full-data pins and reads truth). Phase 8b's Airflow DAG orders the WRITING
+# steps (dbt build → write-back); eval is not a per-interval DAG task, so the DAG
+# produces the same two tables byte-identically without gating on partial data.
 pipeline:
 	uv run python -m serving.cli pipeline $(call _Q,$(value PROFILE))

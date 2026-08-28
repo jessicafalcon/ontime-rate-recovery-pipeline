@@ -236,7 +236,8 @@ EVAL (Python, reads truth)   label accuracy · reachable-center MAE · counterfa
    ▼
 WRITE-BACK (Python)   idempotent upsert → Spanner send_schedule (local: a DuckDB table stands in)
 
-AIRFLOW  load → dbt build → eval → write-back, data-interval-aware, catchup for backfill
+AIRFLOW  dbt build (THROUGH=data_interval_end) → write-back, data-interval-aware, catchup for backfill
+         (eval is a union-only validation gate in make pipeline / CI — it reads truth and writes no table, Phase 8b)
          (local Docker | Cloud Composer, isolated Terraform module, applied once)
 TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · IAM · budget alerts
 ```

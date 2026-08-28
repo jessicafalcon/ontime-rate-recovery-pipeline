@@ -31,7 +31,8 @@ EVAL (reads truth)  label accuracy · reachable-center MAE · counterfactual sim
    ▼
 WRITE-BACK  idempotent upsert → send_schedule (DuckDB stand-in | Spanner)
 
-AIRFLOW orders: load → dbt build → eval → write-back    TERRAFORM: BigQuery · GCS · Spanner · Composer · IAM · budgets
+AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS · Spanner · Composer · IAM · budgets
+  (eval is a union-only gate in make pipeline / CI — reads truth, writes no table)
 ```
 
 ## Repo map
@@ -568,6 +569,6 @@ dbt build → eval → write-back in one process; `make writeback` alone stands.
 tiny: 20 users, 20 written then 0; send_schedule byte-identical (pin hash);
 every Phase 3–6 gate byte-identical (report 0.609756, scores-golden 0 differ,
 eval MAE 0.816201). `make mutate` 3/3. No new package (Airflow is 8b's Docker);
-`fixtures/tiny/` untouched. Next: Phase 8b (Airflow DAG). Open BACKLOG rows: **11**.
+`fixtures/tiny/` untouched. Next: Phase 8b (Airflow DAG). Open BACKLOG rows: **12**.
 
 (Update this section at the end of every working day.)
