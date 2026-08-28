@@ -237,8 +237,8 @@ provisional after the full landing.
 **Goal.** `serving/writeback.py` + `make writeback` against the DuckDB
 stand-in `send_schedule` (replace only on strictly greater `(model_version,
 computed_as_of)`); Airflow DAG (Docker, local) chaining `dbt build` (THROUGH from
-the data interval) → write-back with data-interval-aware runs and `catchup`
-(eval is a union-only validation gate in `make pipeline`/CI, not a per-interval
+the data interval) → write-back, data-interval-aware, `catchup=False` (backfill on
+demand — Amendment 2) (eval is a union-only validation gate in `make pipeline`/CI, not a per-interval
 DAG task — it reads truth and writes no table, Phase 8b); `make pipeline
 PROFILE=<p>` runs the full chain without Airflow; `make test-int-airflow`.
 
@@ -268,20 +268,23 @@ the Docker-local Airflow DAG (`orchestration/dags/pipeline_dag.py`) orders the
 chain's WRITING steps as BashOperators over `make` targets (`dbt_build >>
 writeback`, from the Airflow-free `orchestration/tasks.py` manifest the offline
 structure test shares), `THROUGH={{ data_interval_end | ds }}` (a per-interval
-landing), `max_active_runs=1` (single-writer on the DuckDB file), `catchup` for
-backfill. `make dbt-build` gained a `THROUGH` threaded into its internal `load`
-(resolves the re-load clobber; default loads all). **Amendment 1:** `eval` left
-the per-interval DAG — it asserts full-data pins and reads truth, so it is a
-union-only gate in `make pipeline`/CI and writes no table, leaving the DAG's two
-outputs byte-identical to `make pipeline`'s. `make test-int-airflow` (behind
-`OTR_INT`, CI never runs it) spins a lean `SequentialExecutor`/SQLite container
-and proves DAG≡pipeline and the three-interval catchup (`THROUGH` 2026-01-07/12/13)
-≡ union across processes (`send_schedule == SEND_SCHEDULE_SHA256_TINY`, 3 tests
-~50 s); the backfill converges because intervals are spaced ≤ `lookback_days`.
-Offline: `test_backfill.py`, `test_dag_structure.py`, `test_through_build.py`,
-`test_airflow_docker_only.py`. `apache-airflow` is Docker-only (not in `uv.lock`);
-`fixtures/tiny/` untouched; every Phase 3–8a gate byte-identical. **Phase 8 ⭐
-checkpoint closed.** One BACKLOG row opened (split load from build, trigger Phase 9).
+landing), `max_active_runs=1` (single-writer on the DuckDB file), `catchup=False`
+(no auto-catch-up-to-now; backfill on demand — Amendment 2). `make dbt-build`
+gained a `THROUGH` threaded into its internal `load` (resolves the re-load
+clobber; default loads all). **Amendment 1:** `eval` left the per-interval DAG —
+it asserts full-data pins and reads truth, so it is a union-only gate in `make
+pipeline`/CI and writes no table, leaving the DAG's two outputs byte-identical to
+`make pipeline`'s. `make test-int-airflow` (behind `OTR_INT`, CI never runs it)
+spins a lean `SequentialExecutor`/SQLite container and proves DAG≡pipeline and the
+three-interval backfill (`THROUGH` 2026-01-07/12/13) ≡ union across processes
+(both `scores_send_time` and `send_schedule == SEND_SCHEDULE_SHA256_TINY`; 5 tests,
+~2 min); the backfill converges because intervals are spaced ≤ `lookback_days`.
+Offline: `test_backfill.py`, `test_dag_structure.py` (AST-pinned config),
+`test_through_build.py`, `test_airflow_docker_only.py`. `apache-airflow` is
+Docker-only (not in `uv.lock`); `fixtures/tiny/` untouched; every Phase 3–8a gate
+byte-identical. **Phase 8 ⭐ checkpoint closed.** Two BACKLOG rows opened (split
+load from build, trigger Phase 9; the `computed_as_of` discriminator gap, an 8a/5
+limitation).
 
 ---
 

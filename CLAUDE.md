@@ -86,7 +86,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   never truth/raw. A pipeline dir — guarded by `test_truth_isolation.py`.
 - `orchestration/` *(Phase 8b)* — the Airflow DAG (Docker-local), no logic, only
   ordering: `dags/pipeline_dag.py` (BashOperators over `make` targets, `dbt_build
-  >> writeback`, `max_active_runs=1`, `catchup`, `THROUGH` via `{{
+  >> writeback`, `max_active_runs=1`, `catchup=False`, `THROUGH` via `{{
   data_interval_end | ds }}`), `tasks.py` (the Airflow-free ordered-command
   manifest the DAG and the offline structure test share), `Dockerfile` +
   `docker-compose.yml` (lean `SequentialExecutor`/SQLite; `apache-airflow` never
@@ -579,16 +579,18 @@ Phase 8 ⭐ checkpoint. 8b landed: `orchestration/dags/pipeline_dag.py` orders t
 chain's WRITING steps as BashOperators over `make` targets (`dbt_build >>
 writeback`, from the Airflow-free `orchestration/tasks.py` manifest),
 `THROUGH={{ data_interval_end | ds }}` so a per-interval run lands only files ≤
-that date, `max_active_runs=1` (single-writer on the DuckDB file), `catchup` for
-backfill. `make dbt-build` gained a `THROUGH` threaded into its internal `load`
+that date, `max_active_runs=1` (single-writer on the DuckDB file),
+`catchup=False` (no auto-catch-up-to-now; backfill on demand — Amendment 2).
+`make dbt-build` gained a `THROUGH` threaded into its internal `load`
 (resolves the re-load clobber; default loads all — no golden moves). **Amendment
 1:** `eval` is NOT a DAG task — it asserts full-data pins and reads truth, so it
 stays a union-only gate in `make pipeline`/CI (writes no table, so the DAG's two
 outputs stay byte-identical to `make pipeline`'s). `make test-int-airflow` (behind
 `OTR_INT`, CI never runs it) spins a lean `SequentialExecutor`/SQLite container
-and proves DAG≡pipeline and backfill≡union across processes: 3 passed in ~50s, the
-container `send_schedule == SEND_SCHEDULE_SHA256_TINY`. Offline: `test_backfill.py`
-(three THROUGH landings → union), `test_dag_structure.py`, `test_through_build.py`,
+and proves DAG≡pipeline and backfill≡union across processes: 5 passed (~2 min),
+both container `scores_send_time` and `send_schedule == SEND_SCHEDULE_SHA256_TINY`.
+Offline: `test_backfill.py` (three THROUGH landings → union; `computed_as_of`
+monotone), `test_dag_structure.py` (AST-pinned config), `test_through_build.py`,
 `test_airflow_docker_only.py`. `apache-airflow` is **Docker-only** (never in
 `uv.lock`); `fixtures/tiny/` untouched; every Phase 3–8a gate byte-identical.
 Open BACKLOG rows: **13** (8b opened two: split load from build, trigger Phase 9;

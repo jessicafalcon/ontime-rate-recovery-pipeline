@@ -152,13 +152,13 @@ annotated **Superseded by …** in place and never deleted.
   the command list (more fragile than one shared manifest); `{{ ds }}` (that is
   `data_interval_start` = D−1, the wrong cut).
 - **Single-writer by construction: `max_active_runs=1` + linear task order.** The
-  DAG runs load/build/write-back as SEPARATE processes on `data/<p>.duckdb`
-  (8a was one process); DuckDB is single-writer, so overlap is *prevented*
-  (`max_active_runs=1` serialises catchup; `dbt_build >> writeback` linearises a
-  run), not caught by a lock error. `test-int-airflow` demonstrates the hand-off
-  by driving a green three-interval catchup where each BashOperator is its own
-  subprocess. Rejected: relying on the file lock to error on overlap (a race
-  turned into an exception is not a guarantee).
+  DAG runs `dbt-build` (loads + builds) and write-back as SEPARATE processes on
+  `data/<p>.duckdb` (8a was one process); DuckDB is single-writer, so overlap is
+  *prevented* (`max_active_runs=1` serialises concurrent runs; `dbt_build >>
+  writeback` linearises within a run), not caught by a lock error. `test-int-airflow`
+  demonstrates the hand-off by driving a green three-interval backfill where each
+  BashOperator is its own subprocess. Rejected: relying on the file lock to error
+  on overlap (a race turned into an exception is not a guarantee).
 - **Backfill ≡ union holds when intervals are spaced ≤ `lookback_days`.** scores/
   marts are table (recomputed each build), stg/attribution converge to the union
   at the final landing (Phase 7), and `computed_as_of = max(client_event_time)` is
@@ -175,6 +175,24 @@ annotated **Superseded by …** in place and never deleted.
   (webserver + scheduler + Postgres for a synchronous single-DAG test);
   catchup-to-`now` (months of runs, a wall-clock dependence — the test uses
   explicit logical dates).
+- **`catchup=False`; a backfill is invoked explicitly (Amendment 2, review round
+  1, 2026-08-28).** As first landed, `catchup=True` + a past `start_date` +
+  `DAGS_ARE_PAUSED_AT_CREATION=False` would make any scheduler start backfill every
+  day since 2026-01-06 — the catchup-to-`now` this phase rejects. The DAG now sets
+  `catchup=False` and starts paused (the default; `airflow dags test` runs it
+  anyway); a backfill is `airflow dags test <date>` / `airflow dags backfill -s -e`
+  over a bounded range, which ignores `catchup`. Backfill≡union never depended on
+  auto-catchup. Rejected: `catchup=True` (the foot-gun); a report-only `eval` or a
+  `trigger_rule` to keep eval in the DAG (Amendment 1 settled that).
+- **`computed_as_of` is the write-back discriminator; its limitation is recorded,
+  not fixed here (Amendment 2, review round 1).** `backfill ≡ union` relies on
+  every score change advancing `computed_as_of = max(client_event_time)` of the
+  window's opens — true for the backfill's monotone-superset landings (verified,
+  `test_computed_as_of_is_non_decreasing_across_landings`). A landing that changed
+  scores via only back-dated opens would tie it and keep the stale row; that is an
+  8a/Phase-5 discriminator gap, unreachable on the fixture, deferred to BACKLOG
+  (replace with a content hash / row version when a reproducing case exists). Not
+  fixed in 8b — it would change the 8a write-back contract (its own fix PR).
 
 ### Phase 8a
 
