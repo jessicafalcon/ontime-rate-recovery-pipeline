@@ -34,6 +34,7 @@ with DAG(
     schedule="@daily",
     start_date=datetime(2026, 1, 6),
     catchup=False,  # never auto-catch-up-to-now; backfill is explicit (Amendment 2)
+    is_paused_upon_creation=True,  # starts paused (Amendment 2, second safety leg)
     max_active_runs=1,  # one writer on data/<p>.duckdb at a time (DuckDB single-writer)
     default_args={"retries": 0},
     tags=["ontime", "phase-8b"],

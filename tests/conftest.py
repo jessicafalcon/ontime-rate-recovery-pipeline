@@ -34,6 +34,15 @@ def pytest_collection_modifyitems(
 
 @pytest.fixture(autouse=True)
 def _scrub_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    for var in ("CONFIRM", "MAKEFLAGS", "PROFILE", "TARGET"):
+    # Keep in step with tests/test_makefile.py::SCRUB (round 3 #12).
+    for var in (
+        "CONFIRM",
+        "MAKEFLAGS",
+        "PROFILE",
+        "TARGET",
+        "THROUGH",
+        "WRITE",
+        "FULL",
+    ):
         monkeypatch.delenv(var, raising=False)
     yield

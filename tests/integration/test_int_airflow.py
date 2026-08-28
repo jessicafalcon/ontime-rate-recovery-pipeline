@@ -1,6 +1,6 @@
 """Phase 8b (specs/phase-8b-airflow-dag.md): the Docker-local Airflow DAG equals
-`make pipeline` and a catchup backfill equals the union — across process
-boundaries (Done-when 1/3/4/5, invariants 1/4/5/6).
+`make pipeline` and an explicit three-interval backfill equals the union — across
+process boundaries (Done-when 1/3/4/5, invariants 1/4/5/6).
 
 Behind OTR_INT (only `make test-int-airflow` exports it; CI never runs this). The
 test builds a lean Airflow image (SequentialExecutor + SQLite), drives the DAG
@@ -56,7 +56,15 @@ def _exec(
 
 @pytest.fixture(scope="module")
 def airflow_container() -> Iterator[None]:
-    build = _compose(["build"], timeout=1800)
+    # Positive control (round 3 #5): plant a secret-shaped file in the build
+    # context; .dockerignore (`**/*-key.json`) must keep it OUT of the image, so
+    # test_image_has_no_secrets is not vacuous. Removed right after the build.
+    canary = ROOT / "otr-canary-key.json"
+    canary.write_text("{}\n")
+    try:
+        build = _compose(["build"], timeout=1800)
+    finally:
+        canary.unlink(missing_ok=True)
     assert build.returncode == 0, build.stderr[-4000:]
     up = _compose(["up", "-d"], timeout=300)
     assert up.returncode == 0, up.stderr[-2000:]
@@ -118,8 +126,8 @@ def _assert_scores_match_golden(db: Path) -> None:
 
 def test_dag_edges_and_operators(airflow_container: None) -> None:
     """Invariant 1 at runtime: the real DAG object has exactly {dbt_build,
-    writeback}, the edge dbt_build → writeback, and only BashOperators — imported
-    with airflow inside the container (the offline test can only text-scan)."""
+    writeback}, the edge dbt_build → writeback, and only BashOperators — against a
+    REAL Airflow in the container (corroborating the offline stubbed-airflow test)."""
     snippet = (
         "from airflow.models.dagbag import DagBag;"
         "d=DagBag('/opt/otr/orchestration/dags',include_examples=False).get_dag('pipeline');"
@@ -136,17 +144,21 @@ def test_dag_edges_and_operators(airflow_container: None) -> None:
 
 
 def test_image_has_no_secrets(airflow_container: None) -> None:
-    """Round 2 #1/#2: `COPY . /opt/otr` must bake no secret file and no terraform
-    cache — `.dockerignore` (with `**/`-anchored patterns) excludes them. Assert
-    the BUILT image carries none (the pin the .dockerignore lacked)."""
+    """Round 2/3 #1/#2/#5: `COPY . /opt/otr` must bake no secret file from the repo
+    — `.dockerignore`'s `**/`-anchored patterns exclude them. The repo IS in the
+    image (Makefile present), so an empty result is meaningful; the planted
+    `otr-canary-key.json` (a `**/*-key.json`) proves the exclusion bites. The scan
+    is over the REPO's files, pruning the build-created `.venv` (library code like
+    dbt's `credentials.py` is not a repo secret)."""
+    assert _exec("test -f /opt/otr/Makefile && echo yes").stdout.strip() == "yes"
     r = _exec(
-        r"find /opt/otr \( -name '.env' -o -name '*.tfvars' -o -name '*.tfstate*' "
-        r"-o -name '*-key.json' -o -name 'service-account*.json' -o -name '.terraform' "
-        r"\) -print 2>/dev/null; true"
+        r"find /opt/otr -path /opt/otr/.venv -prune -o \( "
+        r"-name '.env' -o -name '.env.*' -o -name '*.tfvars' -o -name '*.tfstate*' "
+        r"-o -name '*-key.json' -o -name '*-credentials.json' "
+        r"-o -name 'credentials.json' -o -name 'service-account*.json' "
+        r"-o -name '.terraform' \) -print 2>/dev/null; true"
     )
-    assert r.stdout.strip() == "", (
-        f"secrets/terraform baked into the image:\n{r.stdout}"
-    )
+    assert r.stdout.strip() == "", f"secrets baked into the image:\n{r.stdout}"
 
 
 def test_dag_run_matches_make_pipeline(airflow_container: None, tmp_path: Path) -> None:
@@ -162,7 +174,7 @@ def test_dag_run_matches_make_pipeline(airflow_container: None, tmp_path: Path) 
     assert send_schedule_hash(db) == pins.SEND_SCHEDULE_SHA256_TINY
 
 
-def test_catchup_backfill_equals_union(airflow_container: None, tmp_path: Path) -> None:
+def test_backfill_equals_union(airflow_container: None, tmp_path: Path) -> None:
     """Three interval runs (THROUGH 2026-01-07, 2026-01-12, 2026-01-13) into the
     container's incremental DB land the union — the DAG-level analogue of
     tests/test_backfill.py, across process boundaries. The first interval is
@@ -184,7 +196,7 @@ def test_catchup_backfill_equals_union(airflow_container: None, tmp_path: Path) 
     assert send_schedule_hash(db) == pins.SEND_SCHEDULE_SHA256_TINY
 
 
-def test_catchup_runs_green(airflow_container: None) -> None:
+def test_backfill_runs_green(airflow_container: None) -> None:
     """The three-interval catchup completes all tasks green (each BashOperator a
     separate subprocess on data/<p>.duckdb) — the single-writer hand-off. The
     final send_schedule has one row per scored user."""

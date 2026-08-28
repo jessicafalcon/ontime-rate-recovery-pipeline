@@ -52,28 +52,46 @@ def test_three_through_landings_equal_the_union(
     assert h_backfill == h_union == pins.SEND_SCHEDULE_SHA256_TINY
 
 
-def test_computed_as_of_is_non_decreasing_across_landings(
+def _scores_state(db: Path) -> tuple[str, object]:
+    """(content hash of the served score columns, max computed_as_of)."""
+    con = duckdb.connect(str(db))
+    try:
+        h = con.execute(
+            "select md5(string_agg(r, '|' order by r)) from ("
+            "select user_id || '/' || cohort_id || '/' "
+            "|| cast(center_hour_local as varchar) || '/' "
+            "|| cast(send_hour_local as varchar) || ':' "
+            "|| cast(send_minute_local as varchar) as r "
+            "from main_scores.scores_send_time)"
+        ).fetchone()[0]
+        as_of = con.execute(
+            "select max(computed_as_of) from main_scores.scores_send_time"
+        ).fetchone()[0]
+        return h, as_of
+    finally:
+        con.close()
+
+
+def test_computed_as_of_advances_when_scores_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Invariant 5's precondition (Amendment 2): every backfill landing advances
-    (or ties) `max(computed_as_of)` — the write-back's replace-iff-*greater*
-    discriminator. This is what makes each landing's scores overtake the stale
-    row and the union interval win; a landing that changed scores while
-    `computed_as_of` receded would break backfill≡union (BACKLOG)."""
+    """Invariant 5's precondition (Amendment 2), stated as the property it needs:
+    whenever a landing CHANGES the served scores, `computed_as_of` STRICTLY
+    increases (ties only when the scores are unchanged) — so replace-iff-*greater*
+    carries every change forward and the union interval wins. tiny exercises both:
+    07→12 changes the scores (strict increase asserted), 12→13 does not (tie ok)."""
     monkeypatch.setattr(loader, "DATA", tmp_path / "mono")
-    seen: list[object] = []
+    prev: tuple[str, object] | None = None
     for through in pins.BACKFILL_THROUGHS_TINY:
         assert cli.dbt_build("tiny", "", through=through) == 0
-        con = duckdb.connect(str(loader.db_path("tiny")))
-        try:
-            seen.append(
-                con.execute(
-                    "select max(computed_as_of) from main_scores.scores_send_time"
-                ).fetchone()[0]
-            )
-        finally:
-            con.close()
-    assert seen == sorted(seen), seen  # non-decreasing across the three landings
+        state = _scores_state(loader.db_path("tiny"))
+        if prev is not None:
+            (prev_hash, prev_as_of), (cur_hash, cur_as_of) = prev, state
+            if cur_hash != prev_hash:
+                assert cur_as_of > prev_as_of, (through, cur_as_of, prev_as_of)
+            else:
+                assert cur_as_of >= prev_as_of, (through, cur_as_of, prev_as_of)
+        prev = state
 
 
 def test_backfill_interval_twice_is_a_noop(

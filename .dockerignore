@@ -35,5 +35,5 @@ logs
 **/*.tfstate.*
 **/*-key.json
 **/*-credentials.json
+**/credentials.json
 **/service-account*.json
-**/credentials*
