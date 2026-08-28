@@ -26,8 +26,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/airflow/otr-venv \
     PYTHONPATH=/opt/otr \
     AIRFLOW__CORE__EXECUTOR=SequentialExecutor \
     AIRFLOW__CORE__DAGS_FOLDER=/opt/otr/orchestration/dags \
-    AIRFLOW__CORE__LOAD_EXAMPLES=False \
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+    AIRFLOW__CORE__LOAD_EXAMPLES=False
+# The DAG starts paused (the safe default) — `airflow dags test` runs it anyway
+# (it bypasses the scheduler), and no scheduler ever auto-runs it (Amendment 2, #5).
 WORKDIR /opt/otr
 
 # Layer 1: project runtime deps from the lock (cached unless the lock changes) —

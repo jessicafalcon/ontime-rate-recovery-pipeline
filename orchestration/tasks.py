@@ -28,7 +28,9 @@ PROFILE = "tiny"
 THROUGH_TEMPLATE = "{{ data_interval_end | ds }}"
 
 # (task_id, make command) in dependency order — make pipeline's WRITING steps.
+# THROUGH is single-quoted so the rendered date is one shell token regardless of
+# what Airflow substitutes (belt-and-suspenders; the date has no metacharacters).
 TASKS: list[tuple[str, str]] = [
-    ("dbt_build", f"make dbt-build PROFILE={PROFILE} THROUGH={THROUGH_TEMPLATE}"),
+    ("dbt_build", f"make dbt-build PROFILE={PROFILE} THROUGH='{THROUGH_TEMPLATE}'"),
     ("writeback", f"make writeback PROFILE={PROFILE}"),
 ]

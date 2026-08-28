@@ -4,8 +4,9 @@
    `test-int-airflow`, Phase 9 `test-int-bigquery`), which export OTR_INT=1.
    A bare `pytest` (the run-tests hook makes it routine) must never touch a
    live target. Without the
-   marker every `tests/integration` test is SKIPPED, loudly. The directory does
-   not exist yet; the guard is here so adding it cannot forget the rule.
+   marker every `tests/integration` test is SKIPPED, loudly (Phase 8b added the
+   directory — `test_int_airflow.py`; the guard predates it so adding it could
+   not forget the rule).
 2. CONFIRM / MAKEFLAGS / PROFILE / TARGET are scrubbed so the Makefile-invoking
    tests (tests/test_makefile.py) see a clean env.
 """

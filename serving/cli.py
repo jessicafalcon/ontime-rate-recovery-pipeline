@@ -7,8 +7,9 @@ writeback — upsert scores_send_time + the open dim_user tz into
             (model_version, computed_as_of); idempotent (a re-run writes 0).
 pipeline  — the local chain with no scheduler: dbt build → eval → write-back,
             producing scores_send_time and send_schedule. Phase 8b's Airflow DAG
-            orders the same steps as make targets; this is the DAG minus the
-            scheduler."""
+            orders the WRITING steps (dbt build → write-back) as make targets;
+            eval stays a union-only validation gate here and in CI (Amendment 1).
+            The DAG produces the same two tables byte-identically."""
 
 from __future__ import annotations
 

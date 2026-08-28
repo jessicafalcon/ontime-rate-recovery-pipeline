@@ -14,3 +14,16 @@ logs
 .pytest_cache
 .ruff_cache
 .claude
+
+# Secrets must never be baked by `COPY . /opt/otr` (review round 1, #7). None are
+# committed, but a developer's local file would otherwise enter the image and
+# survive `down -v`. These mirror CLAUDE.md's never-commit list.
+.env
+.env.*
+*.tfvars
+*.tfstate
+*.tfstate.*
+*-key.json
+*-credentials.json
+service-account*.json
+**/credentials*

@@ -1,28 +1,31 @@
 """Phase 8b (specs/phase-8b-airflow-dag.md): the Docker-local Airflow DAG equals
 `make pipeline` and a catchup backfill equals the union — across process
-boundaries (Done-when 1/3/4/5, invariants 4/5/6).
+boundaries (Done-when 1/3/4/5, invariants 1/4/5/6).
 
 Behind OTR_INT (only `make test-int-airflow` exports it; CI never runs this). The
 test builds a lean Airflow image (SequentialExecutor + SQLite), drives the DAG
 with `airflow dags test <THROUGH>` (a synchronous run; `{{ data_interval_end |
 ds }}` renders THROUGH = the arg date), copies the container's DuckDB out, and
-hashes `send_schedule` with the SAME host helper as every other gate — so a match
-against SEND_SCHEDULE_SHA256_TINY is the cross-process proof the scheduler-ordered
-chain reproduces `make pipeline`'s table. Each `airflow dags test` runs the
-BashOperators as separate subprocesses, so a green catchup demonstrates the
-single-writer hand-off on data/<p>.duckdb (max_active_runs=1)."""
+compares BOTH tables to the frozen goldens with the SAME host helpers as every
+other gate. It also asserts the real DAG object's task set, edges and operator
+types (imported with airflow inside the container), and that an intermediate
+interval actually lands a partial set — so the proof cannot degrade to "three
+full idempotent runs"."""
 
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from eval import golden
 from tests import pins
 from tests.test_writeback import send_schedule_hash
 
 ROOT = Path(__file__).resolve().parents[2]
+FIXTURES = ROOT / "fixtures" / "tiny"
 COMPOSE_FILE = ROOT / "orchestration" / "docker-compose.yml"
 COMPOSE = ["docker", "compose", "-f", str(COMPOSE_FILE)]
 SVC = "airflow"
@@ -31,7 +34,7 @@ CONTAINER_DB = "/opt/otr/data/tiny.duckdb"
 UNION_THROUGH = pins.LATE_FILE_TINY  # "2026-01-13"
 
 
-def _compose(args: list[str], timeout: int = 600) -> subprocess.CompletedProcess:
+def _compose(args: list[str], timeout: int = 600) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         COMPOSE + args, cwd=str(ROOT), capture_output=True, text=True, timeout=timeout
     )
@@ -39,7 +42,7 @@ def _compose(args: list[str], timeout: int = 600) -> subprocess.CompletedProcess
 
 def _exec(
     bash: str, check: bool = True, timeout: int = 900
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     r = _compose(["exec", "-T", SVC, "bash", "-lc", bash], timeout=timeout)
     if check and r.returncode != 0:
         raise AssertionError(
@@ -50,7 +53,7 @@ def _exec(
 
 
 @pytest.fixture(scope="module")
-def airflow_container() -> None:
+def airflow_container() -> Iterator[None]:
     build = _compose(["build"], timeout=1800)
     assert build.returncode == 0, build.stderr[-4000:]
     up = _compose(["up", "-d"], timeout=300)
@@ -75,29 +78,83 @@ def _run_dag(through: str) -> None:
     _exec(f"airflow dags test pipeline {through}")
 
 
-def _container_send_schedule_hash(tmp_path: Path) -> str:
+def _pull_db(tmp_path: Path) -> Path:
     dst = tmp_path / "tiny.duckdb"
     cp = _compose(["cp", f"{SVC}:{CONTAINER_DB}", str(dst)], timeout=120)
     assert cp.returncode == 0, cp.stderr
-    return send_schedule_hash(dst)
+    return dst
+
+
+def _query(sql: str) -> str:
+    """Run a scalar query against the container's DuckDB via the project venv;
+    return the result as a string (its last stdout line)."""
+    out = _exec(
+        'uv run python -c "import duckdb;'
+        f"print(duckdb.connect('{CONTAINER_DB}').execute({sql!r}).fetchone()[0])\""
+    ).stdout
+    return out.strip().splitlines()[-1]
+
+
+def _assert_scores_match_golden(db: Path) -> None:
+    built = golden.export_rows(db, golden.SCORES_SEND_TIME)
+    frozen = golden.parse(
+        (FIXTURES / golden.SCORES_SEND_TIME.file).read_text(), golden.SCORES_SEND_TIME
+    )
+    assert golden.diff_rows(built, frozen, golden.SCORES_SEND_TIME.key_width) == []
+
+
+def test_dag_edges_and_operators(airflow_container: None) -> None:
+    """Invariant 1 at runtime: the real DAG object has exactly {dbt_build,
+    writeback}, the edge dbt_build → writeback, and only BashOperators — imported
+    with airflow inside the container (the offline test can only text-scan)."""
+    snippet = (
+        "from airflow.models.dagbag import DagBag;"
+        "d=DagBag('/opt/otr/orchestration/dags',include_examples=False).get_dag('pipeline');"
+        "tids=set(t.task_id for t in d.tasks);"
+        "wb=d.get_task('writeback');db=d.get_task('dbt_build');"
+        "ok=(tids=={'dbt_build','writeback'} and wb.upstream_task_ids=={'dbt_build'} "
+        "and db.downstream_task_ids=={'writeback'} "
+        "and all(type(t).__name__=='BashOperator' for t in d.tasks));"
+        "print('EDGES_OK' if ok else 'EDGES_BAD:'+repr(sorted(tids))"
+        "+'/'+repr(sorted(wb.upstream_task_ids)))"
+    )
+    out = _exec(f'python -c "{snippet}"').stdout
+    assert "EDGES_OK" in out, out
 
 
 def test_dag_run_matches_make_pipeline(airflow_container: None, tmp_path: Path) -> None:
-    """A single union DAG run (THROUGH=2026-01-13) produces send_schedule
-    byte-identical to make pipeline's (the pinned hash)."""
+    """A single union DAG run (THROUGH=2026-01-13) produces BOTH scores_send_time
+    and send_schedule byte-identical to make pipeline's (the frozen golden and the
+    pinned hash)."""
     _reset_db()
     _run_dag(UNION_THROUGH)
-    assert _container_send_schedule_hash(tmp_path) == pins.SEND_SCHEDULE_SHA256_TINY
+    db = _pull_db(tmp_path)
+    _assert_scores_match_golden(
+        db
+    )  # Done-when 3: scores_send_time too, not only send_schedule
+    assert send_schedule_hash(db) == pins.SEND_SCHEDULE_SHA256_TINY
 
 
 def test_catchup_backfill_equals_union(airflow_container: None, tmp_path: Path) -> None:
     """Three interval runs (THROUGH 2026-01-07, 2026-01-12, 2026-01-13) into the
-    container's incremental DB land the union send_schedule — the DAG-level
-    analogue of tests/test_backfill.py, across process boundaries."""
+    container's incremental DB land the union — the DAG-level analogue of
+    tests/test_backfill.py, across process boundaries. The first interval is
+    asserted PARTIAL, so a token rendering empty (or a dropped --through) fails
+    here instead of degrading to 'three full idempotent runs'."""
     _reset_db()
-    for through in pins.BACKFILL_THROUGHS_TINY:
+    first, *rest = pins.BACKFILL_THROUGHS_TINY  # 2026-01-07
+    _run_dag(first)
+    # THROUGH reached the loader: the first landing is a strict subset.
+    assert (
+        _query("select max(cast(server_upload_time as date))::varchar from raw.events")
+        <= first
+    )
+    assert int(_query("select count(*) from raw.events")) < pins.RAW_EVENT_ROWS
+    for through in rest:
         _run_dag(through)
-    assert _container_send_schedule_hash(tmp_path) == pins.SEND_SCHEDULE_SHA256_TINY
+    db = _pull_db(tmp_path)
+    _assert_scores_match_golden(db)
+    assert send_schedule_hash(db) == pins.SEND_SCHEDULE_SHA256_TINY
 
 
 def test_catchup_runs_green(airflow_container: None) -> None:
@@ -107,9 +164,6 @@ def test_catchup_runs_green(airflow_container: None) -> None:
     _reset_db()
     for through in pins.BACKFILL_THROUGHS_TINY:
         _run_dag(through)  # _exec check=True → a failed task raises here
-    out = _exec(
-        'uv run python -c "import duckdb;'
-        f"print(duckdb.connect('{CONTAINER_DB}').execute("
-        "'select count(*) from serving.send_schedule').fetchone()[0])\""
-    ).stdout
-    assert out.strip().splitlines()[-1] == str(pins.SEND_SCHEDULE_ROWS_TINY)
+    assert int(_query("select count(*) from serving.send_schedule")) == (
+        pins.SEND_SCHEDULE_ROWS_TINY
+    )

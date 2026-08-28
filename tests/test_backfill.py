@@ -13,6 +13,7 @@ test_int_airflow proves in the container. Real in-process builds into tmp DBs
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,9 @@ from tests import pins
 from tests.test_writeback import send_schedule_hash
 
 
-def _run_chain(data_dir: Path, throughs, monkeypatch: pytest.MonkeyPatch) -> Path:
+def _run_chain(
+    data_dir: Path, throughs: Sequence[str], monkeypatch: pytest.MonkeyPatch
+) -> Path:
     """Redirect the output DB to `data_dir`, then for each landing dbt-build the
     subset and write it back into the same (incremental) DB. Returns the DB path."""
     monkeypatch.setattr(loader, "DATA", data_dir)
