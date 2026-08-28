@@ -81,10 +81,11 @@ load:
 # LOOKBACK_DAYS reprocessing window (Phase 7). TARGET selects the dbt target
 # (default duckdb); any other is a cloud-cost command needing CONFIRM=yes from
 # the COMMAND LINE ($(origin CONFIRM)). FULL=yes from the COMMAND LINE
-# ($(origin FULL)) passes --full-refresh (rebuild-from-scratch). Names validated
-# in Python before any path.
+# ($(origin FULL)) passes --full-refresh (rebuild-from-scratch). THROUGH lands
+# only files uploaded on or before it — a per-interval build (Phase 8b); unset
+# loads all. Names validated in Python before any path.
 dbt-build:
-	uv run python -m loader.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --full $(call _Q,$(value FULL)) --full-origin '$(origin FULL)'
+	uv run python -m loader.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --full $(call _Q,$(value FULL)) --full-origin '$(origin FULL)' --through $(call _Q,$(value THROUGH))
 
 # Deletes data/<PROFILE>.duckdb and its .wal (gitignored; `make load` recreates it). The only
 # deleter this phase adds: CONFIRM=yes must have COMMAND-LINE origin.

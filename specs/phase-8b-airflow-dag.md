@@ -201,24 +201,26 @@ in `uv.lock`, or a moved Phase 3–8a golden is a STOP.
 ## DONE command
 
 ```
-make review-gate SPEC=specs/phase-8b-airflow-dag.md && make dbt-build PROFILE=tiny THROUGH=2026-01-07 && make dbt-build PROFILE=tiny && make attribution-golden PROFILE=tiny && make report PROFILE=tiny && make scores-golden PROFILE=tiny && make eval PROFILE=tiny && make pipeline PROFILE=tiny && make test-int-airflow
+make review-gate SPEC=specs/phase-8b-airflow-dag.md && make dbt-build PROFILE=tiny FULL=yes && make attribution-golden PROFILE=tiny && make report PROFILE=tiny && make scores-golden PROFILE=tiny && make eval PROFILE=tiny && make pipeline PROFILE=tiny && make test-int-airflow
 ```
 
 - `make review-gate SPEC=…` — offline suite (the DAG structure test == `make
-  pipeline`'s steps; the THROUGH-aware build lands only ≤ the cut; backfill≡union
-  at the make/write-back level; `apache-airflow` absent from `uv.lock`;
-  `orchestration/` names no `truth`), ruff, check-docs, Evidence ids,
-  Record-updates files.
-- `make dbt-build PROFILE=tiny THROUGH=2026-01-07` — the per-interval build lands
-  only files uploaded on or before the cut (`load OK: tiny — N files, landing ≤
-  2026-01-07`), then builds; proves the re-load clobber is gone.
-- `make dbt-build PROFILE=tiny` — the full build, `THROUGH` unset
-  (`dbt-build OK: tiny/duckdb`); the default landing is unchanged.
+  pipeline`'s steps; the THROUGH-aware build lands only ≤ the cut, and unset
+  loads all; backfill≡union at the make/write-back level; `apache-airflow` absent
+  from `uv.lock`; `orchestration/` names no `truth`), ruff, check-docs, Evidence
+  ids, Record-updates files. The THROUGH-aware build and backfill≡union are
+  proven here **offline in tmp DBs** (`tests/test_through_build.py`,
+  `tests/test_backfill.py`) so they never disturb `data/<p>.duckdb`.
+- `make dbt-build PROFILE=tiny FULL=yes` — the union baseline (a full refresh, so
+  the golden gates read a converged DB regardless of prior landing state);
+  `dbt-build OK: tiny/duckdb`.
 - `make attribution-golden / report / scores-golden / eval PROFILE=tiny` — every
-  Phase 3–6 gate byte-identical after the default build (the `THROUGH` change
-  did not disturb it): `0 differ`; `ontime_rate 0.609756`; accuracy `1.000`, MAE
+  Phase 3–6 gate byte-identical (the `THROUGH` plumbing did not disturb the
+  default build): `0 differ`; `ontime_rate 0.609756`; accuracy `1.000`, MAE
   `0.816201`.
 - `make pipeline PROFILE=tiny` — the reference chain; `pipeline OK: tiny`.
+- `make test-int-airflow` — the container proves the DAG (per-interval `THROUGH`
+  build + catchup backfill) equals `make pipeline` on a **fresh** DB.
 - `make test-int-airflow` — spins the lean Airflow container, runs the DAG at
   three explicit logical dates, asserts the run's `scores_send_time` and
   `send_schedule` byte-identical to `make pipeline`'s and the three-interval
@@ -326,13 +328,22 @@ implementation on a scratch copy (the Phase 6/7 pattern):
   turn. Rejected: relying on the file lock to error on overlap (a race turned
   into an exception is not a guarantee).
 - **Backfill≡union leans on Phase 7 convergence + replace-iff-greater + per-row
-  `written_at = computed_as_of`; the cut is `2026-01-07`/`2026-01-12`/`2026-01-13`
-  (item 5)** — satisfies invariant 5. scores/marts are table (recomputed each
-  build), stg/attribution converge to the union at the final landing, and
-  `computed_as_of = max(client_event_time)` is monotone as opens arrive, so the
-  union interval's rows win the replace-iff-greater; a batch `written_at` would
-  break it (rejected in 8a). Rejected: a fresh union DB per backfill (would not
-  prove the incremental + upsert path converges).
+  `written_at = computed_as_of`; the cut is `2026-01-07`/`2026-01-12`/`2026-01-13`,
+  and the intervals are spaced ≤ `lookback_days` (item 5)** — satisfies invariant
+  5. scores/marts are table (recomputed each build), stg/attribution converge to
+  the union at the final landing, and `computed_as_of = max(client_event_time)`
+  is monotone as opens arrive, so the union interval's rows win the
+  replace-iff-greater; a batch `written_at` would break it (rejected in 8a).
+  **The convergence precondition is a consecutive-interval gap ≤ `lookback_days`**
+  — a wider gap lets a partition be finalized while its late events sit in the
+  skipped landings (verified: `07 → full(13)`, a 6-day gap > `lookback_days` 5,
+  diverges; `07 → 12 → 13`, max gap 5 = `lookback_days`, converges exactly — the
+  Phase 7 `<=` reprocess-window boundary is what makes gap = `lookback_days`
+  work). The DAG's `@daily` schedule gives gap 1, always safe; the offline
+  3-interval cut sits at the boundary on purpose. Rejected: a fresh union DB per
+  backfill (would not prove the incremental + upsert path converges); intervals
+  spaced > `lookback_days` (diverge — not a valid backfill of an incremental
+  model).
 - **`test-int-airflow` is a lean single-service container (`SequentialExecutor` +
   SQLite, `airflow dags test`/`backfill` at explicit logical dates) behind
   `OTR_INT`, exported in-recipe; CI never runs it (item 6)** — satisfies

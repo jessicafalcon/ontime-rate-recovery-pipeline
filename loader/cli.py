@@ -2,8 +2,10 @@
 
 One entry point validates every name (`[a-z0-9_]+`) before any path is derived:
 load      — fixtures/<p>/{raw,dims} → data/<p>.duckdb schema `raw`.
-dbt-build — load, then `dbt build` against that file (`OTR_DUCKDB_PATH` is
-            the one env var dbt/profiles.yml reads); exit 1 on any failure.
+dbt-build — load (THROUGH lands only files uploaded on or before it — a
+            per-interval landing, Phase 8b), then `dbt build` against that file
+            (`OTR_DUCKDB_PATH` is the one env var dbt/profiles.yml reads); exit 1
+            on any failure.
 drop-db   — delete data/<p>.duckdb; only with CONFIRM=yes from the command line."""
 
 from __future__ import annotations
@@ -91,6 +93,7 @@ def dbt_build(
     origin: str = "",
     full: str = "",
     full_origin: str = "",
+    through: str = "",
 ) -> int:
     validate_name("PROFILE", profile)
     if full and full != "yes":
@@ -102,7 +105,10 @@ def dbt_build(
             f"dbt-build: refused — TARGET={target} is a cloud target; "
             "pass CONFIRM=yes on the command line (CLAUDE.md: ask first, every time)"
         )
-    if load(profile):
+    # THROUGH lands only files uploaded on or before it, so a per-interval build
+    # sees just that landing (Phase 8b); load() validates the date and never lets
+    # it become a path. Unset ⇒ loads all (the default build is unchanged).
+    if load(profile, through):
         return 1
     os.environ.setdefault("DO_NOT_TRACK", "1")  # belt to dbt_project.yml's braces
     from dbt.cli.main import dbtRunner
@@ -157,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--confirm-origin", default="")
     b.add_argument("--full", default="")
     b.add_argument("--full-origin", default="")
+    b.add_argument("--through", default="")
     d = sub.add_parser("drop-db")
     d.add_argument("profile")
     d.add_argument("--confirm", default="")
@@ -166,7 +173,13 @@ def main(argv: list[str] | None = None) -> int:
         return load(a.profile, a.through)
     if a.cmd == "dbt-build":
         return dbt_build(
-            a.profile, a.target, a.confirm, a.confirm_origin, a.full, a.full_origin
+            a.profile,
+            a.target,
+            a.confirm,
+            a.confirm_origin,
+            a.full,
+            a.full_origin,
+            a.through,
         )
     return drop_db(a.profile, a.confirm, a.confirm_origin)
 
