@@ -278,8 +278,8 @@ pipeline`/CI and writes no table, leaving the DAG's two outputs byte-identical t
 spins a lean `SequentialExecutor`/SQLite container and proves DAG≡pipeline and the
 three-interval backfill (`THROUGH` 2026-01-07/12/13) ≡ union across processes
 (both `scores_send_time` and `send_schedule == SEND_SCHEDULE_SHA256_TINY`; 5 tests,
-~2 min); the backfill converges because intervals are spaced ≤ `lookback_days`.
-Offline: `test_backfill.py`, `test_dag_structure.py` (AST-pinned config),
+~1 min); the backfill converges because intervals are spaced ≤ `lookback_days`.
+Offline: `test_backfill.py`, `test_dag_structure.py` (stubbed-airflow DAG object),
 `test_through_build.py`, `test_airflow_docker_only.py`. `apache-airflow` is
 Docker-only (not in `uv.lock`); `fixtures/tiny/` untouched; every Phase 3–8a gate
 byte-identical. **Phase 8 ⭐ checkpoint closed.** Two BACKLOG rows opened (split

@@ -23,8 +23,8 @@ PROFILE = "tiny"
 
 # Rendered to YYYY-MM-DD by Airflow, never by us. A per-interval build lands only
 # the files uploaded on or before this date (Phase 8b); the DAG's @daily schedule
-# gives consecutive intervals a 1-day gap, well within lookback_days, so a
-# catchup backfill converges to the union.
+# gives consecutive intervals a 1-day gap, well within lookback_days, so an
+# explicit backfill converges to the union (catchup=False).
 THROUGH_TEMPLATE = "{{ data_interval_end | ds }}"
 
 # (task_id, make command) in dependency order — make pipeline's WRITING steps.

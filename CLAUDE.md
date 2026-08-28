@@ -249,7 +249,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `make` targets; `eval` stays a union-only gate here and in CI
 - `make test-int-airflow` — Phase 8b integration (behind `OTR_INT`, CI never runs
   it): spins the Docker-local Airflow (`SequentialExecutor`/SQLite), runs the DAG
-  for a union interval and a three-interval catchup, asserts both container tables
+  for a union interval and a three-interval backfill, asserts both container tables
   equal `make pipeline`'s (the `send_schedule` hash), tears down. Takes no
   variable (`tiny` by definition); needs Docker (Engine + `docker compose`)
 - Later phases add:
@@ -587,10 +587,11 @@ that date, `max_active_runs=1` (single-writer on the DuckDB file),
 stays a union-only gate in `make pipeline`/CI (writes no table, so the DAG's two
 outputs stay byte-identical to `make pipeline`'s). `make test-int-airflow` (behind
 `OTR_INT`, CI never runs it) spins a lean `SequentialExecutor`/SQLite container
-and proves DAG≡pipeline and backfill≡union across processes: 5 passed (~2 min),
+and proves DAG≡pipeline and backfill≡union across processes: 5 passed (~1 min),
 both container `scores_send_time` and `send_schedule == SEND_SCHEDULE_SHA256_TINY`.
 Offline: `test_backfill.py` (three THROUGH landings → union; `computed_as_of`
-monotone), `test_dag_structure.py` (AST-pinned config), `test_through_build.py`,
+advances on score change), `test_dag_structure.py` (stubbed-airflow DAG object —
+config values + edge direction), `test_through_build.py`,
 `test_airflow_docker_only.py`. `apache-airflow` is **Docker-only** (never in
 `uv.lock`); `fixtures/tiny/` untouched; every Phase 3–8a gate byte-identical.
 Open BACKLOG rows: **13** (8b opened two: split load from build, trigger Phase 9;

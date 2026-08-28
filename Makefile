@@ -162,7 +162,7 @@ pipeline:
 	uv run python -m serving.cli pipeline $(call _Q,$(value PROFILE))
 
 # Phase 8b integration: spin the Docker-local Airflow (SequentialExecutor +
-# SQLite), run the DAG (a union run + a three-interval catchup) and assert both
+# SQLite), run the DAG (a union run + a three-interval backfill) and assert both
 # tables == make pipeline (the send_schedule hash), then tear down. Exports
 # OTR_INT=1 in-recipe so tests/integration/ collects (conftest skips it
 # otherwise); CI never runs this. Takes NO variable (tiny by definition — the
