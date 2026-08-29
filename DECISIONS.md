@@ -69,8 +69,12 @@ annotated **Superseded by …** in place and never deleted.
   behind Terraform toggles.** Cloud runs are manual and asked-for; nothing
   billable is left up by default. Realised in Phase 9a: `infra/` with `enable_*`
   toggles defaulting false, `project_id` the only required var, ADC/WIF (never a
-  key), budget alerts 50/150 in the account's currency. ([Phase 0](#phase-0),
-  [Phase 9a](#phase-9a))
+  key), budget alerts 50/150 in the account's currency. The profile switch is
+  realised in Phase 9b: five dispatch macros with two bodies each, every model
+  landing in the `ontime` dataset on BigQuery (`generate_schema_name` on
+  `target.type`), the landing GCS → BigQuery on one impersonated-ADC credential,
+  and pin parity proven by diffing the goldens, never re-freezing.
+  ([Phase 0](#phase-0), [Phase 9a](#phase-9a), [Phase 9b](#phase-9b))
 
 ## Process
 
@@ -117,6 +121,82 @@ annotated **Superseded by …** in place and never deleted.
   `.mcp.json`.
 
 ## Appendix — by phase
+
+### Phase 9b
+
+*BigQuery dialect, landing, pin parity (`phase-9b-bigquery-dialect`).* The
+second half of Phase 9; spec finalised after 9a merged (PR #12, 2026-08-29);
+reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
+
+- **`generate_schema_name` collapses on `target.type == 'bigquery'` only;
+  DuckDB keeps `main_<folder>`.** 9a's pin is two datasets and the SA cannot
+  create a third, so dbt's per-folder default (`ontime_staging …`) had to go on
+  BigQuery. DuckDB does not follow: every local reader (`serving/`, `eval/`,
+  ~30 test lines) hard-codes `main_<folder>` and no invariant needs one flat
+  schema there; collapsing would have touched every DuckDB gate for a target
+  that was not changing. Keyed on `target.type` (the dialect), never
+  `target.name`. A hook override, not a dispatch macro — still five. Gotcha:
+  `generate_schema_name_for_env` is NOT dbt's default (it collapses every
+  non-prod target); the else branch restates the default verbatim (§8).
+  Rejected: `+schema` removed for both; a `target.name` switch.
+- **The five BigQuery bodies are type-explicit named forms, no `default__`.**
+  `json_value(col, '$.key')`; `timestamp_diff(cast(end as timestamp),
+  cast(start as timestamp), unit)` — end first, both cast because callers pass
+  DATE/DATETIME (`prompt_date`, the retention midnights) and BigQuery's
+  function is TIMESTAMP-only; `safe_divide(cast(num as float64), den)` —
+  integer/integer would truncate where DuckDB's `/` is a float divide;
+  `datetime(ts, tz)` — DATETIME is BigQuery's naive type, the shape DuckDB's
+  `timestamp` has; the overwrite is the same delete-in-set + insert as one
+  two-statement script. Rejected: dbt-bigquery's `insert_overwrite` (a second
+  mechanism for one seam whose semantics the goldens already pin); a
+  `default__` (the rule).
+- **`overwrite_partition_col` names the overwrite column; the native
+  `partition_by` dict is dialect-guarded.** Found reading main: `partition_by`
+  is parsed by dbt-bigquery as its partitioning dict (a string errors) AND read
+  by dbt-duckdb (a dict raises) — no single value satisfies both (§8). The
+  strategy macro reads the neutral key; `config()` sets `partition_by=({field,
+  data_type: date} if target.type == 'bigquery' else none)`, so BigQuery tables
+  are date-partitioned on the column the overwrite deletes by and DuckDB is
+  untouched. Rejected: either single value.
+- **The landing is `loader/bq.py` on dbt-bigquery's transitive google clients,
+  GCS staging, generated schema, `WRITE_TRUNCATE`.** `bq`/`gsutil` use gcloud's
+  own credential (a second impersonation setting) while dbt uses ADC; the
+  python clients share dbt's ADC, so ONE `--impersonate-service-account`
+  covers landing, build and the parity read, with no keyfile anywhere. The
+  BigQuery schema is a third `make gen-sources` output from `generator/
+  models.py` (varchar→STRING, timestamp→TIMESTAMP, date→DATE, json→JSON) — the
+  schema contract, second dialect. Recreate, never append (the `make load`
+  contract). Every cloud call goes through an injectable `Clients` factory; the
+  offline suite injects fakes and a sentinel default. Rejected: `bq load` via
+  subprocess (two auth paths, argv-only fakes); `load_table_from_file` from the
+  laptop (no GCS landing — §3 names the bucket).
+- **`dbt_build` lands by target; the DAG stays two tasks.** `land()` runs the
+  DuckDB `load()` on `duckdb` and `bq_load()` on `bigquery`, never the other
+  (closes the 8b BACKLOG row); `OTR_GCP_PROJECT` is set in-process from the
+  validated `PROJECT` (the `bigquery` output has no default — Amendment S's
+  profiles half stays; its `loader/cli.py` refusal is lifted in the same commit
+  as `generate_schema_name`); `orchestration/tasks.py` carries `TARGET` as a
+  literal (the Docker-local DAG's run is unchanged). Rejected: a third `load`
+  task now (buys nothing before Composer, reshapes the container attachment
+  pin); `dbt-build` refusing `TARGET≠duckdb` (PHASES names the target).
+- **Pin parity = the three goldens through the same `Golden` specs and ONE
+  renderer, behind `OTR_INT`.** `eval/golden.py` gains `rows_from` +
+  `normalize_cell` (a tz-aware BigQuery TIMESTAMP renders as DuckDB's naive UTC
+  timestamp); `tests/pins.py` and `fixtures/` are untouched — a differing row
+  is a dialect bug, never a new golden. The conflicting-duplicate guard is a
+  singular dbt test comparing the payload key by key through `json_extract`
+  (BigQuery cannot group or cast a JSON column — §8). Rejected: a
+  BigQuery-specific CSV writer; re-freezing.
+- **The CI parity job is deferred (reconciliation item 4, choice (b)).** The
+  laptop `make test-int-bigquery` is the Done-when; the CI leg needs the opt-in
+  `enable_ci_wif = true` + `github_repository` apply (a DEPLOYMENT runbook
+  step) and the SA-id reservation (until ~2026-09-28) makes any 9b apply a
+  detour (undelete + `terraform import`); an unrun job is a claim. The BACKLOG
+  row carries a dated trigger. Rejected: a `workflow_dispatch` job landed
+  unproven.
+- Not chosen and noted: BigQuery clustering (tiny; `user_id` is the candidate
+  when a profile is large enough to measure); `medium` on BigQuery (109 MB, a
+  deliberate later run).
 
 ### Phase 9a
 

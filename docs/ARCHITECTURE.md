@@ -259,16 +259,23 @@ One dbt project, two `profiles.yml` targets (`duckdb`, `bigquery`). Dialect
 divergences behind exactly five dispatch macros: JSON extraction,
 `timestamp_diff`, `safe_divide`, `to_local_time` (UTC → local wall time; added
 in Phase 2, DECISIONS), partition overwrite. Each has a DuckDB body and a
-BigQuery body that raises until Phase 9 — no `default__` an unknown adapter
-could fall into. CI runs `dbt build` on DuckDB per PR; BigQuery runs are manual
-(`make dbt-build PROFILE=<p> TARGET=bigquery`). `PROFILE` names the data
-profile, `TARGET` the warehouse.
+BigQuery body (Phase 9b — they raised until then) — no `default__` an unknown
+adapter could fall into. Where a model lands is a `generate_schema_name` hook
+(not a sixth macro): on `target.type == 'bigquery'` every model resolves to the
+`ontime` dataset Terraform created (two datasets is 9a's pin); every other
+target keeps dbt's per-folder default (`main_<folder>` on DuckDB). CI runs
+`dbt build` on DuckDB per PR; BigQuery runs are manual and as the pipeline SA
+(`make dbt-build PROFILE=<p> TARGET=bigquery PROJECT=<id> CONFIRM=yes`), and
+the DuckDB≡BigQuery pin parity is `make test-int-bigquery` (the three goldens
+byte-for-byte off the BigQuery tables, behind `OTR_INT`). `PROFILE` names the
+data profile, `TARGET` the warehouse.
 
 ### 3.3 What is stubbed (and the production swap)
 
 | stub | replaces | swap |
 |---|---|---|
 | generator → `fixtures/<profile>/raw/events_<upload-date>.jsonl` (one file per UTC `server_upload_time` date — the landing unit Phase 7 replays) | Amplitude → BigQuery export | dbt `source` config |
+| `make bq-load` — the fixture files → the GCS staging bucket (`landing/<profile>/`) → `raw.events` / `raw.dim_user`, explicit schema generated from the contract, recreated per landing (Phase 9b) | Amplitude's own export job writing the `raw` dataset | the landing step is dropped; the source config is unchanged |
 | `dim_user` seed file (`dims/dim_user.csv`, loaded as the `raw.dim_user` source by `make load` — not a dbt seed, whose path could not follow `PROFILE`) | Spanner change streams / federation | `EXTERNAL_QUERY` source (demo), Dataflow template (prod) — a source-config swap, no model changes |
 | DuckDB `send_schedule` table | Spanner serving table | write-back target flag |
 
@@ -422,6 +429,32 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   the fix is a deliberate `terraform providers lock -platform=…` plus `make
   tf-freeze CONFIRM=yes` in one commit (`docs/DEPLOYMENT.md`). Provable only
   from a second platform — static-pinned in the suite.
+- **`partition_by` is a model config BOTH adapters interpret** (Phase 9b, found
+  reading main for the reconciliation). Phase 7's custom strategy read the
+  overwrite column from `config.require('partition_by')` as a plain string.
+  dbt-bigquery parses that key as its native partitioning **dict**
+  (`{field, data_type, granularity}` — a string is a compile error), and
+  dbt-duckdb's `duckdb__get_partitioned_by` reads it too (a string is warned
+  and ignored for non-DuckLake tables; a **dict raises** in
+  `normalize_string_or_list`). No single value satisfies both. The models now
+  name the column under `overwrite_partition_col` (a key neither adapter reads)
+  and set the native dict only under `target.type == 'bigquery'` inside
+  `config()`; pinned by `tests/test_dbt_conventions.py::
+  test_incremental_models_partition_config_is_dialect_safe`.
+- **`generate_schema_name_for_env` is not dbt's default** (Phase 9b, first
+  DuckDB build after the override). The obvious "else keep the default" call
+  collapses EVERY non-`prod` target to `target.schema` — the first build landed
+  `main.stg_events` instead of `main_staging.stg_events` and every DuckDB
+  reader broke. The override restates dbt's default verbatim
+  (`<target.schema>_<custom | trim>`) in its else branch; the in-process
+  DuckDB build's relation names are the pin.
+- **A JSON column is neither groupable nor castable to STRING on BigQuery**
+  (Phase 9b, writing the conflicting-duplicate dbt test). DuckDB happily does
+  `count(distinct cast(event_properties as varchar))`; BigQuery refuses both
+  the `DISTINCT` and the cast (`TO_JSON_STRING` is the dialect form — which
+  DuckDB lacks). The portable predicate compares the payload key by key through
+  the `json_extract` macro over the six keys `generator/models.py::
+  PROPERTY_KEYS` allows — the payload IS those keys by contract.
 - **Terraform auto-loads `terraform.tfvars` and `*.auto.tfvars{,.json}`**
   (Phase 9a, review round 8, reproduced by a local file). They are gitignored
   and outside the manifest, so a toggle could reach an apply with nothing in

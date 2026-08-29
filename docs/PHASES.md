@@ -300,9 +300,11 @@ backend (bootstrap documented),
 
 **Done when.** `terraform plan` clean from a fresh clone with only
 `project_id` (the two bootstrap APIs, `serviceusage` + `cloudresourcemanager`,
-on — a one-time `gcloud services enable` on a brand-new project); `make
-dbt-build TARGET=bigquery PROFILE=tiny` green with the same
-pins as DuckDB; `terraform destroy` leaves nothing billable.
+on — a one-time `gcloud services enable` on a brand-new project) — 9a; `make
+dbt-build TARGET=bigquery PROFILE=tiny PROJECT=<id> CONFIRM=yes` green with the
+same pins as DuckDB, proven by `make test-int-bigquery` (the three goldens
+byte-for-byte off the BigQuery tables, every model inside the `ontime`
+dataset) — 9b; `terraform destroy` leaves nothing billable — 9a.
 
 **Split 9a/9b** (the Done-when is naturally two, disjoint surfaces; ≤6 pinned
 decisions each — `specs/phase-9a-gcp-foundation.md`, `specs/phase-9b-*.md`). 9a
@@ -340,8 +342,37 @@ TARGET=bigquery` exits 2 before `load()` and `profiles.yml` reads
 `serviceAccountTokenCreator` grant on the SA for manual builds (Amendment Q).
 State backend bootstrap-documented (local by default). `make tf-validate` OK (google
 provider 6.50.0); the plan-clean and destroy-empty Done-when clauses are proven
-by the manual cloud runs in the spec's Evidence (ask-first). 9b (the two Done-when
-warehouse clauses) lands next.
+by the manual cloud runs in the spec's Evidence (ask-first).
+
+**Delivered (9b)** (`phase-9b-bigquery-dialect`, spec
+`specs/phase-9b-bigquery-dialect.md`): the BigQuery dialect, the landing and the
+pin-parity run — Phase 9's two warehouse clauses. The five `bigquery__` macro
+bodies (`json_value`; end-first `timestamp_diff` with both sides cast to
+`timestamp`; native `safe_divide` on a `float64` numerator; `datetime(ts, tz)`;
+the same delete-in-set + insert overwrite) replace the Phase 2–8 raises — still
+five, no `default__`. `generate_schema_name` (a hook override, not a sixth
+macro) lands every model in the `ontime` dataset on `target.type == 'bigquery'`
+only; DuckDB keeps `main_<folder>` and no reader changed — two datasets stays
+9a's pin. The three incremental models name their overwrite column under
+`overwrite_partition_col` and set BigQuery's native `partition_by` dict on that
+dialect only (`partition_by` is a key both adapters interpret — §8). The
+landing `loader/bq.py` (`make bq-load`) uploads the same files `load` selects
+to `gs://<id>-ontime/landing/<p>/` and loads `raw.events`/`raw.dim_user` with
+the schema generated from `generator/models.py` (`loader/bq_schema.json`),
+`WRITE_TRUNCATE`, through dbt-bigquery's transitive google clients on ONE
+impersonated-ADC credential (no `bq`/`gsutil`, no key); `dbt_build` lands by
+target (Amendment S lifted; `OTR_GCP_PROJECT` from the validated `PROJECT`;
+`profiles.yml` `location: us-central1`); `TARGET` threaded through
+`orchestration/tasks.py`; the conflicting-duplicate guard is a singular dbt test
+both dialects run. `make test-int-bigquery PROJECT=<id> CONFIRM=yes` (behind
+`OTR_INT`, ask-first) reads the three golden tables back through the same
+`Golden` specs and one renderer and diffs them byte-for-byte against the
+read-only `fixtures/tiny/expected/`, re-asserts the pins, and asserts exactly
+two datasets exist. The CI leg (opt-in WIF apply) is a runbook step and a
+dated BACKLOG row, not a job. **Live status:** offline suite green; the
+ask-first BigQuery build and parity run are recorded in the spec's Evidence
+when they run (the SA-id reservation until ~2026-09-28 needs the undelete +
+import detour first — `docs/DEPLOYMENT.md`).
 
 ---
 
