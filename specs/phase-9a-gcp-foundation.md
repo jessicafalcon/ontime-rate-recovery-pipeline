@@ -289,6 +289,21 @@ are fixes and record corrections landing without amendments.
   `datasets.create` (Owner is the bootstrap role; DEPLOYMENT's permissions
   table already names it).
 
+- **O — Two more clauses on the DUE 9b row: dataset location and the project
+  env var (#10, #11).** Record-only; `dbt/profiles.yml` is Phase 2 code and
+  the `bigquery` target is 9b's surface, so 9a names the defects and 9b fixes
+  them in its reconciliation. (1) Terraform pins both datasets to
+  `location = var.region` (`us-central1`) but the `bigquery` output sets no
+  `location`, so dbt-bigquery defaults to the US multi-region and the first
+  build fails "Dataset … not found in location US" — 9b sets
+  `location: us-central1` from the same value Terraform uses. (2) The output
+  reads `env_var('OTR_GCP_PROJECT', '')`, which nothing sets or documents — 9b
+  has `make dbt-build TARGET=bigquery` set it from the validated `PROJECT`
+  (the `PROJECT_RE` gate `infra/cli.py` uses), never from an unvalidated
+  environment; an empty value is a refusal. Both clauses go on the DUE
+  BACKLOG row, DECISIONS (round 5) and PHASES' 9b line. Rejected: fixing
+  `profiles.yml` here (mixes phases; no BigQuery build can run until 9b).
+
 ## Teaching notes (first appearance in this project)
 
 - **Terraform state, modules, and backends.** Terraform records what it created
