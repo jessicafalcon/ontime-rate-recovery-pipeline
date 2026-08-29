@@ -312,6 +312,51 @@ are fixes and record corrections landing without amendments.
   BACKLOG row, DECISIONS (round 5) and PHASES' 9b line. Rejected: fixing
   `profiles.yml` here (mixes phases; no BigQuery build can run until 9b).
 
+## Amendments (review round 6, approved 2026-08-29 — pin closure)
+
+- **P — The `.tf` tree is pinned by a content manifest, not by one property
+  at a time (#3, #4, #5; the round-2 test-design invariant applied to the
+  HCL).** Restores **invariant 2/4/5's falsifiability**: "for all edits to
+  `infra/**/*.tf` or `infra/.terraform.lock.hcl`, the offline suite is red
+  until the manifest is deliberately rewritten." Three rounds of hand-mutation
+  each found 3–5 unpinned attributes (threshold denominator, `budget_filter`,
+  IAM `member`, …) because a property-by-property pin is an unbounded
+  denylist over ~150 attributes. `infra/MANIFEST.sha256` (the
+  `fixtures/` format — `generator/manifest.py` `render`/`parse`, paths
+  relative to `infra/`, `.terraform/` and untracked `*.tfvars`/`*.tfstate*`
+  outside its glob) is asserted byte-for-byte by
+  `tests/test_infra.py::test_tf_tree_matches_manifest`; its ONLY writer is
+  `make tf-freeze CONFIRM=yes` (`infra/cli.py freeze`, `$(origin CONFIRM)`
+  like `freeze`; the `.tf` diff itself is the review, so no DECISIONS entry
+  per re-freeze — the manifest hunk in the same commit is the declaration).
+  The semantic pins stay for readability and add the three named attributes
+  (`threshold_percent = … / local.budget_amount`, `budget_filter.projects` =
+  the project number, every non-WIF IAM `member` = the SA email); the
+  manifest, not the pins, is the mutation gate. Rejected: `python-hcl2`
+  (a package — STOP-and-ask, and still a property list); a `terraform
+  show -json` golden (needs init + provider, not offline).
+
+- **Q — Operator impersonation is a real grant (#8, #9, #10).** Restores
+  Amendment N's claim as a **control**: the human BigQuery path from 9b on
+  runs as the SA, and the permission that makes impersonation possible
+  (`iam.serviceAccounts.getAccessToken`) is Terraform-managed, not assumed.
+  New root var `operator_principal` (`default = null`; shape
+  `^(user|group|serviceAccount):[^\s,]+$` validated — interpolated into a
+  member) threads into `modules/iam`; when set, one count-gated
+  `google_service_account_iam_member.operator_token_creator` grants
+  `roles/iam.serviceAccountTokenCreator` **on the SA** (resource-scoped, not
+  project-level) to that principal. Default null → zero resources, so the
+  default plan stays `18 to add` and invariant 1 holds (`null` is a default).
+  DEPLOYMENT's permissions table gains the row; the "so the human path is
+  under the same IAM" sentence becomes "with `operator_principal` set, the
+  operator can impersonate the SA; a build on raw Owner ADC is the operator's
+  choice and outside the control" — no overclaim. `roles/iam.
+  serviceAccountTokenCreator` joins the role allowlist as the one role granted
+  ON the SA rather than TO it (`test_sa_roles_are_least_privilege` splits the
+  two). Rejected: documenting the permission only (#9 — a convention, the
+  finding); granting it to the project's Owner group (no such group exists;
+  a named principal is least privilege).
+
 ## Teaching notes (first appearance in this project)
 
 - **Terraform state, modules, and backends.** Terraform records what it created
