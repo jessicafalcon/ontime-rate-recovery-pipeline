@@ -8,10 +8,12 @@ Review round 2 re-implemented these against ONE invariant (cap invoked): every
 property named in the Invariants table has a test that reddens when the property
 is removed from the `.tf` by a hand-mutation. Pins are exact-string / scoped /
 allowlist — never a substring or a resource-type denylist. Round 6 (Amendment
-P) made the whole tree ONE allowlist: `infra/MANIFEST.sha256` pins every `.tf`
-and the provider lock byte-for-byte, so any hand-mutation of any attribute is
-red until `make tf-freeze CONFIRM=yes` rewrites it — the property pins below
-are documentation of WHICH properties matter, not the safety net. `infra/cli.py`'s
+P, closed by round 7's R) made the whole tree ONE allowlist: `infra/MANIFEST.sha256`
+pins every `.tf`/`.tf.json` and the provider lock byte-for-byte, so any
+hand-mutation of any attribute is red until `make tf-freeze CONFIRM=yes` rewrites
+it — the manifest catches EVERY edit; the property pins below say WHICH
+properties a re-freeze must preserve (they stay red after a freeze that dropped
+one). `infra/cli.py`'s
 guards carry the mutation lines; `cli.tf` runs through a fake runner so no test
 spawns terraform, and the argv it builds is asserted."""
 
@@ -599,7 +601,9 @@ def test_sa_roles_are_least_privilege() -> None:
     for f in _tf_files():
         roles |= set(re.findall(r'role\s*=\s*"(roles/[^"]+)"', f.read_text()))
     assert roles, "no IAM roles found"
-    assert roles <= LEAST_PRIVILEGE_ROLES | ON_SA_ROLES, roles - LEAST_PRIVILEGE_ROLES
+    assert roles <= LEAST_PRIVILEGE_ROLES | ON_SA_ROLES, (
+        roles - LEAST_PRIVILEGE_ROLES - ON_SA_ROLES
+    )
     assert "roles/owner" not in roles and "roles/editor" not in roles
     for b in _grant_blocks():
         role = re.search(r'^\s*role\s*=\s*"(roles/[^"]+)"', b, re.M).group(1)

@@ -304,7 +304,9 @@ state in GCS (bootstrapped manually); WIF for CI, never JSON keys.
 Implemented in Phase 9a (`infra/`, behind `enable_*` toggles that default false;
 `project_id` the only required var; one least-privilege service account, with
 the CI WIF pool/provider opt-in behind `enable_ci_wif` so a default apply builds
-no cross-repo trust).
+no cross-repo trust; an optional `operator_principal` gets
+`serviceAccountTokenCreator` ON the SA so manual BigQuery builds impersonate it
+rather than run as an operator's Owner ADC).
 `docs/DEPLOYMENT.md` is the runbook — auth (ADC/WIF), the one-time state-backend
 bootstrap, the cost table, the optional billing kill-switch, and the teardown
 that leaves nothing billable.

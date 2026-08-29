@@ -96,8 +96,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `modules/{bigquery,gcs,iam,budget}` (unconditional, free/near-free) and
   `modules/{composer,spanner}` `count`-gated behind `enable_*` toggles that
   default false (so is the CI WIF layer inside `iam`: `enable_ci_wif`).
-  `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy` on `CONFIRM=yes
-  $(origin)`) drives `make tf-validate|tf-plan|tf-apply|tf-destroy`.
+  `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`/`tf-freeze` on
+  `CONFIRM=yes $(origin)`) drives `make tf-validate|tf-plan|tf-apply|tf-destroy|tf-freeze`.
   `terraform.tfvars.example` only (never a `*.tfvars`); `.terraform.lock.hcl`
   is tracked (the provider pin); ADC/WIF, never a key. A pipeline dir — guarded
   by `test_truth_isolation.py`; the `.tf` tree is pinned byte-for-byte by
@@ -194,8 +194,9 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   unchanged). Any `TARGET` other than `duckdb` is a cloud-cost
   command: refused unless `CONFIRM=yes` has command-line origin. dbt telemetry
   is off (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`). `TARGET=bigquery`
-  is not runnable before Phase 9b lands `generate_schema_name` — the build would
-  create per-folder datasets outside Terraform (`docs/DEPLOYMENT.md`)
+  is REFUSED before Phase 9b lands `generate_schema_name` (`dbt-build:
+  TARGET=bigquery lands in Phase 9b …`, exit 2, before `load()` — Amendment S);
+  a build would create per-folder datasets outside Terraform (`docs/DEPLOYMENT.md`)
 - `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` and its
   `.wal` (nothing else); `CONFIRM=yes` must have command-line origin
 - `make gen-sources` — re-renders `loader/ddl.sql` and
@@ -291,11 +292,15 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   adds one grant — `serviceAccountTokenCreator` ON the SA — so that principal
   can impersonate it for manual BigQuery builds
 - `make tf-freeze CONFIRM=yes` *(Phase 9a)* — the ONLY writer of
-  `infra/MANIFEST.sha256`, the content pin over every `infra/**/*.tf` and
-  `.terraform.lock.hcl` (`tests/test_infra.py::test_tf_tree_matches_manifest`
-  is red on any `.tf` edit until this runs); prints `tf-freeze OK: N files
-  pinned`. Overwrites a committed pin, so `CONFIRM=yes` needs command-line
-  origin; the manifest hunk lands in the same commit as the `.tf` change
+  `infra/MANIFEST.sha256`, the content pin over every file Terraform loads
+  under `infra/` (`*.tf`, `*.tf.json`) plus `.terraform.lock.hcl`, computed by
+  the fixtures' `generator.manifest` (`tests/test_infra.py::
+  test_tf_tree_matches_manifest` is red on any edit until this runs;
+  `tf-validate`'s init is `-lockfile=readonly`, so it can never rewrite the
+  pin); prints `tf-freeze OK: N files pinned in MANIFEST.sha256`. Overwrites a
+  committed pin, so `CONFIRM=yes` needs command-line origin, and refuses when a
+  pinned file has vanished from disk (delete it from the manifest by hand); the
+  manifest hunk lands in the same commit as the `.tf` change
 - Later phases add:
   `test-int-bigquery` (9b — the DuckDB≡BigQuery pin-parity run behind `OTR_INT`;
   in CI it needs an explicit `enable_ci_wif = true` apply, never the default
@@ -636,7 +641,7 @@ are a `google_project` data source). `infra/cli.py` validates `PROJECT` before
 deriving the `-var` and gates `tf-apply`/`tf-destroy` on `CONFIRM=yes $(origin)`;
 `tf-validate` (offline) / `tf-plan` are ungated. `make tf-validate` OK (google
 provider 6.50.0), offline suite green (`tests/test_infra.py` static `.tf` checks
-+ the tf-* makefile tests), `make mutate` 4/4. The plan-clean and
++ the tf-* makefile tests), `make mutate` 6/6. The plan-clean and
 destroy-leaves-nothing-billable Done-when items are proven by the manual cloud
 runs in Evidence (ask-first). `fixtures/tiny/` untouched; every earlier gate
 byte-identical. **Review round 1 applied (23 findings): 4 amendments** — the
@@ -686,8 +691,14 @@ attribute" findings closed), Q (`operator_principal` → a count-gated
 `serviceAccountTokenCreator` grant ON the SA, so Amendment N's impersonation
 is a managed control); the Claude-config pin re-implemented as a path
 allowlist; three new property pins; the Phase 0 / PROJECT_BRIEF edits
-reverted (a merged phase's records are not this branch's). Next: round 7
-confirms green → merge → 9b (its first
+reverted (a merged phase's records are not this branch's). **Review round 7
+applied (25 findings, 18 record/wording): 2 amendments** — R (the manifest is
+the allowlist's closure: `*.tf.json` pinned, `generator.manifest.diff` reused,
+`-lockfile=readonly`, `tf-freeze` refuses a vanished file, two mutation lines
+— 6/6 killed), S (`TARGET=bigquery` refused outright before 9b; `profiles.yml`
+reads `OTR_GCP_PROJECT` with no default); the Claude-config ignore check runs
+in a scratch repo (no local exclude file can stand in); `group:` dropped from
+`operator_principal`. Next: round 8 confirms green → merge → 9b (its first
 commit reconciles against main-with-9a: `generate_schema_name`, `location`,
 `OTR_GCP_PROJECT`, the "DAG's build owns its landing" row —
 `dbt_build(TARGET=bigquery)` must not call the DuckDB `load()` — and the

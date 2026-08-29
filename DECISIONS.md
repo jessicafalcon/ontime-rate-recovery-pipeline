@@ -148,7 +148,9 @@ annotated **Superseded by …** in place and never deleted.
   `repo@ref`, round 3 **H** made the whole WIF layer opt-in
   (`enable_ci_wif`, default false), and round 4 **J** exposed the provider
   name as a root output while **K** removed the default repository (the toggle
-  without `github_repository` is a plan-time refusal). No `google_service_account_key` resource, no
+  without `github_repository` is a plan-time refusal); round 6 **Q** added the
+  one grant ON the SA — `serviceAccountTokenCreator` to `operator_principal`
+  (default null, count-gated) so manual builds impersonate it. No `google_service_account_key` resource, no
   keyfile path anywhere (`tests/test_infra.py` greps for it). Rejected: a
   downloaded SA key (a secret at rest — the thing the rule forbids); `roles/editor`
   (broad). Provides — behind the toggle — the WIF the "cross-warehouse dialect
@@ -172,7 +174,10 @@ annotated **Superseded by …** in place and never deleted.
   input. Rejected: a GCS backend required from clone one (the bucket can't create
   the backend that stores its own state).
 - **`infra/cli.py` validates `PROJECT` and gates the destructive targets; four
-  `make` targets.** Mirrors `loader/cli.py`: one process validates `PROJECT`
+  `make` targets.** *Superseded in review:* round 6 **P** added a fifth,
+  `tf-freeze`, and made `infra/MANIFEST.sha256` (not the static checks) the
+  pin over the HCL; round 7 **R** closed the manifest (`*.tf.json`, shared
+  `generator.manifest.diff`, `-lockfile=readonly`, vanished-file refusal). Mirrors `loader/cli.py`: one process validates `PROJECT`
   (`^[a-z][a-z0-9-]{4,28}[a-z0-9]\Z`) before deriving `-var project_id=…`, and
   refuses `tf-apply`/`tf-destroy` unless `CONFIRM=yes` has command-line origin;
   `tf-validate` (offline: `init -backend=false` + `validate` + `fmt -check`) and
@@ -347,7 +352,7 @@ annotated **Superseded by …** in place and never deleted.
   only (a convention). Test re-implementation (#1/#2/#6/#7/#21, once): the
   Claude-config pin is a PATH allowlist (`.claude/{agents,commands}/*.md`,
   `hooks/*.py` only) with `core.excludesFile` disabled in `check-ignore`;
-  `.mcp.json` + `scheduled_tasks.*` gitignored. New property pins (#3/#4/#5):
+  `.mcp.json` + `.claude/scheduled_tasks.{lock,json}` gitignored. New property pins (#3/#4/#5):
   budget scope + denominator, every grant's `member`. Reverted (#13/#14): the
   Phase 0 spec note and the PROJECT_BRIEF "five macros" edit — a merged phase's
   records are not this branch's; PROJECT_BRIEF stays the origin record. The

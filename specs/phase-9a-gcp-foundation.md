@@ -56,8 +56,8 @@ Rebased onto that main 2026-08-28 (was drafted against `e766e27`, pre-Phase-8).
    it") it is **documented as optional** in `docs/DEPLOYMENT.md` and NOT built.
    Closes the row (documented in Phase 9). **Approved (document-only).**
 
-5. **The four `make` targets — design change.** `tf-validate` (offline: `init
-   -backend=false` + `validate` + `fmt -check`), `tf-plan`, `tf-apply`,
+5. **The four `make` targets (five with `tf-freeze`, Amendment P) — design change.** `tf-validate` (offline: `init
+   -backend=false -lockfile=readonly` + `validate` + `fmt -check`), `tf-plan`, `tf-apply`,
    `tf-destroy`, driven by a thin `infra/cli.py` that validates `PROJECT`
    (GCP-project-id shape) and derives the `-var`. `tf-apply` and `tf-destroy`
    are cloud-cost / destructive → `CONFIRM=yes` with command-line origin
@@ -603,8 +603,9 @@ implementation on a scratch copy (the Phase 6/7 pattern):
   spend". Rejected: building the kill-switch now (nothing billable runs by
   default — no runaway to catch yet).
 - **`infra/cli.py` validates `PROJECT`, gates `tf-apply`/`tf-destroy`, and runs
-  terraform through an injectable runner; four `make` targets (item 5,
-  Amendment C)** — satisfies invariant 6. Mirrors `loader/cli.py`: one process
+  terraform through an injectable runner; four `make` targets — five with
+  `tf-freeze` (item 5, Amendment C; P)** — satisfies invariant 6 (and, via
+  `tf-freeze`, invariant 9). Mirrors `loader/cli.py`: one process
   validates `PROJECT` (`^[a-z][a-z0-9-]{4,28}[a-z0-9]\Z` — `\Z`, not `$`, so a
   trailing newline is rejected) before deriving the `-var`, refuses
   `tf-apply`/`tf-destroy` unless `CONFIRM=yes` has command-line origin, and passes
@@ -614,7 +615,8 @@ implementation on a scratch copy (the Phase 6/7 pattern):
   reaches the provider; no `$(origin)` gate); a non-injectable `tf` (the
   destructive path could not be mutation-tested without risking a live apply).
 
-**The eight review amendments (A–H above) refine the decisions here** — the
+**The review amendments (A–S above; the first eight summarised here, I–S in
+their own paragraphs) refine the decisions here** — the
 managed bucket is the staging bucket not the state bucket (A) and derived, never
 a var (E); the WIF condition is repo+ref (B), the binding is on `repo@ref` with
 CEL-injection validations (F), and the whole WIF layer is opt-in behind
@@ -637,19 +639,27 @@ set precedes the modules (D) with the two bootstrap APIs documented (G).
   runner), `infra/__init__.py` — a new package, now a GUARDED pipeline dir
   (dropped from `test_truth_isolation`'s EXEMPT, Phase 8b instruction; its Python
   names no side-file)
-- `Makefile` (`tf-validate`, `tf-plan`, `tf-apply`, `tf-destroy`; add
-  `PROJECT` to the `unexport` list)
+- `Makefile` (`tf-validate`, `tf-plan`, `tf-apply`, `tf-destroy`, `tf-freeze`
+  (P); add `PROJECT` to the `unexport` list)
 - `tests/test_infra.py` (new — content-based whole-tree `.tf` checks +
   `infra/cli.py` unit tests with a fake runner), `tests/test_makefile.py` (the
-  four tf targets), `tests/test_truth_isolation.py` (drop `infra` from EXEMPT)
+  five tf targets), `tests/test_truth_isolation.py` (drop `infra` from EXEMPT)
 - `docs/DEPLOYMENT.md` (new — bootstrap, cost table, teardown, kill-switch)
 - Records: `DECISIONS.md`, `docs/PHASES.md`, `CLAUDE.md`, `docs/ARCHITECTURE.md`
   (§6; §8 the SA/WIF 30-day soft-delete, quota-project and budget-currency
   gotchas), `BACKLOG.md`
-- `.gitignore` — `*.tfvars.json` (round 3 #12) and `.claude/settings.json`
-  (Amendment M; the file itself is untracked)
-- Untouched by contract: `generator/`, `dbt/`, `loader/`, `eval/`, `serving/`,
-  `orchestration/`, `fixtures/`, `tests/pins.py`, `pyproject.toml`, `uv.lock`
+- `.gitignore` — `*.tfvars.json` (round 3 #12), `.claude/settings.json`,
+  `.mcp.json`, `.claude/scheduled_tasks.{lock,json}` (Amendment M + round 6;
+  the files themselves are untracked)
+- `infra/MANIFEST.sha256` (P — written by `make tf-freeze CONFIRM=yes` only)
+- `tests/conftest.py` (the `tests/integration` skip under `OTR_INT`)
+- `generator/manifest.py` — `compute_file` (P) and the `select` predicate on
+  `compute`/`diff` (R): the fixtures' manifest code is the infra pin's
+  implementation, so the two cannot drift. Byte-identical output for the
+  fixtures (no predicate → every file). `loader/cli.py` + `dbt/profiles.yml`
+  — the pre-9b `TARGET=bigquery` refusal (S)
+- Untouched by contract: `dbt/models`, `eval/`, `serving/`, `orchestration/`,
+  `fixtures/`, `tests/pins.py`, `pyproject.toml`, `uv.lock`
 
 ## Record updates (REQUIRED)
 
@@ -657,7 +667,7 @@ set precedes the modules (D) with the two bootstrap APIs documented (G).
       least-privilege SA + opt-in WIF (ADC/WIF only; superseded-by pointer to B/F/H/J/K);
       two datasets + region; state backend bootstrap-documented; budget 50/150
       in the account's currency (amount = `min`) + kill-switch documented;
-      `infra/cli.py` + the four gated targets; the review-round entries (A–D,
+      `infra/cli.py` + the five targets (two gated + `tf-freeze`); the review-round entries (A–D,
       E–G, H, I–M, N–O). Note on the in-force
       Infra line (the toggles are real now).
 - [ ] `docs/PHASES.md` — Phase 9 "Delivered" paragraph (9a half); Done-when as
@@ -709,14 +719,19 @@ command-line only), ask-first every time. Cost if run twice: `tf-apply` is
 idempotent (Terraform diffs to no-op on a second run — no double spend);
 `tf-destroy` is idempotent (nothing left to delete). What `tf-destroy` removes:
 every resource in state — the two datasets, the bucket, the SA (+ the WIF
-pool/provider/binding only if `enable_ci_wif` was on), the budget — returning
-the project to zero billable resources.
+pool/provider/binding only if `enable_ci_wif` was on; + the
+`serviceAccountTokenCreator` grant ON the SA only if `operator_principal` was
+set — Q), the budget — returning the project to zero billable resources.
+`operator_principal` is interpolated into an IAM member: its HCL `validation`
+admits one `user:`/`serviceAccount:` principal, no whitespace or comma (no
+`group:` — round 7 #9), so a `TF_VAR` cannot smuggle a second member.
 
 | Target | empty | `../x` | `"; ` | env-exported | `$(origin)` on CONFIRM | Pinned by |
 |---|---|---|---|---|---|---|
 | `make tf-plan PROJECT=<id>` | refused (`PROJECT: refused — [a-z][a-z0-9-]…`) | refused, never a path | one literal, refused | reaches Python, validated the same | n/a — not destructive | `tests/test_makefile.py::test_tf_targets_pass_project_as_one_literal`; `tests/test_infra.py::test_cli_validates_project` |
 | `make tf-apply PROJECT=<id> CONFIRM=yes` | `PROJECT` refused; `CONFIRM=` refused | refused | one literal, refused | `CONFIRM=yes` from env ignored (`$(origin)` ≠ command line) | honoured only from the command line | `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only`; `tests/test_infra.py::test_cli_requires_confirm_origin` |
 | `make tf-destroy PROJECT=<id> CONFIRM=yes` | same as apply | refused | one literal, refused | env `CONFIRM=yes` ignored | command-line only | same as apply |
+| `make tf-freeze CONFIRM=yes` | `CONFIRM=` refused, nothing written | takes no path variable (the tree is `infra/`, fixed) | n/a — no value reaches a shell beyond `CONFIRM`, one literal | env `CONFIRM=yes` ignored | command-line only; a pinned file missing on disk is a refusal (R) | `tests/test_makefile.py::test_tf_freeze_confirm_from_command_line_only`; `tests/test_infra.py::test_tf_freeze_requires_confirm_origin_and_writes_the_manifest`, `::test_manifest_gate_reads_tf_json_and_vanished_files` |
 
 ## Review & stack risk
 

@@ -123,7 +123,9 @@ scripts/mutate.py::parse_mutations            invert-guard
 - **Truth isolation greps directories that may not exist** — satisfies
   invariant 5. Rejected: adding the test in Phase 2; a guard added after the
   package it guards is added late.
-- **Hook wiring local-only; `.claude/settings.json` committed as `{}`.**
+- **Hook wiring local-only; `.claude/settings.json` committed as `{}`.** (Phase
+  9a Amendment M later untracked and gitignored it — a tracked settings file
+  would auto-run an inbound branch's hooks.)
   Rejected: committing the hook wiring (auto-executes an inbound branch).
 - **Python 3.12 pinned** (DECISIONS Phase 0).
 - **No runtime dependency** until the phase that needs it (DECISIONS Phase 0).
