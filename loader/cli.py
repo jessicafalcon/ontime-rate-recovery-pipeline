@@ -105,6 +105,11 @@ def dbt_build(
             f"dbt-build: refused — TARGET={target} is a cloud target; "
             "pass CONFIRM=yes on the command line (CLAUDE.md: ask first, every time)"
         )
+    if target == "bigquery":
+        # Amendment S (9a round 7 #7): the BigQuery build lands in Phase 9b with
+        # `generate_schema_name`; before that a build would create per-folder
+        # datasets outside Terraform. 9b lifts this in the same commit.
+        die("dbt-build: TARGET=bigquery lands in Phase 9b (generate_schema_name)")
     # THROUGH lands only files uploaded on or before it, so a per-interval build
     # sees just that landing (Phase 8b); load() validates the date and never lets
     # it become a path. Unset ⇒ loads all (the default build is unchanged).

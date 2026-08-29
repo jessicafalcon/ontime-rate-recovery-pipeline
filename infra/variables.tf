@@ -92,14 +92,14 @@ variable "models_dataset" {
 # its own state (review round 2 #1). The state bucket stays bootstrap-only.
 
 variable "operator_principal" {
-  description = "Principal allowed to impersonate the pipeline SA for manual BigQuery builds (user:…, group:… or serviceAccount:…). Null: no grant (Amendment Q)."
+  description = "Principal allowed to impersonate the pipeline SA for manual BigQuery builds (user:… or serviceAccount:… — ONE principal, never a group). Null: no grant (Amendment Q)."
   type        = string
   default     = null
 
   # Interpolated into an IAM member — a shape check keeps a TF_VAR from carrying
   # a second member or whitespace.
   validation {
-    condition     = var.operator_principal == null || can(regex("^(user|group|serviceAccount):[^\\s,]+$", var.operator_principal))
-    error_message = "operator_principal must be user:<email>, group:<email> or serviceAccount:<email>."
+    condition     = var.operator_principal == null || can(regex("^(user|serviceAccount):[^\\s,]+$", var.operator_principal))
+    error_message = "operator_principal must be user:<email> or serviceAccount:<email> (no group: — one principal)."
   }
 }

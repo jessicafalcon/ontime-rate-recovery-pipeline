@@ -1,8 +1,10 @@
-"""`make tf-validate | tf-plan | tf-apply | tf-destroy PROJECT=<id> [CONFIRM=yes]`.
+"""`make tf-<cmd> [PROJECT=<id>] [CONFIRM=yes]`, cmd one of validate | plan | apply |
+destroy | freeze.
 
 One entry point validates PROJECT (a GCP project-id shape) before deriving the
 `-var`, then runs terraform with `-chdir=infra` (a fixed dir, never user input):
-tf-validate — offline: `init -backend=false` + `validate` + `fmt -check`. No auth.
+tf-validate — offline: `init -backend=false -lockfile=readonly` + `validate` +
+              `fmt -check`. No auth; the pinned lock is never rewritten.
 tf-plan     — reads GCP APIs (ADC/WIF); shows the diff. Non-destructive.
 tf-apply    — creates cloud resources. CONFIRM=yes from the command line only.
 tf-destroy  — deletes them. CONFIRM=yes from the command line only.
@@ -65,42 +67,51 @@ def require_confirm(cmd: str, confirm: str, origin: str) -> None:
         die(f"tf-{cmd}: refused — pass CONFIRM=yes on the command line")
 
 
+PINNED_SUFFIXES = (".tf", ".tf.json")
+
+
+def is_pinned(p: Path) -> bool:
+    """The manifest's predicate: every file Terraform loads — `.tf` AND
+    `.tf.json` (round 7 #3) — plus the provider lock, pruning `.terraform/`
+    (the gitignored provider cache). `*.tfvars`, `*.tfstate*` and `*.example`
+    are outside by construction."""
+    if ".terraform" in p.relative_to(INFRA_DIR).parts:
+        return False
+    return p.name.endswith(PINNED_SUFFIXES) or p.name == ".terraform.lock.hcl"
+
+
 def pinned_files() -> list[Path]:
-    """The files the manifest covers: every `.tf` under infra/ plus the provider
-    lock, pruning `.terraform/` (the gitignored provider cache). `*.tfvars`,
-    `*.tfstate*` and `*.example` are outside the glob by construction."""
-    files = [p for p in INFRA_DIR.rglob("*.tf") if ".terraform" not in p.parts]
-    lock = INFRA_DIR / ".terraform.lock.hcl"
-    if lock.is_file():
-        files.append(lock)
-    return sorted(files)
+    return sorted(p for p in INFRA_DIR.rglob("*") if p.is_file() and is_pinned(p))
 
 
 def compute_manifest() -> dict[str, str]:
-    return {
-        p.relative_to(INFRA_DIR).as_posix(): _manifest.compute_file(p)
-        for p in pinned_files()
-    }
+    return _manifest.compute(INFRA_DIR, is_pinned)
 
 
 def manifest_diff() -> list[str]:
-    """`<path>: missing|extra|changed` per drifted entry; empty when the tree
-    matches the committed manifest (the offline test's assertion)."""
-    have = compute_manifest()
-    want = _manifest.parse(MANIFEST.read_text()) if MANIFEST.is_file() else {}
-    out = []
-    for k in sorted(set(have) | set(want)):
-        if have.get(k) != want.get(k):
-            state = (
-                "missing" if k not in have else "extra" if k not in want else "changed"
-            )
-            out.append(f"{k}: {state}")
-    return out
+    """`<path>: missing|extra|changed` per drifted entry via the fixtures'
+    `generator.manifest.diff` (one implementation, round 7 #6); empty when the
+    tree matches the committed manifest (the offline test's assertion). A
+    missing manifest reads as every pinned file `extra`."""
+    if not MANIFEST.is_file():
+        return [f"{k}: extra" for k in sorted(compute_manifest())]
+    return _manifest.diff(INFRA_DIR, MANIFEST, is_pinned)
 
 
 def freeze(confirm: str, origin: str) -> int:
+    """Rewrite the pin from disk — refusing, like `make freeze`, when a path the
+    committed manifest lists has vanished (a deleted `.tf` must be an explicit
+    delete, never a silent narrowing of the allowlist — round 7 #5)."""
     require_confirm("freeze", confirm, origin)
     m = compute_manifest()
+    if MANIFEST.is_file():
+        gone = sorted(set(_manifest.parse(MANIFEST.read_text())) - set(m))
+        if gone:
+            die(
+                "tf-freeze: refused — pinned files missing on disk: "
+                + ", ".join(gone)
+                + " (delete them from the manifest by hand in the same commit)"
+            )
     MANIFEST.write_text(_manifest.render(m))
     print(f"tf-freeze OK: {len(m)} files pinned in {MANIFEST.name}")
     return 0
@@ -131,7 +142,7 @@ def tf(
         require_confirm(cmd, confirm, origin)
     if cmd == "validate":
         for step in (
-            _TF + ["init", "-backend=false", "-input=false"],
+            _TF + ["init", "-backend=false", "-input=false", "-lockfile=readonly"],
             _TF + ["validate"],
             _TF + ["fmt", "-check", "-recursive"],
         ):

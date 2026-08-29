@@ -32,9 +32,16 @@ GATED_MODULE_DIRS = {INFRA / "modules" / "composer", INFRA / "modules" / "spanne
 
 
 def _tf_files() -> list[Path]:
-    """Every committed `.tf` — pruning `.terraform/` (the gitignored provider /
-    vendored-module cache `tf-validate` creates), the `BUILD_DIRS` precedent."""
-    return sorted(p for p in INFRA.rglob("*.tf") if ".terraform" not in p.parts)
+    """Every file Terraform loads — `.tf` and `.tf.json` (Amendment R) — pruning
+    `.terraform/` (the gitignored provider / vendored-module cache `tf-validate`
+    creates), the `BUILD_DIRS` precedent."""
+    return sorted(
+        p
+        for p in INFRA.rglob("*")
+        if p.is_file()
+        and p.name.endswith(cli.PINNED_SUFFIXES)
+        and ".terraform" not in p.parts
+    )
 
 
 def _strip_hcl_comments(text: str) -> str:
@@ -169,7 +176,7 @@ def test_input_shape_validations_exist() -> None:
         "github_repository": 'regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"',
         "github_ref": 'regex("^refs/(heads|tags)/',
         "budget_alert_thresholds": "alltrue(",
-        "operator_principal": 'regex("^(user|group|serviceAccount):',
+        "operator_principal": 'regex("^(user|serviceAccount):',
     }
     for var, needle in expect.items():
         conds = _validation_conditions(_block(text, rf'variable "{var}"'))
@@ -351,24 +358,40 @@ def _git_ls_files(pathspec: str) -> list[str]:
     ).stdout.splitlines()
 
 
-def _ignored(relpath: str) -> bool:
-    """Ignored by the REPO's rules only: a machine-global excludes file
-    (`core.excludesFile`) is disabled so a rule the clone happens to carry
-    cannot stand in for one in .gitignore (round 6 #6)."""
-    return (
-        subprocess.run(
-            ["git", "-c", "core.excludesFile=/dev/null", "check-ignore", "-q", relpath],
-            cwd=ROOT,
-        ).returncode
-        == 0
-    )
+@pytest.fixture(scope="module")
+def ignored(tmp_path_factory: pytest.TempPathFactory):
+    """`git check-ignore` in a scratch repo holding ONLY this repo's .gitignore:
+    neither `core.excludesFile` nor this clone's `.git/info/exclude` can stand
+    in for a rule in .gitignore (round 6 #6, round 7 #2 — the local exclude
+    file carried the `.claude/scheduled_tasks.*` rules)."""
+    repo = tmp_path_factory.mktemp("ignore-scratch")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / ".gitignore").write_bytes((ROOT / ".gitignore").read_bytes())
+
+    def _ignored(relpath: str) -> bool:
+        return (
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "core.excludesFile=/dev/null",
+                    "check-ignore",
+                    "-q",
+                    relpath,
+                ],
+                cwd=repo,
+            ).returncode
+            == 0
+        )
+
+    return _ignored
 
 
 PRIVATE_KEY_SUFFIXES = (".pem", ".p12", ".pfx", ".key", ".p8")
 BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".duckdb", ".pyc", ".ico"}
 
 
-def test_no_tracked_secret_state_or_tfvars() -> None:
+def test_no_tracked_secret_state_or_tfvars(ignored) -> None:
     """No key / tfstate / real tfvars is tracked; the gitignore rule ignores a
     real terraform.tfvars but not the *.example. Private-key filetypes (.pem/.p12/
     …) are rejected by extension; any tracked JSON is content-scanned for a
@@ -400,11 +423,11 @@ def test_no_tracked_secret_state_or_tfvars() -> None:
         assert not sa_type.search(body), p
         assert not private_key.search(body), p
     assert (INFRA / "terraform.tfvars.example").exists()
-    assert _ignored("infra/terraform.tfvars")
+    assert ignored("infra/terraform.tfvars")
     # Terraform auto-loads *.auto.tfvars and *.tfvars.json too (round 3 #12).
     for auto in ("terraform.tfvars.json", "x.auto.tfvars", "x.auto.tfvars.json"):
-        assert _ignored(f"infra/{auto}"), auto
-    assert not _ignored("infra/terraform.tfvars.example")
+        assert ignored(f"infra/{auto}"), auto
+    assert not ignored("infra/terraform.tfvars.example")
 
 
 def test_auth_is_adc_or_wif_never_keyfile() -> None:
@@ -755,7 +778,7 @@ def test_stated_defaults_are_pinned() -> None:
     )
 
 
-def test_tracked_claude_config_is_prose_and_hook_scripts_only() -> None:
+def test_tracked_claude_config_is_prose_and_hook_scripts_only(ignored) -> None:
     """Amendment M (round 4 #9), re-implemented ONCE in round 6 as an allowlist:
     the only tracked paths under `.claude/` are agent/command prose and hook
     SCRIPTS (wired only by the gitignored settings.local.json); any tracked
@@ -768,20 +791,67 @@ def test_tracked_claude_config_is_prose_and_hook_scripts_only() -> None:
     assert not off_list, off_list
     assert not _git_ls_files(".mcp.json")
     for relpath in _LOCAL_ONLY_CLAUDE_FILES:
-        assert _ignored(relpath), relpath
+        assert ignored(relpath), relpath
 
 
 # ---------------------------------------------------------------- Amendment P
 
 
 def test_tf_tree_matches_manifest() -> None:
-    """Amendment P: every `.tf` + the provider lock hash to the committed
-    `infra/MANIFEST.sha256` — ANY hand-mutation of any attribute is red until
-    `make tf-freeze CONFIRM=yes` rewrites it (the one allowlist that replaces
-    property-by-property pinning as the mutation gate)."""
+    """Amendments P/R: every `.tf`/`.tf.json` + the provider lock hash to the
+    committed `infra/MANIFEST.sha256` — ANY hand-mutation of any attribute is
+    red until `make tf-freeze CONFIRM=yes` rewrites it (the one allowlist that
+    replaces property-by-property pinning as the mutation gate). Asserted on
+    the diff LIST, and the pinned set is asserted against an independent walk,
+    so a neutered `manifest_diff`/`pinned_files` is red (round 7 #1)."""
     assert cli.MANIFEST.is_file(), "infra/MANIFEST.sha256 missing"
     assert cli.manifest_diff() == []
-    assert cli.pinned_files() == sorted(_tf_files() + [INFRA / ".terraform.lock.hcl"])
+    pinned = cli.pinned_files()
+    assert pinned == sorted(_tf_files() + [INFRA / ".terraform.lock.hcl"])
+    assert len(pinned) >= 8
+    from generator import manifest
+
+    assert set(manifest.parse(cli.MANIFEST.read_text())) == {
+        p.relative_to(INFRA).as_posix() for p in pinned
+    }
+
+
+def test_manifest_gate_reads_tf_json_and_vanished_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 7 #3/#5 on a scratch tree: a `.tf.json` outside the manifest is
+    `extra` (Terraform loads it, so the allowlist must see it); a pinned file
+    deleted from disk is `missing`, and `freeze` refuses rather than silently
+    narrowing the pin; `.terraform/` and `*.tfvars` stay outside."""
+    tree = tmp_path / "infra"
+    (tree / "modules" / "m").mkdir(parents=True)
+    (tree / ".terraform" / "providers").mkdir(parents=True)
+    (tree / "main.tf").write_text('resource "a" "b" {}\n')
+    (tree / "modules" / "m" / "x.tf").write_text("# m\n")
+    (tree / ".terraform.lock.hcl").write_text("provider {}\n")
+    (tree / ".terraform" / "providers" / "y.tf").write_text("# cache\n")
+    (tree / "terraform.tfvars").write_text('project_id = "p"\n')
+    manifest = tree / "MANIFEST.sha256"
+    monkeypatch.setattr(cli, "INFRA_DIR", tree)
+    monkeypatch.setattr(cli, "MANIFEST", manifest)
+    assert cli.manifest_diff() == [
+        ".terraform.lock.hcl: extra",
+        "main.tf: extra",
+        "modules/m/x.tf: extra",
+    ]
+    assert cli.freeze("yes", "command line") == 0
+    assert cli.manifest_diff() == []
+    (tree / "modules" / "m" / "owner.tf.json").write_text('{"resource": {}}\n')
+    assert cli.manifest_diff() == ["modules/m/owner.tf.json: extra"]
+    (tree / "main.tf").write_text('resource "a" "b" { x = 1 }\n')
+    assert "main.tf: changed" in cli.manifest_diff()
+    (tree / "modules" / "m" / "x.tf").unlink()
+    assert "modules/m/x.tf: missing" in cli.manifest_diff()
+    before = manifest.read_text()
+    with pytest.raises(SystemExit) as e:
+        cli.freeze("yes", "command line")
+    assert e.value.code == 2
+    assert manifest.read_text() == before
 
 
 def test_tf_freeze_requires_confirm_origin_and_writes_the_manifest(
@@ -886,13 +956,14 @@ def test_cli_builds_the_expected_argv() -> None:
 
 def test_cli_validate_argv_is_offline() -> None:
     """Round 3 #5 (round 2 #9's live survivor): `tf-validate` runs init with
-    `-backend=false` (no state backend touched, no auth) then validate, then
-    fmt -check — dropping the flag or a step reddens."""
+    `-backend=false` (no state backend touched, no auth) and `-lockfile=readonly`
+    (Amendment R: init may never rewrite the pinned provider lock) then
+    validate, then fmt -check — dropping a flag or a step reddens."""
     fake = _FakeRunner()
     assert cli.tf("validate", runner=fake) == 0
     steps = [argv[2:] for argv in fake.calls]
     assert steps == [
-        ["init", "-backend=false", "-input=false"],
+        ["init", "-backend=false", "-input=false", "-lockfile=readonly"],
         ["validate"],
         ["fmt", "-check", "-recursive"],
     ], steps
