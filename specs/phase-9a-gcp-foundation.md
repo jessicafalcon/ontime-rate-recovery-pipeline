@@ -273,9 +273,9 @@ are fixes and record corrections landing without amendments.
 - **M — No tracked Claude settings file (#9).** Restores CLAUDE.md's rule that
   hook wiring lives only in the gitignored `settings.local.json`: `.claude/
   settings.json` (an empty `{}`) is untracked and gitignored, and
-  `tests/test_infra.py::test_no_tracked_auto_configuring_claude_settings`
-  asserts no tracked `.claude/settings*.json` carries any auto-configuring key
-  (`hooks`, `permissions`, `env`, `mcpServers`, `enableAllProjectMcpServers`)
+  the Claude-config pin (round 5's key scan; re-implemented in round 6 as
+  `tests/test_infra.py::test_tracked_claude_config_is_prose_and_hook_scripts_only`,
+  a path allowlist) asserts no tracked `.claude/settings*.json` exists at all
   and no `.mcp.json` is tracked (round 5 #12 widened it from `hooks` alone). Repo hygiene outside
   9a's Scope, landed here as a security finding at the phase exit (one-line
   diff) rather than on a `fix/` branch.

@@ -111,9 +111,10 @@ annotated **Superseded by …** in place and never deleted.
   `settings.json` would auto-execute an inbound branch's hook + conftest for
   anyone opening the repo in Claude Code. Since Phase 9a (Amendment M) the
   file is untracked and gitignored, and
-  `tests/test_infra.py::test_no_tracked_auto_configuring_claude_settings` pins
-  that no tracked `.claude/settings*.json` carries `hooks`, `permissions`,
-  `env` or an MCP key and no `.mcp.json` is tracked.
+  `tests/test_infra.py::test_tracked_claude_config_is_prose_and_hook_scripts_only`
+  (round 6's re-implementation of the round-4/5 key scan) pins that nothing
+  under `.claude/` but agent/command prose and hook scripts is tracked, and no
+  `.mcp.json`.
 
 ## Appendix — by phase
 
