@@ -1,8 +1,14 @@
 # Copy to terraform.tfvars (gitignored) and set your project. `project_id` is the
-# only required value; every other input has a default (region us-central1, both
-# enable_* toggles false, budget alerts at $50/$150). Never commit terraform.tfvars.
+# only required value; every other input has a default. A FORK must also set
+# github_repository (its own owner/repo) so WIF trusts its CI, not this repo's.
+# Never commit terraform.tfvars.
 project_id = "your-gcp-project-id"
 
-# region          = "us-central1"
-# enable_composer = false
-# enable_spanner  = false
+# A fork's own repo/ref for Workload Identity Federation (CI auth, no key):
+# github_repository = "your-org/your-repo"
+# github_ref        = "refs/heads/main"
+
+# region                      = "us-central1"
+# enable_composer             = false
+# enable_spanner              = false
+# budget_alert_thresholds_usd = [50, 150]

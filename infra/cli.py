@@ -33,7 +33,6 @@ PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]\Z")
 # gated on CONFIRM=yes from the command line.
 CLOUD_MUTATING = ("apply", "destroy")
 _TF = ["terraform", f"-chdir={INFRA_DIR}"]
-_NO_BINARY = 127
 
 
 def die(msg: str, code: int = 2) -> NoReturn:
@@ -61,14 +60,15 @@ def require_confirm(cmd: str, confirm: str, origin: str) -> None:
 Runner = Callable[..., subprocess.CompletedProcess]
 
 
-def _run(runner: Runner, argv: list[str], label: str) -> int:
-    """Run one terraform argv through the injected runner; a missing binary is a
-    clean FAIL, not a traceback (returns _NO_BINARY, already reported)."""
+def _run(runner: Runner, argv: list[str], label: str) -> int | None:
+    """Run one terraform argv through the injected runner; returns the exit code,
+    or None when the binary is missing (a clean FAIL, already reported — None is a
+    distinct sentinel so a real terraform exit 127 still prints its FAIL line)."""
     try:
         return runner(argv).returncode
     except FileNotFoundError:
         print(f"{label} FAIL: terraform not on PATH")
-        return _NO_BINARY
+        return None
 
 
 def tf(
@@ -87,23 +87,25 @@ def tf(
             _TF + ["fmt", "-check", "-recursive"],
         ):
             rc = _run(runner, step, "tf-validate")
+            if rc is None:
+                return 1  # missing binary — already reported
             if rc != 0:
-                if rc != _NO_BINARY:
-                    print(f"tf-validate FAIL: {' '.join(step[2:])}")
+                print(f"tf-validate FAIL: {' '.join(step[2:])}")
                 return 1
         print("tf-validate OK")
         return 0
     validate_project(project)
     var = ["-var", f"project_id={project}"]
     argv = {
-        "plan": _TF + ["plan", *var],
-        "apply": _TF + ["apply", *var, "-auto-approve"],
-        "destroy": _TF + ["destroy", *var, "-auto-approve"],
+        "plan": _TF + ["plan", "-input=false", *var],
+        "apply": _TF + ["apply", "-input=false", "-auto-approve", *var],
+        "destroy": _TF + ["destroy", "-input=false", "-auto-approve", *var],
     }[cmd]
     rc = _run(runner, argv, f"tf-{cmd}")
+    if rc is None:
+        return 1  # missing binary — already reported
     if rc != 0:
-        if rc != _NO_BINARY:
-            print(f"tf-{cmd} FAIL: {project}")
+        print(f"tf-{cmd} FAIL: {project}")
         return 1
     print(f"tf-{cmd} OK: {project}")
     return 0

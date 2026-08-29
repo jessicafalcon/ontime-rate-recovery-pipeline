@@ -17,6 +17,22 @@ is applied until you run `make tf-apply` yourself.
   uses `google-github-actions/auth` with the provider and the `ontime-pipeline`
   service account — a short-lived credential, no secret at rest.
 
+## One-time API bootstrap (a brand-new project only)
+
+Terraform enables every API it needs (`google_project_service`), but that
+resource — and the `data.google_project` read at plan time — themselves require
+**`serviceusage` and `cloudresourcemanager`** already on. A project that has ever
+been used with `gcloud` has them; a brand-new project needs them enabled by hand
+once, before the first `tf-plan`:
+
+```
+gcloud services enable serviceusage.googleapis.com cloudresourcemanager.googleapis.com \
+  --project=<project_id>
+```
+
+After that, `terraform plan` is clean with only `project_id`, and Terraform keeps
+the rest of the service set on.
+
 ## One-time state-backend bootstrap
 
 Terraform's state lives locally by default, so a fresh clone plans with no
@@ -25,11 +41,12 @@ cannot create the backend that stores its own state, so it is **created by hand
 and never managed by Terraform** (distinct from the `module.gcs`
 artifacts/staging bucket `<project_id>-ontime`, which Terraform does manage and
 `tf-destroy` removes). The state bucket therefore survives `tf-destroy` on
-purpose:
+purpose, and is hardened to match the managed bucket:
 
 ```
 gcloud storage buckets create gs://<project_id>-tfstate \
-  --project=<project_id> --location=us-central1 --uniform-bucket-level-access
+  --project=<project_id> --location=us-central1 \
+  --uniform-bucket-level-access --public-access-prevention
 gcloud storage buckets update gs://<project_id>-tfstate --versioning
 ```
 
@@ -69,9 +86,9 @@ stop spend. With no `all_updates_rule`/notification channel configured (the case
 here), the alert emails go to the **billing-account administrators and billing
 users** by default — add an `all_updates_rule` with a Cloud Monitoring
 notification channel if you need other recipients or a Pub/Sub trigger. The only
-thing that actually stops spend is disabling billing on the project. The real guardrail is a **Pub/Sub → Cloud Function** that, on a budget
-notification at the $150 threshold, calls the Cloud Billing API to detach the
-billing account. It is **documented here as optional and left unbuilt** (the
+thing that actually stops spend is disabling billing on the project. The real
+guardrail is a **Pub/Sub → Cloud Function** that, on a budget notification at the
+$150 threshold, calls the Cloud Billing API to detach the billing account. It is **documented here as optional and left unbuilt** (the
 meter is off by default, so there is no runaway to catch yet); build it before
 any long-lived apply (Phase 12 demo day) if you want a hard stop. Sketch:
 
@@ -91,7 +108,11 @@ Removes every resource in state — the two datasets
 (`delete_contents_on_destroy`, so they go even with 9b's tables), the staging
 bucket (`force_destroy`, so it goes even with objects), the service account + WIF
 pool, and the budget. The bootstrap **tfstate bucket is not managed and is not
-removed** (it holds the state). Verify the meter is at zero:
+removed** (it holds the state). The **API enablements stay on**
+(`disable_on_destroy = false`) — deliberately, so a re-apply works and a
+project-wide API another workload may use is never disabled by our teardown;
+enabled APIs are free, so this leaves nothing billable. Verify the meter is at
+zero:
 
 ```
 bq ls --project_id=<project_id>                       # no ontime/raw datasets

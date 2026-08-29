@@ -54,9 +54,13 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "google.subject"       = "assertion.sub"
     "attribute.repository" = "assertion.repository"
     "attribute.ref"        = "assertion.ref"
+    # A combined repo@ref attribute so the impersonation binding scopes BOTH at
+    # once — not repo-only with ref living solely in the provider condition
+    # (review round 2 #3).
+    "attribute.repo_ref" = "assertion.repository + \"@\" + assertion.ref"
   }
   # Only THIS repo AND only the trusted ref (default refs/heads/main) — not any
-  # branch of the repo — can exchange a token (spec invariant 3, review round 1).
+  # branch of the repo — can exchange a token (spec invariant 7).
   attribute_condition = "assertion.repository == \"${var.github_repository}\" && assertion.ref == \"${var.github_ref}\""
 
   oidc {
@@ -64,12 +68,11 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   }
 }
 
-# Only CI runs of THIS repo may impersonate the SA. The provider's
-# attribute_condition already rejects any token whose ref is not var.github_ref,
-# so the pool only ever holds this-repo/this-ref identities and binding on the
-# repository attribute is exact.
+# Only CI runs of THIS repo on the trusted ref may impersonate the SA. The
+# binding is on the combined repo@ref attribute, so even a future second, looser
+# provider on the same pool could not widen it to another branch.
 resource "google_service_account_iam_member" "wif_impersonation" {
   service_account_id = google_service_account.pipeline.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repository}"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repo_ref/${var.github_repository}@${var.github_ref}"
 }

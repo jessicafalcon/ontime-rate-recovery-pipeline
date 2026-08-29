@@ -610,7 +610,7 @@ are a `google_project` data source). `infra/cli.py` validates `PROJECT` before
 deriving the `-var` and gates `tf-apply`/`tf-destroy` on `CONFIRM=yes $(origin)`;
 `tf-validate` (offline) / `tf-plan` are ungated. `make tf-validate` OK (google
 provider 6.50.0), offline suite green (`tests/test_infra.py` static `.tf` checks
-+ the tf-* makefile tests), `make mutate` 3/3. The plan-clean and
++ the tf-* makefile tests), `make mutate` 4/4. The plan-clean and
 destroy-leaves-nothing-billable Done-when items are proven by the manual cloud
 runs in Evidence (ask-first). `fixtures/tiny/` untouched; every earlier gate
 byte-identical. **Review round 1 applied (23 findings): 4 amendments** — the
@@ -620,7 +620,14 @@ managed bucket is a staging bucket distinct from the bootstrap tfstate bucket
 delete-call` now in the sweep, 4/4 killed); `google_project_service` so a fresh
 project applies — **plus 15 test/wording fixes** (whole-tree content-based
 `test_infra.py`, `infra` dropped from truth-isolation EXEMPT, `\Z` anchor, budget
-percents). Next: 9a review → merge → 9b (its first
+percents). **Review round 2 applied (24 findings): cap invoked** — `test_infra.py`
+re-implemented once against the pinning invariant (resource allowlist, exact WIF
+`&&`, IAM scope, bucket-hardening/argv/region pins); 3 design changes (managed
+bucket derived not a var; WIF binds on combined `repo@ref` + CEL-injection
+validations; `serviceusage`+`cloudresourcemanager` bootstrap APIs); fixes
+(`None` sentinel, `-input=false`, positive-threshold validation); #18 accepted
+(sanctioned `$(origin)` pattern). A scoped round 3 follows. Next: 9a review → merge
+→ 9b (its first
 commit reconciles against main-with-9a; it also fixes the 8b-opened row "the
 DAG's build owns its landing" — `dbt_build(TARGET=bigquery)` must not call the
 DuckDB `load()`). Open BACKLOG rows: **13** (9a struck "Budget alerts do not stop

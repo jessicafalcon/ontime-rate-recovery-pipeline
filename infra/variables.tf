@@ -28,12 +28,24 @@ variable "github_repository" {
   description = "owner/repo the WIF provider trusts for CI (short-lived OIDC, no key at rest)."
   type        = string
   default     = "jessicafalcon/ontime-rate-recovery-pipeline"
+
+  # Interpolated into the provider's CEL attribute_condition and the principalSet
+  # member — a shape check keeps a hostile TF_VAR from injecting CEL/`||`.
+  validation {
+    condition     = can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", var.github_repository))
+    error_message = "github_repository must be owner/repo."
+  }
 }
 
 variable "github_ref" {
   description = "The git ref CI must run on to impersonate the SA (branch scoping — not any branch)."
   type        = string
   default     = "refs/heads/main"
+
+  validation {
+    condition     = can(regex("^refs/(heads|tags)/[A-Za-z0-9._/-]+$", var.github_ref))
+    error_message = "github_ref must be a refs/heads/... or refs/tags/... path."
+  }
 }
 
 variable "budget_alert_thresholds_usd" {
@@ -41,9 +53,11 @@ variable "budget_alert_thresholds_usd" {
   type        = list(number)
   default     = [50, 150]
 
+  # Non-empty AND every threshold strictly positive — the budget amount is the
+  # smallest threshold, so a 0 would divide-by-zero the percents.
   validation {
-    condition     = length(var.budget_alert_thresholds_usd) > 0
-    error_message = "budget_alert_thresholds_usd must list at least one threshold."
+    condition     = length(var.budget_alert_thresholds_usd) > 0 && alltrue([for t in var.budget_alert_thresholds_usd : t > 0])
+    error_message = "budget_alert_thresholds_usd must be non-empty and all strictly positive."
   }
 }
 
@@ -59,8 +73,7 @@ variable "models_dataset" {
   default     = "ontime"
 }
 
-variable "staging_bucket" {
-  description = "GCS bucket for pipeline artifacts / the 9b BigQuery landing. Empty derives <project_id>-ontime. NOT the Terraform state bucket (that is bootstrap-only — docs/DEPLOYMENT.md)."
-  type        = string
-  default     = ""
-}
+# NOTE: the managed staging bucket is NOT a variable — it is always
+# `${project_id}-ontime`, so a caller can never point it at the bootstrap
+# `${project_id}-tfstate` state bucket and have Terraform manage (and destroy)
+# its own state (review round 2 #1). The state bucket stays bootstrap-only.

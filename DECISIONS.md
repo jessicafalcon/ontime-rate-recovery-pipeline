@@ -157,15 +157,15 @@ annotated **Superseded by …** in place and never deleted.
   the backend that stores its own state).
 - **`infra/cli.py` validates `PROJECT` and gates the destructive targets; four
   `make` targets.** Mirrors `loader/cli.py`: one process validates `PROJECT`
-  (`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`) before deriving `-var project_id=…`, and
+  (`^[a-z][a-z0-9-]{4,28}[a-z0-9]\Z`) before deriving `-var project_id=…`, and
   refuses `tf-apply`/`tf-destroy` unless `CONFIRM=yes` has command-line origin;
   `tf-validate` (offline: `init -backend=false` + `validate` + `fmt -check`) and
   `tf-plan` are non-destructive and ungated. The Terraform HCL is configuration no
   mutation operator addresses — pinned by `tests/test_infra.py` static checks +
   `terraform validate` + the manual plan/apply/destroy Evidence (the Phase 7
-  treatment of SQL); the three `infra/cli.py` guards carry the mutation lines
-  (3/3 killed). Rejected: `terraform` invoked straight from the Makefile (an
-  unvalidated value reaches the provider; no `$(origin)` gate).
+  treatment of SQL); the `infra/cli.py` guards carry the mutation lines
+  (4/4 killed after round 2). Rejected: `terraform` invoked straight from the
+  Makefile (an unvalidated value reaches the provider; no `$(origin)` gate).
 - **The 8b-opened row "the DAG's build owns its landing" is a 9b fix, re-deferred
   here.** `loader/cli.py::dbt_build` calls the DuckDB `load()` even for a
   non-`duckdb` `TARGET`, which is wrong once the landing is `bq load` GCS→BigQuery.
@@ -193,6 +193,26 @@ annotated **Superseded by …** in place and never deleted.
   corrected and the 30-day SA/WIF soft-delete gotcha to §8). Rejected up front:
   repository-only WIF; a non-injectable `tf`; managing the state bucket; a
   `gcloud services enable` runbook step over the `google_project_service` resource.
+- **Review round 2 — cap invoked, three more amendments (approved 2026-08-29).**
+  Round 2 found round 1's `test_infra.py` pinned substrings/mechanisms, so ~12
+  `.tf` properties survived mutation. Rather than patch each, the **review cap was
+  invoked**: `test_infra.py`'s static checks were **re-implemented once** against
+  one invariant — every property in the Invariants table reddens when removed from
+  the `.tf`; pins are exact-string/scoped/allowlist, never substring or type-
+  denylist (resource **allowlist**, exact WIF `&&`, project-vs-resource IAM scope,
+  bucket-hardening pins, argv assertions, region pin, `.terraform` prune). Design
+  changes: (E) the managed bucket is **derived** `${project_id}-ontime`, not a var
+  — a caller can no longer point it at the `tfstate` bucket (round 1's #1 could
+  still be reinstated via `var.staging_bucket`); (F) WIF impersonation binds on a
+  combined `attribute.repo_ref` (repo@ref), not repo-only, and `github_repository`/
+  `github_ref` gain shape `validation`s against CEL injection; (G) `serviceusage`
+  + `cloudresourcemanager` join `required_services` and a one-time `gcloud services
+  enable` is documented — the irreducible bootstrap the "fresh project applies"
+  clause implied (invariant 8 / Done-when 1 reworded). Fixes: `_NO_BINARY`→`None`
+  sentinel (a real exit 127 still FAILs), `-input=false` on plan/apply/destroy,
+  positive-threshold validation, DEPLOYMENT bootstrap-bucket hardening / API-stay-on
+  notes. **Accepted:** `require_confirm`'s caller-supplied origin is the sanctioned
+  repo-wide `$(origin CONFIRM)` pattern (no change). A scoped round 3 follows.
 
 ### Phase 8b
 

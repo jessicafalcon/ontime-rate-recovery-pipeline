@@ -33,9 +33,18 @@ provider "google" {
 }
 
 locals {
-  staging_bucket = var.staging_bucket != "" ? var.staging_bucket : "${var.project_id}-ontime"
-  # APIs a fresh project needs before any resource below can be created.
+  # Always derived — never a variable, so it can never be the state bucket
+  # (review round 2 #1).
+  staging_bucket = "${var.project_id}-ontime"
+  # APIs the modules need. `serviceusage`/`cloudresourcemanager` are the two
+  # bootstrap APIs that `google_project_service` and `data.google_project`
+  # themselves require: on a brand-new project they must be enabled by hand once
+  # (docs/DEPLOYMENT.md `gcloud services enable`), after which Terraform keeps the
+  # whole set on. disable_on_destroy = false, so teardown never disables a
+  # project-wide API.
   required_services = [
+    "serviceusage.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
     "bigquery.googleapis.com",
     "storage.googleapis.com",
     "iam.googleapis.com",

@@ -143,6 +143,48 @@ invariant it restores; the 15 test/wording fixes are applied without amendments.
   Rejected: a `gcloud services enable` runbook step (leaves the plan incomplete;
   "nothing created outside Terraform").
 
+## Amendments (review round 2, approved 2026-08-29 — cap invoked)
+
+Round 2 found that round 1's `test_infra.py` hardening pinned substrings /
+mechanisms, so a dozen `.tf` properties survived mutation. **The cap was invoked**:
+`test_infra.py`'s static checks were **re-implemented once** against one invariant
+— *every property in the Invariants table has a test that reddens when that
+property is removed from the `.tf`; pins are exact-string / scoped / allowlist,
+never a substring or a resource-type denylist* — instead of patching each gap. A
+scoped round 3 follows. Three design changes rode with it:
+
+- **E — the managed bucket is derived, never a variable (#1 BLOCKER).** Round 1's
+  `var.staging_bucket` could be set to `<project>-tfstate`, reinstating the BLOCKER
+  (Terraform managing/destroying its own state) with the suite green. The var is
+  **removed**; the module bucket is always `${project_id}-ontime`, and a test
+  reddens if any managed `.tf` names `tfstate`. Restores invariant 5. Rejected: a
+  cross-var `validation` (a footgun kept behind a guard is worse than no footgun).
+
+- **F — WIF impersonation binds on the combined `repo@ref` (#2, #3, #4).** The
+  binding was repo-only (ref lived solely in the provider condition), the test
+  checked two substrings not the `&&`, and the vars were interpolated raw into
+  CEL. Now: a mapped `attribute.repo_ref = repository + "@" + ref`, the member
+  binds on it, the test asserts the exact `&&` conjunction and the combined
+  binding, and `github_repository`/`github_ref` carry shape `validation`s
+  (`TF_VAR_…='x" || true'` is rejected). Refines invariant 7.
+
+- **G — the two bootstrap APIs (#5).** `google_project_service` and
+  `data.google_project` themselves need `serviceusage` + `cloudresourcemanager`;
+  a brand-new project can't even plan without them. They join `required_services`,
+  and a one-time `gcloud services enable` is documented; invariant 8 / Done-when 1
+  now say "with the two bootstrap APIs on". This is the irreducible manual step
+  the "fresh project applies" clause always implied.
+
+The 15 test/wording fixes (including #16 `_NO_BINARY`→`None` sentinel, #11 argv +
+`-input=false`, #15 positive-threshold validation, #14 `.terraform` prune, #10
+resource allowlist) landed without amendments.
+
+**Accepted, not fixed:** #18 — `require_confirm`'s origin is a caller-supplied
+string, but this is the **sanctioned repo-wide `$(origin CONFIRM)` pattern** (every
+CONFIRM gate — `freeze`, `drop-db`, `dbt-build` — trusts make's closed origin
+word-set; the threat model is "mistakes, not a user who controls the environment
+or calls Python directly", DECISIONS Phase 0). No change.
+
 ## Teaching notes (first appearance in this project)
 
 - **Terraform state, modules, and backends.** Terraform records what it created
@@ -225,7 +267,8 @@ time, like every cloud-cost command.
 
 1. **Plans from `project_id` alone.** From a fresh clone, `make tf-plan
    PROJECT=<id>` runs clean with no other required input; every var except
-   `project_id` has a default. *Evidence: row 1.*
+   `project_id` has a default (a brand-new project first needs the two bootstrap
+   APIs enabled once — `docs/DEPLOYMENT.md`). *Evidence: row 1.*
 2. **Meter off by default.** With `enable_composer` and `enable_spanner` at their
    false defaults, the plan creates zero Composer / Spanner resources; both
    modules are `count`-gated. *Evidence: row 2.*
@@ -250,31 +293,32 @@ authoritative if the landing diverges.)
 
 | Done-when | Proof (test file / `make` target / command output) |
 |---|---|
-| 1 | `tests/test_infra.py::test_project_id_is_the_only_required_var` (brace-matched parse of `variables.tf`: exactly one variable without a `default =`), `::test_required_apis_are_enabled` (a fresh project applies), `::test_stated_defaults_are_pinned`; manual `make tf-plan PROJECT=<id>` → a clean plan, no prompt for a second var |
-| 2 | `tests/test_infra.py::test_enable_toggles_default_false`, `::test_optional_modules_are_count_gated` (composer/spanner called with `count = var.enable_* ? 1 : 0`), `::test_no_billable_resource_outside_a_toggled_module` (a `google_spanner_instance` at root `main.tf` → red); manual `make tf-plan` → `0 to add` for the toggled modules |
-| 3 | `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars` (`git ls-files` matches no `*.tfstate*`/`*.tfvars`/gcloud-shaped key JSON; tracked JSON content-scanned for `"type": "service_account"`), `::test_auth_is_adc_or_wif_never_keyfile` (no `credentials`/`keyfile` argument in any `.tf` or `profiles.yml`), `::test_wif_provider_is_ref_scoped` (repo AND ref) |
-| 4 | `tests/test_infra.py::test_sa_roles_are_least_privilege` (roles in ANY `.tf` ⊆ the BQ-data/job + storage-object + WIF allowlist; `roles/owner`/`roles/editor` absent — a root-`main.tf` grant is caught) |
-| 5 | manual `make tf-apply PROJECT=<id> CONFIRM=yes` then `make tf-destroy PROJECT=<id> CONFIRM=yes`, then `bq ls --project_id=<id>` / `gcloud iam service-accounts list` / `gcloud billing budgets list` all empty; `tests/test_infra.py::test_every_resource_is_destroyable` (no `prevent_destroy`, both datasets `delete_contents_on_destroy`, the bucket `force_destroy`) |
-| 6 | `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only` (fake runner), `::test_tf_targets_pass_project_as_one_literal`; `tests/test_infra.py::test_cli_validates_project`, `::test_cli_requires_confirm_origin`, `::test_cli_validates_before_running`, `::test_cli_missing_terraform_is_a_clean_fail`; mutations `require_confirm invert-guard`/`delete-call`, `validate_project invert-guard`, `tf constant-return:0` all KILLED |
+| 1 | `tests/test_infra.py::test_project_id_is_the_only_required_var` (brace-matched: exactly one variable without a `default =`), `::test_required_apis_are_enabled_and_survive_destroy`, `::test_modules_depend_on_the_service_enablement`, `::test_stated_defaults_are_pinned`; manual `make tf-plan PROJECT=<id>` (with the two bootstrap APIs on) → a clean plan, no prompt for a second var |
+| 2 | `tests/test_infra.py::test_enable_toggles_default_false`, `::test_optional_modules_are_count_gated`, `::test_every_declared_resource_type_is_on_the_allowlist` (a `google_spanner_instance`/`google_cloud_run_v2_service` at root → red); manual `make tf-plan` → `0 to add` for the toggled modules |
+| 3 | `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars` (`git ls-files` matches no `*.tfstate*`/`*.tfvars`/private-key filetypes; tracked JSON **content-scanned** for `"type": "service_account"`/`"private_key"` — the content scan, not the name, is what catches a gcloud-shaped key), `::test_auth_is_adc_or_wif_never_keyfile`, `::test_wif_provider_condition_is_the_repo_and_ref_conjunction`, `::test_wif_impersonation_binds_on_combined_repo_and_ref` |
+| 4 | `tests/test_infra.py::test_sa_roles_are_least_privilege` (roles in ANY `.tf` ⊆ allowlist; owner/editor absent), `::test_project_level_grant_is_only_bigquery_jobuser` (scope: `objectAdmin` bucket-scoped, `dataEditor` dataset-scoped — a project-wide move → red) |
+| 5 | manual `make tf-apply PROJECT=<id> CONFIRM=yes` then `make tf-destroy … CONFIRM=yes`, then `bq ls` / `gcloud iam service-accounts list` / `gcloud billing budgets list` all empty; `tests/test_infra.py::test_every_resource_is_destroyable`, `::test_bucket_is_hardened`, `::test_no_staging_bucket_variable_and_the_managed_bucket_is_derived`, `::test_region_and_dataset_location_are_us_central1` |
+| 6 | `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only` (fake runner), `::test_tf_targets_pass_project_as_one_literal`; `tests/test_infra.py::test_cli_validates_project`, `::test_cli_requires_confirm_origin`, `::test_cli_validates_before_running`, `::test_cli_builds_the_expected_argv`, `::test_cli_missing_terraform_is_a_clean_fail`; mutations `require_confirm invert-guard`/`delete-call`, `validate_project invert-guard`, `tf constant-return:0` all KILLED |
 
 ## Invariants (REQUIRED)
 
 | Invariant ("for all …, … holds") | Falsified by (scenario test) |
 |---|---|
 | 1. **Only `project_id` is required.** For all fresh clones, every Terraform variable except `project_id` has a `default =` assignment, so a plan needs only that one input (brace-matched, so a nested `validation {}` can't hide a required var; keyed on the assignment, so a description containing "default" doesn't read as one). | `tests/test_infra.py::test_project_id_is_the_only_required_var` (a second default-less var → red) |
-| 2. **Meter off by default.** For all default applies, no Spanner/Composer/other-billable resource is created; `enable_*` default false, the optional modules are `count = var.enable_* ? 1 : 0`, and no billable resource type exists anywhere but those two gated modules. | `tests/test_infra.py::test_enable_toggles_default_false`, `::test_optional_modules_are_count_gated`, `::test_no_billable_resource_outside_a_toggled_module` (a `google_spanner_instance` at root → red); manual `tf-plan` zero toggled resources |
-| 3. **No secret at rest.** For all commits, no key/tfstate/tfvars is tracked (key regex covers a gcloud `<project>-<keyid>.json`; tracked JSON is content-scanned for a SA-key body) and no `.tf`/`profiles.yml` sets a `credentials`/`keyfile` argument; auth is ADC/WIF. | `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars`, `::test_auth_is_adc_or_wif_never_keyfile` |
-| 4. **Least privilege.** For all IAM role grants in ANY `.tf` (not just `modules/iam`), the pipeline SA gets only the BQ data/job + bucket-object + WIF roles, never `roles/owner`/`roles/editor`. | `tests/test_infra.py::test_sa_roles_are_least_privilege` (a `roles/owner` at root `main.tf` → red) |
-| 5. **Destroy is total.** For all applied resources, `terraform destroy` removes them — no `prevent_destroy`, both datasets `delete_contents_on_destroy` (so a destroy works once 9b lands tables), the bucket `force_destroy`, no resource created outside Terraform (the state bucket is bootstrap-only, by design). | `tests/test_infra.py::test_every_resource_is_destroyable`; manual apply→destroy→empty listing |
-| 6. **Cloud/destructive targets gated, validated first.** For all `tf-apply`/`tf-destroy`, `CONFIRM=yes` from the command line is required; and for all `tf-plan`/`apply`/`destroy`, `PROJECT` is validated before the runner is invoked — a bad/env-only value is refused, and (injected fake runner) no real terraform is ever spawned by a test. | `tests/test_infra.py::test_cli_requires_confirm_origin` (fake runner, never called on refusal), `::test_cli_validates_project` (rejects `my-proj\n`), `::test_cli_validates_before_running`, `::test_cli_missing_terraform_is_a_clean_fail`; `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only` |
-| 7. **WIF trust is branch-scoped.** For all CI token exchanges, the provider's `attribute_condition` requires this repo AND the trusted ref (`assertion.repository` && `assertion.ref`) — not any branch. | `tests/test_infra.py::test_wif_provider_is_ref_scoped` (deleting either half → red) |
-| 8. **A fresh project applies.** For all required APIs, `google_project_service` enables them (`disable_on_destroy = false`), so a fresh project's first apply does not fail API-not-enabled. | `tests/test_infra.py::test_required_apis_are_enabled` |
+| 2. **Meter off by default.** For all default applies, no billable resource is created outside the count-gated composer/spanner modules; `enable_*` default false, the modules are `count = var.enable_* ? 1 : 0`, and every declared resource type is on an explicit allowlist (so any new type — billable or not — is a conscious change). | `tests/test_infra.py::test_enable_toggles_default_false`, `::test_optional_modules_are_count_gated`, `::test_every_declared_resource_type_is_on_the_allowlist` (a `google_spanner_instance` at root → red); manual `tf-plan` zero toggled resources |
+| 3. **No secret at rest.** For all commits, no tfstate/tfvars/private-key filetype is tracked, and every tracked JSON is content-scanned for a SA-key body (the **content scan**, not the filename, is what catches a gcloud-shaped `<project>-<keyid>.json`); no `.tf`/`profiles.yml` sets a `credentials`/`keyfile` argument; auth is ADC/WIF. | `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars`, `::test_auth_is_adc_or_wif_never_keyfile` |
+| 4. **Least privilege, scoped.** For all IAM role grants in ANY `.tf`, the SA gets only the BQ data/job + bucket-object + WIF roles, never owner/editor; and the only PROJECT-level grant is `bigquery.jobUser` — `objectAdmin` is bucket-scoped, `dataEditor` dataset-scoped. | `tests/test_infra.py::test_sa_roles_are_least_privilege` (a `roles/owner` at root → red), `::test_project_level_grant_is_only_bigquery_jobuser` (a project-wide `objectAdmin` → red) |
+| 5. **Destroy is total; the managed bucket is not the state bucket.** For all applied resources, `terraform destroy` removes them — no `prevent_destroy`, datasets `delete_contents_on_destroy`, bucket `force_destroy` + hardened (public-access-prevention, versioning, lifecycle); the managed bucket is derived `${project_id}-ontime` (never a var), so it can never be the bootstrap `tfstate` bucket. | `tests/test_infra.py::test_every_resource_is_destroyable`, `::test_bucket_is_hardened`, `::test_no_staging_bucket_variable_and_the_managed_bucket_is_derived`; manual apply→destroy→empty listing |
+| 6. **Cloud/destructive targets gated, validated first, correct argv.** For all `tf-apply`/`tf-destroy`, `CONFIRM=yes` from the command line is required; `PROJECT` is validated before the runner runs; the argv carries `-var project_id=…` + `-input=false` (+ `-auto-approve` for the mutating pair); and (injected fake runner) no test spawns real terraform. | `tests/test_infra.py::test_cli_requires_confirm_origin`, `::test_cli_validates_project` (rejects `my-proj\n`), `::test_cli_validates_before_running`, `::test_cli_builds_the_expected_argv`, `::test_cli_missing_terraform_is_a_clean_fail`; `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only` |
+| 7. **WIF trust is branch-scoped, at both the provider and the binding.** For all CI token exchanges, the provider's `attribute_condition` requires repo AND ref (`&&`, not `||`), and the impersonation binds on the combined `attribute.repo_ref/repo@ref` — not repo-only. | `tests/test_infra.py::test_wif_provider_condition_is_the_repo_and_ref_conjunction` (`&&`→`||` red), `::test_wif_impersonation_binds_on_combined_repo_and_ref` (widening to `attribute.repository/*` red) |
+| 8. **A fresh project applies (with the two bootstrap APIs on).** For all required APIs, `google_project_service` enables them (`disable_on_destroy = false`) and the modules `depends_on` it; the two bootstrap APIs (`serviceusage`, `cloudresourcemanager`) that `google_project_service`/`data.google_project` themselves need are a documented one-time `gcloud services enable` on a brand-new project. | `tests/test_infra.py::test_required_apis_are_enabled_and_survive_destroy`, `::test_modules_depend_on_the_service_enablement` |
 
 Rules — the Terraform HCL is configuration no mutation operator addresses (the
 four Python operators act on `.py`; the two SQL operators on `case` arms). It is
-pinned by the static `tests/test_infra.py` checks (content-based and whole-tree,
-review round 1), `terraform validate` in the DONE command, and the manual
-plan/apply/destroy Evidence — the same treatment Phase 7 gave SQL predicates.
+pinned by the static `tests/test_infra.py` checks (content-based, whole-tree, and
+property-complete — re-implemented in round 2 against the pinning invariant),
+`terraform validate` in the DONE command, and the manual plan/apply/destroy
+Evidence — the same treatment Phase 7 gave SQL predicates.
 Every Python guard (`validate_project`, `require_confirm`, the `tf` dispatch)
 gets a mutation line; the unmutated suite runs first and must be green. `tf` now
 takes an injectable runner, so `require_confirm delete-call` is a SAFE line — the
