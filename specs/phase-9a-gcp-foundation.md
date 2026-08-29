@@ -215,6 +215,61 @@ ARCHITECTURE §8: user ADC needs a quota project for `billingbudgets` (provider
 `user_project_override` + `billing_project`), and a budget's currency must be
 the billing account's (`data.google_billing_account.currency_code`).
 
+## Amendments (review round 4, approved 2026-08-29 — phase-exit audit)
+
+Round 4 (the whole-repo phase-exit union) found five design changes; the rest
+are fixes and record corrections landing without amendments.
+
+- **I — Two datasets stays the pin; 9b's dbt build must land inside them (#1,
+  #18).** Restores **Done-when 5** ("none created out of band") and the "two
+  datasets" pinned decision. Terraform creates exactly `raw` and `ontime`; the
+  SA's dataset-scoped `dataEditor` cannot create a dataset, so an out-of-band
+  dataset is impossible by IAM, not by convention — 9a pins by name that no role
+  in the tree grants `bigquery.datasets.create` (`dataOwner`/`admin` stay off the
+  allowlist). `dbt_project.yml`'s per-folder `+schema` would otherwise make the
+  first BigQuery build create `ontime_staging … ontime_scores` (five datasets,
+  US multi-region) that Terraform never creates and destroy never removes. The
+  9b reconciliation commit therefore MUST add `generate_schema_name` so on the
+  `bigquery` target every model's custom schema resolves to `models_dataset` (no
+  `ontime_<folder>` suffix); whether DuckDB keeps its per-folder schemas or
+  collapses too is 9b's call (collapsing touches every schema-qualified reader
+  in `serving/`, `eval/`, tests). A DUE BACKLOG row carries this, trigger "Phase
+  9b spec reconciliation". Second clause of the same row: **`test-int-bigquery`
+  needs `enable_ci_wif = true` applied explicitly** — a default apply builds no
+  WIF (H) — so 9b's spec names that opt-in apply as a step; DECISIONS' "9a
+  stands up the WIF" is corrected to "provides it behind the toggle".
+- **J — The WIF provider name is a root output, and its null-guard is pinned
+  (#5, #2).** Restores **invariant 1** (a default plan is clean) and makes H
+  usable: `infra/outputs.tf` gains `workload_identity_provider` =
+  `module.iam.workload_identity_provider`, the value `google-github-actions/auth`
+  takes; both the module and the root outputs are `var.enable_ci_wif ? …[0].name
+  : null`. `tests/test_infra.py::test_wif_output_is_null_guarded` pins the
+  conditional on both (drop it → red; the tester's surviving hand-mutation). No
+  plan-based check — offline is the contract, and a real plan needs the google
+  provider's data sources.
+- **K — No default trusted repository (#6).** Restores **invariant 7** (trust
+  is opt-in) without prose coupling: `github_repository` defaults `null`
+  (invariant 1 holds — it still has a `default =`), and the pool resource
+  carries `lifecycle { precondition { condition = var.github_repository != null
+  } }`, so `enable_ci_wif = true` without a repo fails at plan with a named
+  message instead of trusting this repo's `main` on a fork.
+  `test_stated_defaults_are_pinned` pins `null`; the shape `validation` stays for
+  the non-null case; `terraform.tfvars.example` and DEPLOYMENT set the pair
+  together. Rejected: a precondition against a hard-coded repo name (a fork
+  would carry the name it is meant to reject).
+- **L — Thresholds are in the billing account's currency; the variable says so
+  (#23).** `budget_alert_thresholds_usd` → `budget_alert_thresholds` (the
+  module's var was already `alert_thresholds`); every record reads "50 / 150 in
+  the billing account's currency ($50/$150 on a USD account)". Restores the
+  record ↔ code agreement the currency fix (`5d08729`) broke.
+- **M — No tracked Claude settings file (#9).** Restores CLAUDE.md's rule that
+  hook wiring lives only in the gitignored `settings.local.json`: `.claude/
+  settings.json` (an empty `{}`) is untracked and gitignored, and
+  `tests/test_infra.py::test_no_tracked_claude_settings_with_hooks` asserts no
+  tracked `.claude/settings*.json` carries a `hooks` key. Repo hygiene outside
+  9a's Scope, landed here as a security finding at the phase exit (one-line
+  diff) rather than on a `fix/` branch.
+
 ## Teaching notes (first appearance in this project)
 
 - **Terraform state, modules, and backends.** Terraform records what it created
