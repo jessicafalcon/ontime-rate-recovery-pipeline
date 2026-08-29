@@ -77,9 +77,9 @@ Amendment 1) as **separate processes** on `data/<p>.duckdb`, each a clean
 open→close (loader's `connect` /
 `finally: con.close()`, dbt and the write-back both open and close the
 file). Overlap is **prevented, not caught by lock errors**: **`max_active_runs=1`**
-on the DAG serialises catchup intervals (no two runs touch the file at once) and
+on the DAG serialises concurrent runs (no two touch the file at once) and
 `dbt_build >> writeback` linearises the processes within a run.
-`test-int-airflow` **demonstrates** the hand-off by driving a full catchup to
+`test-int-airflow` **demonstrates** the hand-off by driving a full backfill to
 all-green — the green run is the proof the sequential lock hand-off holds across
 processes. **Approved.** Rejected: relying on DuckDB's file lock to error on
 overlap (a race turned into an exception is not a guarantee).
@@ -119,8 +119,9 @@ cut (the middle two already exist).
 collects (conftest skips it otherwise), spins the container, runs the DAG, and
 tears it down (`docker compose down -v`); **CI never runs it**. The container is
 **lean**: a single service, `AIRFLOW__CORE__EXECUTOR=SequentialExecutor` + a
-SQLite metadata DB, driven by **`airflow dags test`** (a synchronous dag run — no
-webserver/scheduler/Postgres) and a small `backfill` for catchup. Each
+SQLite metadata DB, driven by **`airflow dags test`** at explicit dates (a
+synchronous dag run — no webserver/scheduler/Postgres) — one union run and a
+three-interval backfill. Each
 `BashOperator` still spawns its own subprocess, so the single-writer hand-off in
 item 3 is exercised for real. `serving/` and `orchestration/` are the sensitive
 surface, so **security-reviewer** runs (item 8's review table). **Approved.**
@@ -138,9 +139,10 @@ from "(Phase 8b)" to present — `dags/pipeline_dag.py`, `tasks.py`, the
 `docker-compose`); Commands (`test-int-airflow` out of "Later phases add" into
 live Commands; `make dbt-build … [THROUGH=<date>]` documented); allowlist note
 (`apache-airflow` via Docker only, not in `uv.lock`); Current status (→ Phase 8b;
-Phase 8 checkpoint closed); Open BACKLOG rows: **13** (this reconciliation opened
-none; Amendments 1–2 later opened two — build-only split and the `computed_as_of`
-discriminator gap). `docs/PHASES.md`:
+Phase 8 checkpoint closed); Open BACKLOG rows: **14** (this reconciliation opened
+none; Amendments 1–2 and review round 5 opened three — build-only split, the
+`computed_as_of` discriminator gap, and the offline-attachment residual).
+`docs/PHASES.md`:
 Phase 8 "Delivered" (8b portion; the ⭐ checkpoint closed). `DECISIONS.md`: Phase
 8b appendix (the DAG shape + `THROUGH` templating, the THROUGH-aware build, the
 single-writer guarantee, the lean `test-int-airflow`, backfill≡union basis);
@@ -470,7 +472,7 @@ implementation on a scratch copy (the Phase 6/7 pattern):
       `docker-compose`); Conventions/allowlist (apache-airflow via Docker only,
       not in `uv.lock`); Architecture diagram AIRFLOW row (`dbt build →
       write-back`, eval out — Amendment 1; `catchup=False` — Amendment 2); Open
-      BACKLOG rows: **13** (two open)
+      BACKLOG rows: **14** (three open)
 - [ ] `docs/PHASES.md` — Phase 8 "Delivered" (8b portion; the ⭐ checkpoint
       closed); Phase 8 goal line (the DAG chains `dbt build → write-back`, eval a
       union gate — Amendment 1)
@@ -479,10 +481,12 @@ implementation on a scratch copy (the Phase 6/7 pattern):
       landing owner per run, the split is the Phase 9 shape; DAG shape +
       templating; single-writer guarantee; lean `test-int-airflow`; backfill≡union
       basis)
-- [ ] `BACKLOG.md` — **open two rows**: split load from `dbt build` (a build-only
-      target), trigger Phase 9 (Amendment 1); and `computed_as_of` not a complete
-      score-change discriminator (8a/5 gap, Amendment 2), trigger a
-      score-changing-back-dated-opens backfill / Phase 10; count **11 → 13**. The
+- [ ] `BACKLOG.md` — **open three rows**: split load from `dbt build` (a build-only
+      target), trigger Phase 9 (Amendment 1); `computed_as_of` not a complete
+      served-row-change discriminator (8a/5 gap, Amendments 2/round 5), trigger a
+      served-row change without an as-of advance / Phase 10; the offline stub
+      can't pin DAG↔task attachment (round 5), trigger CI gains Docker; count
+      **11 → 14**. The
       `THROUGH`-validated-by-shape and
       `model_version`-string-ordering rows re-checked at 8b exit and re-deferred
       with triggers unchanged (8b feeds `THROUGH` from `{{ data_interval_end |
@@ -490,6 +494,8 @@ implementation on a scratch copy (the Phase 6/7 pattern):
 - [ ] `docs/ARCHITECTURE.md` — the diagram AIRFLOW row (`load → dbt build →
       write-back`, eval out of the DAG — Amendment 1); §3.1 Airflow row already
       reads "may NOT contain logic"; §8 Gotchas only if a Docker surprise lands
+- [ ] `PROJECT_BRIEF.md` — the Airflow stack-roles row (writing steps `dbt build →
+      write-back`, eval a union gate, `catchup=False` — Amendments 1–2; round 5 #5)
 - [ ] Spec amendments — none (no later spec is invalidated; Phase 9+ reconcile
       against a main including all of Phase 8 when they start)
 - [ ] docs/RESULTS.md, docs/AB_DESIGN.md, docs/METRICS.md, README — none
@@ -536,7 +542,7 @@ hostile environment" carve-out.
   and the exclusions reasoned; every Phase 3–8a gate byte-identical.
 - **coherence-auditor** at exit (mandatory, whole repo): CLAUDE.md Repo
   map / Commands / Current status; PHASES "Delivered" (8b; ⭐ closed); DECISIONS
-  8b appendix; BACKLOG count 13; that Phase 8 as a whole now supports Phase 9 (a
+  8b appendix; BACKLOG count 14; that Phase 8 as a whole now supports Phase 9 (a
   chain a scheduler orders, ready for the Composer module).
 - Stack risk (first hour, STOP on any surprise, §8): (1) the Airflow image builds
   and `airflow dags test pipeline <date>` (dag_id `pipeline`) runs a full dag run

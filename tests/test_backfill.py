@@ -56,7 +56,10 @@ def _scores_state(db: Path) -> tuple[str, object]:
     """(content hash of the served score columns, max computed_as_of)."""
     con = duckdb.connect(str(db))
     try:
-        # the served columns the write-back writes — incl. confidence (#4)
+        # a content hash of the model output (scores_send_time) — a proxy for "the
+        # scored row changed"; incl. confidence (a served column, round 4 #4).
+        # Note: tz is served but sourced from dim_user_current (BACKLOG row 34), so
+        # a tz-only change is out of this proxy's scope — unreachable on tiny.
         h = con.execute(
             "select md5(string_agg(r, '|' order by r)) from ("
             "select user_id || '/' || cohort_id || '/' "
