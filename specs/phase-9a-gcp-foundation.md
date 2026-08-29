@@ -208,9 +208,12 @@ The genuine fixes (#2 `issuer_uri` pin, #7 the `tfstate` check scoped to managed
 blocks so the documented backend block can be uncommented, #12 `*.tfvars.json`
 ignored + scanned, #13 `project_id` shape `validation` in HCL), the seven
 test-cluster completions and the five record fixes land without amendments.
-**Gate item before merge (#8):** the apply→destroy Evidence predates the
-amendment commits — a fresh `make tf-apply` → `tf-destroy` cycle (ask-first)
-re-proves Done-when 5.
+**Gate item (#8) discharged 2026-08-29:** a fresh `make tf-plan` → `tf-apply` →
+`tf-destroy` cycle on the post-H tree re-proved Done-when 1, 2 and 5 (Evidence
+row 5). It surfaced two live gotchas, fixed in the tree and logged in
+ARCHITECTURE §8: user ADC needs a quota project for `billingbudgets` (provider
+`user_project_override` + `billing_project`), and a budget's currency must be
+the billing account's (`data.google_billing_account.currency_code`).
 
 ## Teaching notes (first appearance in this project)
 
@@ -326,7 +329,7 @@ authoritative if the landing diverges.)
 | 2 | `tests/test_infra.py::test_enable_toggles_default_false`, `::test_optional_modules_are_count_gated`, `::test_every_declared_resource_type_is_on_the_allowlist` (ANY provider's type — a `google_spanner_instance`/`null_resource` at root → red), `::test_required_providers_is_hashicorp_google_only`, `::test_ci_wif_is_opt_in_and_count_gated` (H: drop the `count` from any of the three WIF resources → red); manual `make tf-plan` → `0 to add` for the toggled modules and no WIF resource |
 | 3 | `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars` (`git ls-files` matches no `*.tfstate*`/`*.tfvars`/private-key filetypes; tracked JSON **content-scanned** for `"type": "service_account"`/`"private_key"` — the content scan, not the name, is what catches a gcloud-shaped key), `::test_auth_is_adc_or_wif_never_keyfile`, `::test_wif_provider_condition_is_the_repo_and_ref_conjunction` (also pins `issuer_uri` and the `repo_ref` mapping composition), `::test_wif_impersonation_binds_on_combined_repo_and_ref` (exact `${repo}@${ref}` member); `*.tfvars.json`/`*.auto.tfvars*` gitignored and scanned |
 | 4 | `tests/test_infra.py::test_sa_roles_are_least_privilege` (roles in ANY `.tf` ⊆ allowlist; owner/editor absent), `::test_project_level_grant_is_only_bigquery_jobuser` (whole tree: the only `google_project_iam_member` role anywhere is `jobUser`; `objectAdmin` bucket-scoped, `dataEditor` dataset-scoped — a project-wide move → red) |
-| 5 | manual `make tf-apply PROJECT=<id> CONFIRM=yes` then `make tf-destroy … CONFIRM=yes`, then `bq ls` / `gcloud iam service-accounts list` / `gcloud billing budgets list` all empty; `tests/test_infra.py::test_every_resource_is_destroyable`, `::test_bucket_is_hardened`, `::test_no_staging_bucket_variable_and_the_managed_bucket_is_derived`, `::test_region_and_dataset_location_are_us_central1` |
+| 5 | manual cycle **2026-08-29 on `ontime-rate-recovery` (post-Amendment-H tree, `71e30ce`)**: `make tf-plan` → `Plan: 18 to add, 0 to change, 0 to destroy` (9 API enablements, 2 datasets, 1 bucket, 1 SA + 4 scoped grants, 1 budget — **no WIF pool/provider/binding, no Composer/Spanner**); `make tf-apply … CONFIRM=yes` → `Apply complete! Resources: 18 added` (after two live fixes: quota project, budget currency — §8 Gotchas); `bq ls` = `ontime`,`raw`; buckets = `ontime-rate-recovery-ontime`; SA = `ontime-pipeline@…`; `gcloud iam workload-identity-pools list` = **empty**; budget `ontime-ontime-rate-recovery`; `make tf-destroy … CONFIRM=yes` → `Destroy complete! Resources: 18 destroyed`; state list 0; `bq ls` / buckets / SAs / WIF pools / our budget all **empty** (the API enablements stay on, `disable_on_destroy = false`, free); `tests/test_infra.py::test_every_resource_is_destroyable`, `::test_bucket_is_hardened`, `::test_no_staging_bucket_variable_and_the_managed_bucket_is_derived`, `::test_region_and_dataset_location_are_us_central1` |
 | 6 | `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only` (fake runner), `::test_tf_targets_pass_project_as_one_literal`; `tests/test_infra.py::test_cli_validates_project`, `::test_cli_requires_confirm_origin`, `::test_cli_validates_before_running`, `::test_cli_builds_the_expected_argv`, `::test_cli_missing_terraform_is_a_clean_fail` (FAIL lines asserted), `::test_cli_validate_argv_is_offline` (`-backend=false`); `::test_project_id_validation_mirrors_the_cli_regex` (the HCL `validation` equals `PROJECT_RE`, so a tfvars/direct apply is shape-checked too), `::test_input_shape_validations_exist`; mutations `require_confirm invert-guard`/`delete-call`, `validate_project invert-guard`, `tf constant-return:0` all KILLED |
 
 ## Invariants (REQUIRED)

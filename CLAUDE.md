@@ -634,8 +634,11 @@ pool/provider/binding; a fork's default apply no longer trusts this repo's
 `main`); 4 genuine fixes (`project_id` HCL `validation` = `PROJECT_RE`; `issuer_uri`
 pinned; `*.tfvars.json` ignored + scanned; the `tfstate` check scoped to managed
 blocks — a round-2 regression); 7 test-cluster completions; 5 record fixes. **Gate
-item before merge:** a fresh `make tf-apply`→`tf-destroy` cycle (the Evidence
-predates the amendments), then round 4 confirms green. Next: round 4 → merge
+item discharged:** a fresh plan→apply→destroy cycle on `ontime-rate-recovery`
+re-proved Done-when 1/2/5 on the post-H tree (18 added, 18 destroyed, no WIF
+resource, nothing billable left) and surfaced two live gotchas fixed in-tree
+(§8: ADC quota project → provider `user_project_override`; budget currency →
+derived from the billing account). Next: round 4 confirms green → merge
 → 9b (its first
 commit reconciles against main-with-9a; it also fixes the 8b-opened row "the
 DAG's build owns its landing" — `dbt_build(TARGET=bigquery)` must not call the
