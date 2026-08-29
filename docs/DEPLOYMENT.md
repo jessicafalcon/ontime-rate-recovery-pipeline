@@ -31,8 +31,8 @@ is applied until you run `make tf-apply` yourself.
 ### Operator permissions for `tf-apply` (your ADC identity, not the SA)
 
 Beyond creating the project resources (project Owner, or Editor + Project IAM
-Admin for the SA grants), two mechanisms need permissions a project role does
-not carry:
+Admin for the SA grants), three mechanisms need a specific permission — the
+first is inside Owner/Editor, the two billing ones are not:
 
 | Mechanism | Permission | Minimal predefined role |
 |---|---|---|
@@ -160,6 +160,12 @@ Nothing else is created outside Terraform, and no resource carries
 Phase 9a Done-when. That holds for 9b's tables too only because the dbt build
 lands inside `ontime` (`generate_schema_name`; the SA cannot create a dataset,
 so a per-folder `ontime_<folder>` layout would fail, not sprawl — Amendment I).
+That control covers the SA only: your own ADC is project Owner and CAN create
+datasets, so **do not run `make dbt-build TARGET=bigquery` before 9b lands**,
+and from 9b on run manual BigQuery builds as the SA
+(`gcloud auth application-default login
+--impersonate-service-account=<pipeline_service_account output>`) so the human
+path is under the same IAM (Amendment N).
 
 **Gotcha — 30-day soft-delete on re-apply (ARCHITECTURE §8).** GCP soft-deletes
 a service account and a Workload Identity pool/provider and **reserves their ids

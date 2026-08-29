@@ -119,7 +119,9 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   denominator, null policy, pinning test), RESULTS.md (Phase 6: the
   counterfactual simulation — one generated block per profile, tiny and
   medium), AB_DESIGN.md (Phase 6: the production experiment; its power
-  table is a generated block); later DEPLOYMENT.md (all under `docs/`).
+  table is a generated block), DEPLOYMENT.md (Phase 9a: bootstrap, cost
+  table, operator permissions, teardown, the optional kill-switch; all under
+  `docs/`).
 - `DECISIONS.md` — why-not-X log. One entry per non-obvious choice.
 - `BACKLOG.md` — deferred findings with revisit triggers. Reviewed at every
   phase exit: do due items or re-defer with a new trigger, never drop.

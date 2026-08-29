@@ -1,4 +1,5 @@
-# A monthly budget with alert thresholds (default $50 and $150). A budget
+# A monthly budget with alert thresholds (default 50 and 150 in the billing
+# account's currency). A budget
 # NOTIFIES; it does not stop spend — the real kill-switch (Pub/Sub -> Cloud
 # Function disabling billing) is documented as optional in docs/DEPLOYMENT.md and
 # left unbuilt (the meter is off by default, so there is nothing to run away).

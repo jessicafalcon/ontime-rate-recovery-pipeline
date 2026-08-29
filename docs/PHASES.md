@@ -321,7 +321,10 @@ trusts nothing it did not name) — ADC/WIF only, no key at rest. Budget alerts
 at 50/150 in the billing account's currency ($50/$150 on USD; notify only);
 the billing kill-switch is documented optional in `docs/DEPLOYMENT.md`, not
 built. Exactly two datasets: 9b's dbt build must land inside `ontime`
-(`generate_schema_name`) — the SA cannot create a dataset. `project_id` the only
+(`generate_schema_name`) — the SA cannot create a dataset (an operator's Owner
+ADC can: no BigQuery build before 9b, then as the SA — Amendment N); 9b also
+sets the `bigquery` output's `location` (`us-central1`, the datasets') and
+exports `OTR_GCP_PROJECT` from the validated `PROJECT` (Amendment O). `project_id` the only
 required var (`region` defaults `us-central1`; the budget's billing account +
 project number are a `google_project` data source). `infra/cli.py` validates
 `PROJECT` and gates `tf-apply`/`tf-destroy` on `CONFIRM=yes $(origin)`; four

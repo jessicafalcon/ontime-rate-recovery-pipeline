@@ -318,6 +318,24 @@ def test_wif_output_is_null_guarded() -> None:
 # ---------------------------------------------------------------- invariant 3
 
 
+# Keys of a Claude Code settings file that configure behaviour for whoever opens
+# the checkout (hooks run commands; permissions/env/MCP pre-authorise them).
+_AUTO_CONFIGURING_KEYS = frozenset(
+    {"hooks", "permissions", "env", "mcpServers", "enableAllProjectMcpServers"}
+)
+
+
+def _git_ls_files(pathspec: str) -> list[str]:
+    """Tracked paths under `pathspec` (empty when nothing is tracked)."""
+    return subprocess.run(
+        ["git", "ls-files", pathspec],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+
+
 def _ignored(relpath: str) -> bool:
     return (
         subprocess.run(["git", "check-ignore", "-q", relpath], cwd=ROOT).returncode == 0
@@ -654,22 +672,20 @@ def test_stated_defaults_are_pinned() -> None:
     )
 
 
-def test_no_tracked_claude_settings_with_hooks() -> None:
+def test_no_tracked_auto_configuring_claude_settings() -> None:
     """Amendment M (round 4 #9): hook wiring lives only in the gitignored
     `.claude/settings.local.json` — a committed settings file would auto-execute
     an inbound branch's hook for anyone opening it (CLAUDE.md § Project tooling).
     `.claude/settings.json` is untracked and ignored; any tracked settings file
-    carries no `hooks` key."""
-    tracked = subprocess.run(
-        ["git", "ls-files", ".claude"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.splitlines()
+    carries no auto-configuring key — hooks, permissions, env, MCP servers
+    (round 5 #12 widened this from `hooks` alone) — and no `.mcp.json` is
+    tracked."""
+    tracked = _git_ls_files(".claude")
     settings = [p for p in tracked if re.search(r"^\.claude/settings[^/]*\.json$", p)]
     for p in settings:
-        assert "hooks" not in json.loads((ROOT / p).read_text()), p
+        keys = set(json.loads((ROOT / p).read_text()))
+        assert not keys & _AUTO_CONFIGURING_KEYS, (p, keys)
+    assert not _git_ls_files(".mcp.json")
     assert _ignored(".claude/settings.json")
     assert _ignored(".claude/settings.local.json")
 

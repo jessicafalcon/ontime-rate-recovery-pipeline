@@ -109,7 +109,11 @@ annotated **Superseded by …** in place and never deleted.
   it cannot drift by judgment.
 - **The run-tests hook is wired locally, not committed.** A committed
   `settings.json` would auto-execute an inbound branch's hook + conftest for
-  anyone opening the repo in Claude Code.
+  anyone opening the repo in Claude Code. Since Phase 9a (Amendment M) the
+  file is untracked and gitignored, and
+  `tests/test_infra.py::test_no_tracked_auto_configuring_claude_settings` pins
+  that no tracked `.claude/settings*.json` carries `hooks`, `permissions`,
+  `env` or an MCP key and no `.mcp.json` is tracked.
 
 ## Appendix — by phase
 
@@ -140,8 +144,10 @@ annotated **Superseded by …** in place and never deleted.
   authenticates through a Workload Identity Federation pool/provider scoped to
   `attribute.repository == <repo>`. *Superseded in review:* round 1 **B** made
   the condition repo AND ref, round 2 **F** bound impersonation on the combined
-  `repo@ref`, and round 3 **H** made the whole WIF layer opt-in
-  (`enable_ci_wif`, default false). No `google_service_account_key` resource, no
+  `repo@ref`, round 3 **H** made the whole WIF layer opt-in
+  (`enable_ci_wif`, default false), and round 4 **J** exposed the provider
+  name as a root output while **K** removed the default repository (the toggle
+  without `github_repository` is a plan-time refusal). No `google_service_account_key` resource, no
   keyfile path anywhere (`tests/test_infra.py` greps for it). Rejected: a
   downloaded SA key (a secret at rest — the thing the rule forbids); `roles/editor`
   (broad). Provides — behind the toggle — the WIF the "cross-warehouse dialect
@@ -225,11 +231,13 @@ annotated **Superseded by …** in place and never deleted.
 - **Review round 3 — scoped re-review, one amendment (approved 2026-08-29).**
   Nine of round 2's ten survivors died; four genuine issues were missed in
   earlier rounds and one was a round-2 regression. Design change: **(H) CI WIF
-  is opt-in** — `github_repository` defaults to this repo, so a fork's *default*
+  is opt-in** — `github_repository` defaulted to this repo, so a fork's *default*
   apply built a trust letting this repo's `main` impersonate their SA; the pool,
   provider and binding are now `count`-gated behind `enable_ci_wif` (default
   false) and the SA stays unconditional. Rejected: a tfvars-comment warning (not a
-  control); an empty `github_repository` default (breaks invariant 1). Fixes:
+  control); an empty `github_repository` default (breaks invariant 1) — *superseded
+  by round 4 K:* the default is now `null` (still a `default =`, so invariant 1
+  holds) and the pool's precondition refuses the toggle without a repo. Fixes:
   `project_id` gets the `PROJECT_RE` shape as an HCL `validation` (a tfvars /
   direct apply no longer bypasses the make-target check; the test pins the two
   regexes equal); the WIF `issuer_uri` is pinned exactly; `*.tfvars.json` /
@@ -257,15 +265,17 @@ annotated **Superseded by …** in place and never deleted.
   make 9b's first BigQuery build create five `ontime_<folder>` datasets (US
   multi-region) Terraform never creates and destroy never removes; the SA's
   dataset-scoped `dataEditor` cannot create one (pinned:
-  `test_no_role_can_create_a_dataset`), so 9b's reconciliation MUST add
+  `test_no_role_can_create_a_dataset`; an operator's Owner ADC can — round 5
+  N), so 9b's reconciliation MUST add
   `generate_schema_name` (BigQuery → `models_dataset`; DuckDB's layout is 9b's
   call) — a DUE BACKLOG row, which also tells 9b that `test-int-bigquery` needs
   an explicit `enable_ci_wif = true` apply. Rejected: Terraform-managed
   per-folder datasets + IAM (seven datasets against a two-dataset pin; more
   IAM surface for no read benefit). **J** — `workload_identity_provider` is a
-  root output (the `google-github-actions/auth` value), and its
-  `enable_ci_wif ? …[0].name : null` guard is pinned on both the module and
-  root outputs (an unguarded `[0]` is "Invalid index … empty tuple" on every
+  root output (the `google-github-actions/auth` value); the module output
+  carries the `enable_ci_wif ? …[0].name : null` guard and the root output is
+  a bare passthrough that propagates the null — the test pins the conditional
+  on the module and the passthrough on the root (an unguarded `[0]` is "Invalid index … empty tuple" on every
   default plan — `terraform validate` does not catch it; the tester's surviving
   hand-mutation). Rejected: an offline plan check (a real plan needs the google
   provider's data sources). **K** — `github_repository` has NO default: a fork
@@ -292,6 +302,28 @@ annotated **Superseded by …** in place and never deleted.
   invariant 8, a fresh project plans). The 2026-08-29 destroy reserved the
   `ontime-pipeline` id until ~2026-09-28 (DEPLOYMENT; 9b's first apply
   `undelete`s or waits).
+- **Review round 5 (confirmation round, 20 findings): Amendments N–O, both
+  record-only.** **N** — Amendment I's "impossible by IAM" is narrowed to the
+  pipeline identity: the SA cannot create a dataset, but an operator running
+  `make dbt-build TARGET=bigquery` on an Owner ADC can, so until 9b lands
+  `generate_schema_name` DEPLOYMENT forbids a BigQuery build, and 9b's manual
+  builds impersonate the SA so the IAM control covers the human path.
+  Rejected: stripping the operator's `datasets.create` (Owner is the bootstrap
+  role). **O** — two more 9b carry-ins on the DUE row: `dbt/profiles.yml`'s
+  `bigquery` output sets no `location` (dbt-bigquery defaults to the US
+  multi-region; the datasets are `us-central1`) and reads
+  `OTR_GCP_PROJECT`, which nothing sets or documents — 9b sets `location`
+  from Terraform's value and has `make dbt-build TARGET=bigquery` export the
+  project from the validated `PROJECT`. Rejected: fixing `profiles.yml` in
+  9a (Phase 2 code, 9b's surface). Test widening (#12): the Claude-settings
+  pin rejects any auto-configuring key (`hooks`, `permissions`, `env`,
+  `mcpServers`, `enableAllProjectMcpServers`) and a tracked `.mcp.json`, not
+  `hooks` alone. Accepted (#13): invariant 7 is static-pinned only until 9b's
+  opt-in apply — the first live WIF proof. Evidence row 5 re-planned on the
+  post-J/K/L tree (see the spec). The rest: the BACKLOG count (14, not 13),
+  superseded-by pointers (J/K on the SA/WIF entry, K on round 3's rejected
+  "empty default", M on Phase 0's `settings.json` pin), and currency /
+  "THIS repo" / "four macros" wording sweeps.
 
 ### Phase 8b
 

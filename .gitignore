@@ -36,4 +36,8 @@ __pycache__/
 # Phase 8b test-int-airflow secret canary (planted then removed; ignored so an
 # aborted run leaves no untracked key-shaped file — round 4 #5)
 *otr-canary*
+
+# Claude Code hook wiring is local-only: a tracked settings.json would auto-run
+# an inbound branch's hook for anyone opening it (CLAUDE.md § Project tooling;
+# Phase 9a Amendment M). settings.local.json is ignored by Claude Code itself.
 .claude/settings.json

@@ -125,6 +125,9 @@ scripts/mutate.py::parse_mutations            invert-guard
   package it guards is added late.
 - **Hook wiring local-only; `.claude/settings.json` committed as `{}`.**
   Rejected: committing the hook wiring (auto-executes an inbound branch).
+  *Superseded Phase 9a (Amendment M):* the file is untracked and gitignored;
+  `tests/test_infra.py::test_no_tracked_auto_configuring_claude_settings` pins
+  that no tracked `.claude/settings*.json` auto-configures anything.
 - **Python 3.12 pinned** (DECISIONS Phase 0).
 - **No runtime dependency** until the phase that needs it (DECISIONS Phase 0).
 
@@ -138,7 +141,7 @@ scripts/mutate.py::parse_mutations            invert-guard
   `.github/pull_request_template.md`
 - `scripts/{review_common,review_gate,mutate,round_tag,check_docs}.py`
 - `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/hooks/run-tests.py`,
-  `.claude/settings.json`
+  `.claude/settings.json` (untracked since Phase 9a — Amendment M)
 - `tests/{conftest,test_review_tools,test_check_docs,test_truth_isolation,test_makefile}.py`
 
 ## Record updates (REQUIRED)

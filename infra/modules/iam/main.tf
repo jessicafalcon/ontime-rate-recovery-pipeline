@@ -73,8 +73,9 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     # (review round 2 #3).
     "attribute.repo_ref" = "assertion.repository + \"@\" + assertion.ref"
   }
-  # Only THIS repo AND only the trusted ref (default refs/heads/main) — not any
-  # branch of the repo — can exchange a token (spec invariant 7).
+  # Only the repo named in var.github_repository AND only the trusted ref
+  # (default refs/heads/main) — not any branch of it — can exchange a token
+  # (spec invariant 7).
   attribute_condition = "assertion.repository == \"${var.github_repository}\" && assertion.ref == \"${var.github_ref}\""
 
   oidc {
@@ -82,7 +83,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   }
 }
 
-# Only CI runs of THIS repo on the trusted ref may impersonate the SA. The
+# Only CI runs of the named repo on the trusted ref may impersonate the SA. The
 # binding is on the combined repo@ref attribute, so even a future second, looser
 # provider on the same pool could not widen it to another branch.
 resource "google_service_account_iam_member" "wif_impersonation" {
