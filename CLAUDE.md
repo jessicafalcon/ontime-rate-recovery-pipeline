@@ -121,8 +121,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
 ## Commands (macOS, uv)
 
 - `make setup` — `uv sync`, `pre-commit install`
-- `make test` — pytest, no services, no network; `tests/integration/` is
-  skipped unless `OTR_INT=1`, which only the `test-int-*` targets export
+- `make test` — pytest, no services, no network; it passes
+  `--ignore=tests/integration` (a bare `pytest`, e.g. the run-tests hook, instead
+  relies on the `conftest.py` skip that collects `tests/integration/` only under
+  `OTR_INT=1`, which only the `test-int-*` targets export)
 - `make lint` — ruff via pre-commit (rewrites files; never run inside a gate)
 - `make check-docs` — `scripts/check_docs.py`: every relative link/anchor in
   CLAUDE.md, README, docs/, PROJECT_BRIEF, DECISIONS, BACKLOG resolves; every
@@ -330,7 +332,7 @@ DECISIONS.md or fix it.
   write-back twice is a no-op; a `final` label never changes.
 - Truth isolation: `truth/` is never a dbt source, never an input to
   `features`/`scores`. `tests/test_truth_isolation.py` greps every pipeline
-  directory (`dbt/`, `serving/`, `orchestration/`) for the word; in
+  directory (`loader/`, `dbt/`, `serving/`, `orchestration/`) for the word; in
   `generator/` only `truth.py` (the writer), `models.py` (record types) and
   `cli.py` (the entry point that calls the writer) may name it — generation
   logic never does.
@@ -520,7 +522,7 @@ range. Agents run only when the range touches their surface — derived from
 | Surface touched in the range | Agents |
 |---|---|
 | Code: `*.py`, `dbt/**` (models, macros, tests, yml), `Makefile`, `scripts/`, `tests/`, `generator/`, `eval/`, `serving/`, `orchestration/`, `infra/**/*.tf` | code-reviewer, then functionality-tester |
-| Sensitive: `.github/`, `infra/`, `serving/`, `.env*`, `dbt/profiles.yml`, `.claude/hooks/`, `.claude/settings*.json`, any target that deletes / applies / takes `CONFIRM` | + security-reviewer |
+| Sensitive: `.github/`, `infra/`, `serving/`, `orchestration/` (Docker image / `docker-compose` / the container-spinning `test-int-airflow`), `.env*`, `.dockerignore`, `dbt/profiles.yml`, `.claude/hooks/`, `.claude/settings*.json`, any target that deletes / applies / takes `CONFIRM` | + security-reviewer |
 | Docs and records only: `*.md` (incl. `specs/`, `docs/`, `DECISIONS.md`, `BACKLOG.md`, `CLAUDE.md`, `.claude/agents|commands/*.md`) | coherence-auditor only, scoped to the changed docs (drift and stale-record checks; no code to review or run) |
 | Any of the above at a phase exit | + coherence-auditor over the whole repo (mandatory) |
 

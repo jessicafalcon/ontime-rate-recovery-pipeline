@@ -282,9 +282,10 @@ three-interval backfill (`THROUGH` 2026-01-07/12/13) ≡ union across processes
 Offline: `test_backfill.py`, `test_dag_structure.py` (stubbed-airflow DAG object),
 `test_through_build.py`, `test_airflow_docker_only.py`. `apache-airflow` is
 Docker-only (not in `uv.lock`); `fixtures/tiny/` untouched; every Phase 3–8a gate
-byte-identical. **Phase 8 ⭐ checkpoint closed.** Two BACKLOG rows opened (split
-load from build, trigger Phase 9; the `computed_as_of` discriminator gap, an 8a/5
-limitation).
+byte-identical. **Phase 8 ⭐ checkpoint closed.** Three BACKLOG rows opened (split
+load from build, trigger Phase 9; the `computed_as_of` served-row-change
+discriminator gap, an 8a/5 limitation; the offline stub can't pin DAG↔task
+attachment — the container test does, trigger CI gains Docker).
 
 ---
 

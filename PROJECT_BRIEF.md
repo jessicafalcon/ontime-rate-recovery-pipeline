@@ -115,7 +115,7 @@ Spanner (serving) → app sends better-timed prompt → new events.
    sends timed
    prompt ──► generates new events (loop closes)
 
-   Airflow (Composer): orchestrates load → dbt build (tests gate) → eval → write-back
+   Airflow (Composer): orchestrates dbt build (tests gate) → write-back (eval is a make-pipeline/CI gate, not a DAG task — Phase 8b)
    Terraform: provisions BigQuery, GCS, Spanner, Composer, IAM, budget alerts
 ```
 

@@ -57,9 +57,11 @@ annotated **Superseded by …** in place and never deleted.
   `written_at = computed_as_of` (data-derived, never a clock), which keeps
   `send_schedule` byte-identical on a re-run and under a backfill. ([Phase 8a](#phase-8a))
 - **Airflow contains no logic — a task is a `make` target or a dbt command.**
-  `make pipeline` is the same chain minus the scheduler; the DAG's only
-  "computation" is Airflow's own `data_interval` rendered to a `THROUGH` date via
-  templating. ([Phase 0](#phase-0), [Phase 8a](#phase-8a))
+  The DAG orders `make pipeline`'s WRITING steps (`dbt build → write-back`; `eval`
+  is a union-only validation gate in `make pipeline`/CI, not a DAG task — Phase 8b
+  Amendment 1); the DAG's only "computation" is Airflow's own `data_interval`
+  rendered to a `THROUGH` date via templating. ([Phase 0](#phase-0),
+  [Phase 8a](#phase-8a), [Phase 8b](#phase-8b))
 
 **Infra**
 
@@ -146,8 +148,11 @@ annotated **Superseded by …** in place and never deleted.
   pipeline" is a fast structure test, not a container-only claim, and the test
   needs no `import airflow` (apache-airflow is Docker-only). The interval reaches
   the build only as the literal token `{{ data_interval_end | ds }}` Airflow
-  renders (`airflow dags test D` gives `data_interval_end = D`, so `THROUGH = D`);
-  we compute nothing, so "Airflow contains no logic" holds. Rejected: a Python
+  renders — `airflow dags test D` gives `data_interval_end = D`, so `THROUGH = D`
+  (what the tests use), while a *scheduled* `@daily` run owning `[D, D+1)` gives
+  `data_interval_end = D+1`, so `THROUGH = D+1` (Phase 11/Composer) — the same
+  template over a different interval; we compute nothing, so "Airflow contains no
+  logic" holds. Rejected: a Python
   callable computing `THROUGH` (logic in the DAG); AST-parsing the DAG file for
   the command list (more fragile than one shared manifest); `{{ ds }}` (that is
   `data_interval_start` = D−1, the wrong cut).

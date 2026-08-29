@@ -364,3 +364,14 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   (Phase 7). `tests/test_dbt_conventions.py`'s dialect check flagged the
   incremental models' statement blocks; the `%` alternative now excludes a `%`
   adjacent to a brace (`(?<!\{)%(?!\})`), keeping the `x % 24` control.
+- **`.dockerignore` patterns are root-anchored — a leading `*` does not cross
+  `/`** (Phase 8b). `*.tfvars` / `.env` excluded only root-level files, so
+  `infra/.env`, `infra/sa-key.json` still shipped into the image; every secret
+  pattern is now `**/`-anchored (`**/*.tfvars`, `**/.env`, …). A planted-canary
+  test (`test_int_airflow.py::test_image_has_no_secrets`) caught it. The scan
+  prunes the build-created `/opt/otr/.venv` (its library files — e.g. dbt's
+  `credentials.py` — are not repo secrets).
+- **`docker compose down -v` removes containers and volumes but NOT the image**
+  (Phase 8b). If a secret ever slipped past `.dockerignore` it persists in the
+  image layer; recovery is `docker image rm otr-airflow-8b:latest` (or `down
+  --rmi local`), documented in `.dockerignore`.
