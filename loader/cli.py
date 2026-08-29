@@ -4,8 +4,9 @@ One entry point validates every name (`[a-z0-9_]+`) before any path is derived:
 load      — fixtures/<p>/{raw,dims} → data/<p>.duckdb schema `raw`.
 dbt-build — load (THROUGH lands only files uploaded on or before it — a
             per-interval landing, Phase 8b), then `dbt build` against that file
-            (`OTR_DUCKDB_PATH` is the one env var dbt/profiles.yml reads); exit 1
-            on any failure.
+            (`OTR_DUCKDB_PATH` is the env var dbt/profiles.yml's duckdb target
+            reads; the bigquery target's `OTR_GCP_PROJECT` is 9b's — until then
+            TARGET=bigquery is refused, Amendment S); exit 1 on any failure.
 drop-db   — delete data/<p>.duckdb; only with CONFIRM=yes from the command line."""
 
 from __future__ import annotations
@@ -105,6 +106,11 @@ def dbt_build(
             f"dbt-build: refused — TARGET={target} is a cloud target; "
             "pass CONFIRM=yes on the command line (CLAUDE.md: ask first, every time)"
         )
+    if target == "bigquery":
+        # Amendment S (9a round 7 #7): the BigQuery build lands in Phase 9b with
+        # `generate_schema_name`; before that a build would create per-folder
+        # datasets outside Terraform. 9b lifts this in the same commit.
+        die("dbt-build: TARGET=bigquery lands in Phase 9b (generate_schema_name)")
     # THROUGH lands only files uploaded on or before it, so a per-interval build
     # sees just that landing (Phase 8b); load() validates the date and never lets
     # it become a path. Unset ⇒ loads all (the default build is unchanged).

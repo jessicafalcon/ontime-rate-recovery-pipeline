@@ -46,9 +46,10 @@ When invoked:
 - **Write-back contract.** Replace only on strictly greater
   `(model_version, computed_as_of)`, keyed `user_id`; a caller-supplied
   version or timestamp is a correctness finding.
-- **Dialect contract.** Exactly four dispatch macros (JSON extract,
-  `timestamp_diff`, `safe_divide`, partition overwrite). Dialect-specific SQL
-  outside a macro, or a fifth macro without a DECISIONS entry, is a finding.
+- **Dialect contract.** Exactly five dispatch macros (JSON extract,
+  `timestamp_diff`, `safe_divide`, `to_local_time`, partition overwrite).
+  Dialect-specific SQL outside a macro, or a sixth macro without a DECISIONS
+  entry, is a finding.
 - **Airflow contains no logic.** A PythonOperator with transformation code
   is a finding; tasks call `make` targets or dbt commands.
 - **Dependency allowlist.** Imports outside pydantic, duckdb, dbt-core,

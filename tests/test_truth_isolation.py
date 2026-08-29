@@ -13,11 +13,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 SOURCE_SUFFIXES = {".py", ".sql", ".yml", ".yaml"}
-# Not pipeline code: tooling, docs, plans, fixtures, infra-as-text, the two
-# sanctioned readers/writers, and every dot-directory.
-# NOTE (Phase 8b coherence audit): `infra` is exempt as infra-as-text (Terraform),
-# but Phase 9 will add `infra/cli.py` (parked 9a already has it on its branch) —
-# when that lands, drop `infra` from EXEMPT so the truth guard covers its Python.
+# Not pipeline code: tooling, docs, plans, fixtures, the two sanctioned
+# readers/writers, and every dot-directory.
+# Phase 9a: `infra/cli.py` landed, so `infra` is NO LONGER exempt (Phase 8b
+# instruction honoured) — the guard now covers its Python; the `.tf` tree is not
+# a SOURCE_SUFFIX, so only `infra/*.py` is grepped, and it never names the file.
 EXEMPT = {
     "tests",
     "scripts",
@@ -26,7 +26,6 @@ EXEMPT = {
     "docs",
     "specs",
     "fixtures",
-    "infra",
     "data",
 }
 

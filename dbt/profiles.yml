@@ -13,6 +13,6 @@ ontime:
     bigquery:
       type: bigquery
       method: oauth
-      project: "{{ env_var('OTR_GCP_PROJECT', '') }}"
+      project: "{{ env_var('OTR_GCP_PROJECT') }}"
       dataset: ontime
       threads: 1

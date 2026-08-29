@@ -92,8 +92,17 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `docker-compose.yml` (lean `SequentialExecutor`/SQLite; `apache-airflow` never
   in `uv.lock`). A pipeline dir — `test_truth_isolation.py` covers it. `eval` is
   NOT a DAG task (union-only gate — reads truth, asserts full-data pins).
-- `infra/` *(Phase 9+)* — Terraform; `modules/composer`, `modules/spanner`
-  behind `enable_*` toggles.
+- `infra/` *(Phase 9a)* — Terraform. `main.tf`/`variables.tf`/`outputs.tf` +
+  `modules/{bigquery,gcs,iam,budget}` (unconditional, free/near-free) and
+  `modules/{composer,spanner}` `count`-gated behind `enable_*` toggles that
+  default false (so is the CI WIF layer inside `iam`: `enable_ci_wif`).
+  `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`/`tf-freeze` on
+  `CONFIRM=yes $(origin)`) drives `make tf-validate|tf-plan|tf-apply|tf-destroy|tf-freeze`.
+  `terraform.tfvars.example` only (never a `*.tfvars`); `.terraform.lock.hcl`
+  is tracked (the provider pin); ADC/WIF, never a key. A pipeline dir — guarded
+  by `test_truth_isolation.py`; the `.tf` tree is pinned byte-for-byte by
+  `MANIFEST.sha256` (`make tf-freeze CONFIRM=yes` its only writer) plus the
+  static property checks in `tests/test_infra.py`.
 - `fixtures/tiny/` — golden `raw/events_<upload-date>.jsonl` + `dims/` +
   `truth/` + `expected/attribution.csv` (Phase 3) + `MANIFEST.sha256`. **READ-ONLY**: the
   review gate FAILs any change without a `Freeze:` line in the phase spec;
@@ -111,7 +120,9 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   denominator, null policy, pinning test), RESULTS.md (Phase 6: the
   counterfactual simulation — one generated block per profile, tiny and
   medium), AB_DESIGN.md (Phase 6: the production experiment; its power
-  table is a generated block); later DEPLOYMENT.md (all under `docs/`).
+  table is a generated block), DEPLOYMENT.md (Phase 9a: bootstrap, cost
+  table, operator permissions, teardown, the optional kill-switch; all under
+  `docs/`).
 - `DECISIONS.md` — why-not-X log. One entry per non-obvious choice.
 - `BACKLOG.md` — deferred findings with revisit triggers. Reviewed at every
   phase exit: do due items or re-defer with a new trigger, never drop.
@@ -182,7 +193,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   per-interval build the DAG runs; unset loads all (the default build is
   unchanged). Any `TARGET` other than `duckdb` is a cloud-cost
   command: refused unless `CONFIRM=yes` has command-line origin. dbt telemetry
-  is off (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`)
+  is off (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`). `TARGET=bigquery`
+  is REFUSED before Phase 9b lands `generate_schema_name` (`dbt-build:
+  TARGET=bigquery lands in Phase 9b …`, exit 2, before `load()` — Amendment S);
+  a build would create per-folder datasets outside Terraform (`docs/DEPLOYMENT.md`)
 - `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` and its
   `.wal` (nothing else); `CONFIRM=yes` must have command-line origin
 - `make gen-sources` — re-renders `loader/ddl.sql` and
@@ -254,10 +268,50 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   for a union interval and a three-interval backfill, asserts both container tables
   equal `make pipeline`'s (the `send_schedule` hash), tears down. Takes no
   variable (`tiny` by definition); needs Docker (Engine + `docker compose`)
+- `make tf-validate` *(Phase 9a)* — offline Terraform check (`infra/cli.py`):
+  `terraform -chdir=infra init -backend=false -input=false -lockfile=readonly`
+  + `validate` + `fmt -check -recursive`; prints `tf-validate OK`. The init can
+  never rewrite the pinned lock: on a platform `.terraform.lock.hcl` lacks a
+  hash for, it FAILs (exit 1) until a deliberate `terraform providers lock
+  -platform=…` + `tf-freeze` (§8 Gotchas). Downloads the google provider once from
+  the registry (a setup step, outside the offline `make test`); no GCP auth, no
+  cloud call
+- `make tf-plan PROJECT=<id>` *(Phase 9a)* — validates `PROJECT` (a GCP
+  project-id shape) before deriving `-var project_id=<id>`, then `terraform
+  -chdir=infra plan`. Reads GCP APIs (ADC/WIF); shows the diff, creates nothing.
+  `tf-plan`/`tf-apply`/`tf-destroy` REFUSE (exit 2, before terraform) while an
+  auto-loaded `infra/terraform.tfvars` or `*.auto.tfvars{,.json}` exists —
+  gitignored and unpinned, so a toggle reaches Terraform only as a
+  command-line `-var` (Amendment T); `tf-validate` is not gated
+- `make tf-apply | tf-destroy PROJECT=<id> CONFIRM=yes` *(Phase 9a)* — apply
+  creates the free-tier layer: 9 API enablements (free, kept on by destroy),
+  two BigQuery datasets, a GCS staging bucket, a least-privilege service
+  account with 4 scoped grants, and budget alerts at 50/150 in the billing
+  account's currency ($50/$150 on USD; notify only) — `Plan: 18 to add`;
+  destroy removes everything in state (nothing billable left). Cloud-cost /
+  destructive: `CONFIRM=yes` must have COMMAND-LINE origin (`$(origin
+  CONFIRM)`); ask first, every time. Auth ADC/WIF only — never a keyfile.
+  `enable_composer`/`enable_spanner` default false, so a default apply makes
+  zero Composer/Spanner resources; `enable_ci_wif` defaults false, so it builds
+  no WIF pool/provider/binding — CI auth is an explicit opt-in that also needs
+  `github_repository` (no default repo is trusted); the provider name is then
+  the `workload_identity_provider` output. `operator_principal` (default null)
+  adds one grant — `serviceAccountTokenCreator` ON the SA — so that principal
+  can impersonate it for manual BigQuery builds
+- `make tf-freeze CONFIRM=yes` *(Phase 9a)* — the ONLY writer of
+  `infra/MANIFEST.sha256`, the content pin over every file Terraform loads
+  under `infra/` (`*.tf`, `*.tf.json`) plus `.terraform.lock.hcl`, computed by
+  the fixtures' `generator.manifest` (`tests/test_infra.py::
+  test_tf_tree_matches_manifest` is red on any edit until this runs;
+  `tf-validate`'s init is `-lockfile=readonly`, so it can never rewrite the
+  pin); prints `tf-freeze OK: N files pinned in MANIFEST.sha256`. Overwrites a
+  committed pin, so `CONFIRM=yes` needs command-line origin, and refuses when a
+  pinned file has vanished from disk (delete it from the manifest by hand); the
+  manifest hunk lands in the same commit as the `.tf` change
 - Later phases add:
-  `tf-plan | tf-apply | tf-destroy`,
-  `test-int-bigquery` (9). Each lands with its phase and is listed here in the
-  same PR.
+  `test-int-bigquery` (9b — the DuckDB≡BigQuery pin-parity run behind `OTR_INT`;
+  in CI it needs an explicit `enable_ci_wif = true` apply, never the default
+  one). Each lands with its phase and is listed here in the same PR.
 
 ## Event model facts (from ARCHITECTURE.md §2; update if reality differs)
 
@@ -332,8 +386,8 @@ DECISIONS.md or fix it.
   write-back twice is a no-op; a `final` label never changes.
 - Truth isolation: `truth/` is never a dbt source, never an input to
   `features`/`scores`. `tests/test_truth_isolation.py` greps every pipeline
-  directory (`loader/`, `dbt/`, `serving/`, `orchestration/`) for the word; in
-  `generator/` only `truth.py` (the writer), `models.py` (record types) and
+  directory (`loader/`, `dbt/`, `serving/`, `orchestration/`, `infra/`) for the
+  word; in `generator/` only `truth.py` (the writer), `models.py` (record types) and
   `cli.py` (the entry point that calls the writer) may name it — generation
   logic never does.
 - Model scoring and simulation are seeded; the generated blocks of
@@ -572,34 +626,101 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 8b implemented; review complete (rounds 1–5 + exit audit), ready for PR
-(`phase-8b-airflow-dag`).** Phases 0–7 merged
-(PRs #1–#9); 8a merged (PR #10). Phase 9a (`phase-9-gcp-foundation`,
-GCP/Terraform) is **parked** (its working-tree leftovers stashed). Phase 8 is
-split 8a/8b: **8a** landed the write-back + `make pipeline`; **8b** is the
-**Airflow DAG** (Docker-local) + `test-int-airflow` + backfill≡union, closing the
-Phase 8 ⭐ checkpoint. 8b landed: `orchestration/dags/pipeline_dag.py` orders the
-chain's WRITING steps as BashOperators over `make` targets (`dbt_build >>
-writeback`, from the Airflow-free `orchestration/tasks.py` manifest),
-`THROUGH={{ data_interval_end | ds }}` so a per-interval run lands only files ≤
-that date, `max_active_runs=1` (single-writer on the DuckDB file),
-`catchup=False` (no auto-catch-up-to-now; backfill on demand — Amendment 2).
-`make dbt-build` gained a `THROUGH` threaded into its internal `load`
-(resolves the re-load clobber; default loads all — no golden moves). **Amendment
-1:** `eval` is NOT a DAG task — it asserts full-data pins and reads truth, so it
-stays a union-only gate in `make pipeline`/CI (writes no table, so the DAG's two
-outputs stay byte-identical to `make pipeline`'s). `make test-int-airflow` (behind
-`OTR_INT`, CI never runs it) spins a lean `SequentialExecutor`/SQLite container
-and proves DAG≡pipeline and backfill≡union across processes: 5 passed (~1 min),
-both container `scores_send_time` and `send_schedule == SEND_SCHEDULE_SHA256_TINY`.
-Offline: `test_backfill.py` (three THROUGH landings → union; `computed_as_of`
-advances on score change), `test_dag_structure.py` (stubbed-airflow DAG object —
-config values + edge direction), `test_through_build.py`,
-`test_airflow_docker_only.py`. `apache-airflow` is **Docker-only** (never in
-`uv.lock`); `fixtures/tiny/` untouched; every Phase 3–8a gate byte-identical.
-Open BACKLOG rows: **14** (8b opened three: split load from build, trigger Phase 9;
-`computed_as_of` not a complete served-row-change discriminator, an 8a/5 gap; the
-offline stub can't pin DAG↔task attachment — the container test does, trigger CI
-gains Docker — all unreachable/mitigated on the fixture).
+**Phase 9a implemented, in review (`phase-9-gcp-foundation`).** Phases 0–8 merged
+(PRs #1–#11): Phase 8 split 8a (write-back `serving/` + `make pipeline`, PR #10)
+and 8b (Airflow DAG `orchestration/` + `test-int-airflow` + backfill≡union, PR
+#11), closing the Phase 8 ⭐ checkpoint. Phase 9 is the first cloud phase, split
+9a/9b: **9a** (this) is the Terraform foundation; **9b** (spec finalized after 9a
+merges) is the BigQuery dialect (the five `bigquery__` macro bodies), the `bq
+load` landing, and the DuckDB≡BigQuery pin-parity run. 9a landed `infra/`: one
+module per concern — `bigquery` (datasets `raw` + `ontime`), `gcs`, `iam`,
+`budget` unconditional (free/near-free, §6); `composer`/`spanner` count-gated
+behind `enable_*` toggles that **default false**, so a default plan/apply makes
+zero of them. One **least-privilege** service account (BQ `jobUser` +
+dataset-scoped `dataEditor`, bucket `objectAdmin`; never `roles/owner|editor`) +
+a **WIF** pool/provider for CI, opt-in behind `enable_ci_wif` (default false) —
+**ADC/WIF only, no key at rest**. Budget alerts
+**50/150 in the billing account's currency** ($50/$150 on USD; notify only);
+the billing kill-switch is documented optional in
+`docs/DEPLOYMENT.md`, not built. **`project_id` is the only required var**
+(`region` defaults `us-central1`; the budget's billing account + project number
+are a `google_project` data source). `infra/cli.py` validates `PROJECT` before
+deriving the `-var` and gates `tf-apply`/`tf-destroy`/`tf-freeze` on `CONFIRM=yes
+$(origin)`; `tf-validate` (offline) / `tf-plan` are ungated. `make tf-validate` OK
+(google provider 6.50.0), offline suite green (`tests/test_infra.py` static `.tf`
+checks + the tf-* makefile tests), `make mutate` 7/7. The plan-clean and
+destroy-leaves-nothing-billable Done-when items are proven by the manual cloud
+runs in Evidence (ask-first). `fixtures/tiny/` untouched; every earlier gate
+byte-identical. **Review round 1 applied (23 findings): 4 amendments** — the
+managed bucket is a staging bucket distinct from the bootstrap tfstate bucket
+(datasets `delete_contents_on_destroy`); WIF trust scoped to repo AND ref;
+`tf()` runner-injectable so no offline test spawns a live apply (`require_confirm
+delete-call` now in the sweep, 4/4 killed); `google_project_service` so a fresh
+project applies — **plus 15 test/wording fixes** (whole-tree content-based
+`test_infra.py`, `infra` dropped from truth-isolation EXEMPT, `\Z` anchor, budget
+percents). **Review round 2 applied (24 findings): cap invoked** — `test_infra.py`
+re-implemented once against the pinning invariant (resource allowlist, exact WIF
+`&&`, IAM scope, bucket-hardening/argv/region pins); 3 design changes (managed
+bucket derived not a var; WIF binds on combined `repo@ref` + CEL-injection
+validations; `serviceusage`+`cloudresourcemanager` bootstrap APIs); fixes
+(`None` sentinel, `-input=false`, positive-threshold validation); #18 accepted
+(sanctioned `$(origin)` pattern). **Review round 3 applied (18 findings, cap's
+scoped re-review): 1 amendment** — H, CI WIF opt-in (`enable_ci_wif` count-gates
+pool/provider/binding; a fork's default apply no longer trusts this repo's
+`main`); 4 genuine fixes (`project_id` HCL `validation` = `PROJECT_RE`; `issuer_uri`
+pinned; `*.tfvars.json` ignored + scanned; the `tfstate` check scoped to managed
+blocks — a round-2 regression); 7 test-cluster completions; 5 record fixes. **Gate
+item discharged:** a fresh plan→apply→destroy cycle on `ontime-rate-recovery`
+re-proved Done-when 1/2/5 on the post-H tree (18 added, 18 destroyed, no WIF
+resource, nothing billable left) and surfaced two live gotchas fixed in-tree
+(§8: ADC quota project → provider `user_project_override`; budget currency →
+derived from the billing account). **Review round 4 applied (27 findings,
+phase-exit union): 5 amendments** — I (two datasets stays the pin; 9b's
+reconciliation must add `generate_schema_name` so the BigQuery build lands in
+`ontime`, and `test-int-bigquery` needs an explicit `enable_ci_wif = true`
+apply — a DUE BACKLOG row), J (root `workload_identity_provider` output, null
+guard pinned), K (no default `github_repository`; the pool's precondition
+refuses the toggle without one), L (`budget_alert_thresholds`, the account's
+currency), M (`.claude/settings.json` untracked + pinned); 4 test fixes
+(`tfstate` scan covers header labels — re-implemented once; data-source
+allowlist; whole-tree key scan; `min` pin); the rest records. **Review round
+5 applied (20 findings, no correctness finding in round 4's fixes — cap not
+triggered): 2 record-only amendments** — N (Amendment I's "impossible by IAM"
+narrowed to the SA; an operator's Owner ADC can create datasets, so no BigQuery
+build before 9b, then as the SA), O (9b must set the `bigquery` output's
+`location` and export `OTR_GCP_PROJECT` from the validated `PROJECT`); the
+settings pin widened to every auto-configuring key + `.mcp.json`; a read-only
+`tf-plan` on the post-J/K/L tree re-proved `18 to add` with a null WIF output;
+the rest records/wording. **Review round 6 applied (24 findings, 19 record/wording): 2 amendments** — P
+(`infra/MANIFEST.sha256` + `make tf-freeze`: the `.tf` tree is one allowlist,
+so every hand-mutation is lethal — the cause of three rounds of "unpinned
+attribute" findings closed), Q (`operator_principal` → a count-gated
+`serviceAccountTokenCreator` grant ON the SA, so Amendment N's impersonation
+is a managed control); the Claude-config pin re-implemented as a path
+allowlist; three new property pins; the Phase 0 / PROJECT_BRIEF edits
+reverted (a merged phase's records are not this branch's). **Review round 7
+applied (25 findings, 18 record/wording): 2 amendments** — R (the manifest is
+the allowlist's closure: `*.tf.json` pinned, `generator.manifest.diff` reused,
+`-lockfile=readonly`, `tf-freeze` refuses a vanished file, two mutation lines
+— 6/6 killed), S (`TARGET=bigquery` refused outright before 9b; `profiles.yml`
+reads `OTR_GCP_PROJECT` with no default); the Claude-config ignore check runs
+in a scratch repo (no local exclude file can stand in); `group:` dropped from
+`operator_principal`. **Review round 8 applied (23 findings, 18 record/wording):
+1 amendment** — T (`tf-plan`/`tf-apply`/`tf-destroy` refuse an auto-loaded
+`terraform.tfvars` / `*.auto.tfvars{,.json}` under `infra/`, the one input
+outside the argv and the manifest — reproduced live by a local file); 5
+test-only pins (profiles.yml no-default, nonzero-step FAIL, module sources
+local, `git init --template=<empty>`, the test-only pinned-files helper deleted — `compute_manifest`
+is the one predicate); mutate 7/7; the coherence-auditor's whole-repo pass has
+run twice (rounds 4 and 8) — round 9 is SCOPED to `review-round-8..HEAD`, and a
+record finding on unchanged text goes to BACKLOG with a 9b trigger, not to a
+round 10. Next: round 9 (scoped) → merge → 9b (its first
+commit reconciles against main-with-9a: `generate_schema_name`, `location`,
+`OTR_GCP_PROJECT`, the "DAG's build owns its landing" row —
+`dbt_build(TARGET=bigquery)` must not call the DuckDB `load()` — and the
+`ontime-pipeline` SA id reserved until ~2026-09-28 by the 2026-08-29 destroy).
+Open BACKLOG rows: **15** (9a struck "Budget alerts do not stop spend"; Spanner
+re-deferred; the five 9b-triggered rows — incl. "the DAG's build owns its
+landing" — re-deferred in-row; one new DUE 9b row; one dated SA-id row).
 
 (Update this section at the end of every working day.)

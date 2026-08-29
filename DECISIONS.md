@@ -67,7 +67,10 @@ annotated **Superseded by …** in place and never deleted.
 
 - **Local-first, DuckDB for CI, BigQuery by profile switch; Composer and Spanner
   behind Terraform toggles.** Cloud runs are manual and asked-for; nothing
-  billable is left up by default. ([Phase 0](#phase-0))
+  billable is left up by default. Realised in Phase 9a: `infra/` with `enable_*`
+  toggles defaulting false, `project_id` the only required var, ADC/WIF (never a
+  key), budget alerts 50/150 in the account's currency. ([Phase 0](#phase-0),
+  [Phase 9a](#phase-9a))
 
 ## Process
 
@@ -106,9 +109,305 @@ annotated **Superseded by …** in place and never deleted.
   it cannot drift by judgment.
 - **The run-tests hook is wired locally, not committed.** A committed
   `settings.json` would auto-execute an inbound branch's hook + conftest for
-  anyone opening the repo in Claude Code.
+  anyone opening the repo in Claude Code. Since Phase 9a (Amendment M) the
+  file is untracked and gitignored, and
+  `tests/test_infra.py::test_tracked_claude_config_is_prose_and_hook_scripts_only`
+  (round 6's re-implementation of the round-4/5 key scan) pins that nothing
+  under `.claude/` but agent/command prose and hook scripts is tracked, and no
+  `.mcp.json`.
 
 ## Appendix — by phase
+
+### Phase 9a
+
+*GCP foundation — Terraform (`phase-9-gcp-foundation`).* Split from Phase 9;
+9b (BigQuery dialect + landing + pin parity) is a separate spec finalised after
+9a merges. Design changes approved 2026-08-26; rebased onto Phase-8-complete main
+2026-08-28.
+
+**9a in one screen (standing decisions after review round 8; the round entries
+below are history — an entry a later amendment overrode carries a pointer):**
+`infra/` one module per concern, `composer`/`spanner`/CI-WIF count-gated behind
+`enable_*` toggles defaulting false (A–C, H, K); one least-privilege SA, ADC/WIF
+only, `operator_principal` count-gates a `serviceAccountTokenCreator` grant ON
+the SA (Q); staging bucket derived `${project_id}-ontime`, distinct from the
+bootstrap tfstate bucket (F); budgets at `min`-amount thresholds in the billing
+account's currency, notify only (L); `google_project_service` so a fresh
+project applies (D, G); `infra/cli.py` — `PROJECT` validated before the `-var`,
+`tf-apply`/`tf-destroy`/`tf-freeze` `$(origin)`-gated, `tf()` runner-injectable
+(E, P), auto-loaded tfvars refused (T); the `.tf` tree pinned by
+`infra/MANIFEST.sha256` over `*.tf` + `*.tf.json` + the lock, `tf-validate`
+`-lockfile=readonly` (P, R); no BigQuery build before 9b — `TARGET=bigquery`
+refused, `profiles.yml` no default project (N, S); Claude config a tracked-path
+allowlist (M); the root `workload_identity_provider` output (J); two datasets,
+9b's `generate_schema_name` DUE (I, O).
+
+- **`infra/` is one tree, one module per concern, `enable_*` toggles default
+  false.** `main.tf` wires `modules/{bigquery,gcs,iam,budget}` unconditionally
+  (all free/near-free — ARCHITECTURE §6) and `modules/{composer,spanner}` behind
+  `count = var.enable_* ? 1 : 0`, so a default plan creates zero of them
+  (Composer is Phase 11, Spanner Phase 10; the Spanner trial clock only starts on
+  an apply, so the BACKLOG row re-defers). Rejected: a flat `main.tf` (a concern
+  can't be toggled or destroyed alone).
+- **`project_id` is the only required var; the budget's billing account is
+  derived.** Every other input defaults (`region` `us-central1`, the toggles, the
+  WIF repo slug, the dataset names); a `google_project` data source supplies the
+  billing account and project number, so no `billing_account` var is needed and a
+  fresh clone plans with just `project_id`. Rejected: a required `billing_account`
+  (breaks "project_id only"); `google_billing_project_billing_info` (used the
+  `google_project` data source, which carries both fields).
+- **One least-privilege service account + WIF; ADC/WIF only, no key at rest.**
+  `modules/iam` grants BQ `jobUser` (project) + dataset-scoped `dataEditor` on the
+  two datasets + bucket `objectAdmin`, never `roles/owner|editor`; CI
+  authenticates through a Workload Identity Federation pool/provider scoped to
+  `attribute.repository == <repo>`. *Superseded in review:* round 1 **B** made
+  the condition repo AND ref, round 2 **F** bound impersonation on the combined
+  `repo@ref`, round 3 **H** made the whole WIF layer opt-in
+  (`enable_ci_wif`, default false), and round 4 **J** exposed the provider
+  name as a root output while **K** removed the default repository (the toggle
+  without `github_repository` is a plan-time refusal); round 6 **Q** added the
+  one grant ON the SA — `serviceAccountTokenCreator` to `operator_principal`
+  (default null, count-gated) so manual builds impersonate it. No `google_service_account_key` resource, no
+  keyfile path anywhere (`tests/test_infra.py` greps for it). Rejected: a
+  downloaded SA key (a secret at rest — the thing the rule forbids); `roles/editor`
+  (broad). Provides — behind the toggle — the WIF the "cross-warehouse dialect
+  drift needs a CI BigQuery job" BACKLOG row needs; 9b applies it with
+  `enable_ci_wif = true` + its `github_repository` explicitly (a default apply
+  builds none — H, K), and the row closes at 9b exit.
+- **Budget alerts 50/150 in the billing account's currency; the kill-switch
+  documented, not built.** `modules/budget` sets threshold rules at 50 and 150
+  ($50/$150 on a USD account — the currency is the billing account's, round 3's
+  live fix; the variable is `budget_alert_thresholds`, Amendment L) on a monthly
+  amount (the total is `min(thresholds)`; the rules are whole-percent multiples
+  of it). A budget only notifies; the real guardrail (Pub/Sub → Cloud
+  Function disabling billing) is documented in `docs/DEPLOYMENT.md` with a resource
+  sketch and left unbuilt — nothing billable runs by default, so there is no
+  runaway to catch. Closes BACKLOG "Budget alerts do not stop spend". Rejected:
+  building it now (premature; Phase 12 demo day is the trigger).
+- **State backend bootstrap-documented, local by default.** The GCS `backend`
+  block is present but commented; `docs/DEPLOYMENT.md` gives the one-time bootstrap
+  (create the versioned bucket, `terraform init -migrate-state`). A fresh clone
+  plans on the local backend with no setup, so `project_id` really is the only
+  input. Rejected: a GCS backend required from clone one (the bucket can't create
+  the backend that stores its own state).
+- **`infra/cli.py` validates `PROJECT` and gates the destructive targets; four
+  `make` targets.** *Superseded in review:* round 6 **P** added a fifth,
+  `tf-freeze`, and made `infra/MANIFEST.sha256` (not the static checks) the
+  pin over the HCL; round 7 **R** closed the manifest (`*.tf.json`, shared
+  `generator.manifest.diff`, `-lockfile=readonly`, vanished-file refusal). Mirrors `loader/cli.py`: one process validates `PROJECT`
+  (`^[a-z][a-z0-9-]{4,28}[a-z0-9]\Z`) before deriving `-var project_id=…`, and
+  refuses `tf-apply`/`tf-destroy` unless `CONFIRM=yes` has command-line origin;
+  `tf-validate` (offline: `init -backend=false -input=false -lockfile=readonly`
+  + `validate` + `fmt -check`, since R) and
+  `tf-plan` are non-destructive and ungated (T adds the auto-tfvars refusal to
+  plan/apply/destroy). The Terraform HCL is configuration no
+  mutation operator addresses — pinned by `tests/test_infra.py` static checks +
+  `terraform validate` + the manual plan/apply/destroy Evidence (the Phase 7
+  treatment of SQL); the `infra/cli.py` guards carry the mutation lines
+  (4/4 killed after round 2). Rejected: `terraform` invoked straight from the
+  Makefile (an unvalidated value reaches the provider; no `$(origin)` gate).
+- **The 8b-opened row "the DAG's build owns its landing" is a 9b fix, re-deferred
+  here.** `loader/cli.py::dbt_build` calls the DuckDB `load()` even for a
+  non-`duckdb` `TARGET`, which is wrong once the landing is `bq load` GCS→BigQuery.
+  9a touches no dbt/DAG code; 9b splits a build-only path from the landing and
+  threads `TARGET`, closing the row.
+- **Review round 1 — four amendments (approved 2026-08-29).** (A) The `gcs`
+  module managed `<project>-tfstate` — the bootstrap backend bucket — so apply
+  collided and destroy would delete its own state; it now manages a distinct
+  staging bucket (`<project>-ontime`, SA `objectAdmin` scoped there,
+  `public_access_prevention` + a noncurrent lifecycle rule), the state bucket
+  stays bootstrap-only and unmanaged, and both datasets gain
+  `delete_contents_on_destroy` (destroy stays total once 9b lands tables).
+  (B) The WIF provider's `attribute_condition` now requires repo AND
+  `assertion.ref` (default `refs/heads/main`) — not any branch — with a test that
+  reddens if either half is deleted. (C) `tf()` takes an injectable runner so no
+  offline test can spawn a real `terraform apply`; `require_confirm delete-call`
+  joined the mutation block (safe with the fake) and a "validated before the
+  runner runs" test landed. (D) A `google_project_service` set (`disable_on_destroy
+  = false`) + module `depends_on` so a fresh project applies. Plus 15
+  test/wording fixes (whole-tree content-based `test_infra.py`: role scan across
+  all `.tf`, a "no billable resource outside a toggled module" pin, brace-matched
+  required-var parse, `default =` assignment not the word; `\Z` not `$`;
+  `FileNotFoundError` → clean FAIL; `infra` dropped from truth-isolation EXEMPT;
+  budget percents whole (amount = min threshold); DEPLOYMENT `MODULE=spanner`
+  corrected and the 30-day SA/WIF soft-delete gotcha to §8). Rejected up front:
+  repository-only WIF; a non-injectable `tf`; managing the state bucket; a
+  `gcloud services enable` runbook step over the `google_project_service` resource.
+- **Review round 2 — cap invoked, three more amendments (approved 2026-08-29).**
+  Round 2 found round 1's `test_infra.py` pinned substrings/mechanisms, so ~12
+  `.tf` properties survived mutation. Rather than patch each, the **review cap was
+  invoked**: `test_infra.py`'s static checks were **re-implemented once** against
+  one invariant — every property in the Invariants table reddens when removed from
+  the `.tf`; pins are exact-string/scoped/allowlist, never substring or type-
+  denylist (resource **allowlist**, exact WIF `&&`, project-vs-resource IAM scope,
+  bucket-hardening pins, argv assertions, region pin, `.terraform` prune). Design
+  changes: (E) the managed bucket is **derived** `${project_id}-ontime`, not a var
+  — a caller can no longer point it at the `tfstate` bucket (round 1's #1 could
+  still be reinstated via `var.staging_bucket`); (F) WIF impersonation binds on a
+  combined `attribute.repo_ref` (repo@ref), not repo-only, and `github_repository`/
+  `github_ref` gain shape `validation`s against CEL injection; (G) `serviceusage`
+  + `cloudresourcemanager` join `required_services` and a one-time `gcloud services
+  enable` is documented — the irreducible bootstrap the "fresh project applies"
+  clause implied (invariant 8 / Done-when 1 reworded). Fixes: `_NO_BINARY`→`None`
+  sentinel (a real exit 127 still FAILs), `-input=false` on plan/apply/destroy,
+  positive-threshold validation, DEPLOYMENT bootstrap-bucket hardening / API-stay-on
+  notes. **Accepted:** `require_confirm`'s caller-supplied origin is the sanctioned
+  repo-wide `$(origin CONFIRM)` pattern (no change). A scoped round 3 follows.
+- **Review round 3 — scoped re-review, one amendment (approved 2026-08-29).**
+  Nine of round 2's ten survivors died; four genuine issues were missed in
+  earlier rounds and one was a round-2 regression. Design change: **(H) CI WIF
+  is opt-in** — `github_repository` defaulted to this repo, so a fork's *default*
+  apply built a trust letting this repo's `main` impersonate their SA; the pool,
+  provider and binding are now `count`-gated behind `enable_ci_wif` (default
+  false) and the SA stays unconditional. Rejected: a tfvars-comment warning (not a
+  control); an empty `github_repository` default (breaks invariant 1) — *superseded
+  by round 4 K:* the default is now `null` (still a `default =`, so invariant 1
+  holds) and the pool's precondition refuses the toggle without a repo. Fixes:
+  `project_id` gets the `PROJECT_RE` shape as an HCL `validation` (a tfvars /
+  direct apply no longer bypasses the make-target check; the test pins the two
+  regexes equal); the WIF `issuer_uri` is pinned exactly; `*.tfvars.json` /
+  `*.auto.tfvars*` (auto-loaded by Terraform) are gitignored and in the tracked-
+  secret scan; the `tfstate` check is scoped to managed blocks so the documented
+  `backend "gcs"` block can be uncommented without reddening `make test` (the
+  round-2 regression). Test-cluster completions: whole-tree project-level-grant
+  scan, `validation {}` presence, `repo_ref` mapping + member composition, the
+  `validate` argv's `-backend=false`, an any-provider resource allowlist +
+  `hashicorp/google ~> 6.0` pin, the FAIL lines asserted via `capsys`, the API pin
+  scoped to `local.required_services` as an exact set. Records: this file's
+  `max`→`min` and the superseded-by pointer above. **Gate item — discharged
+  `5d08729` (2026-08-29):** the apply→destroy Evidence predated the amendments;
+  a fresh cycle re-proved it (Evidence row 5). **Found on that first live
+  apply** (two §8 gotchas, fixed in
+  the tree): user ADC has no quota project for `billingbudgets` → the provider
+  sets `user_project_override` + `billing_project = var.project_id`; a budget's
+  currency must be the billing account's → `data.google_billing_account.
+  currency_code`, read inside the module at apply time. Rejected: a per-machine
+  `set-quota-project` step; a `budget_currency_code` var (a second input on a
+  non-USD account, against invariant 1).
+
+- **Review round 4 (phase-exit union, 27 findings): Amendments I–M.** **I** —
+  two datasets stays the pin: `dbt_project.yml`'s per-folder `+schema` would
+  make 9b's first BigQuery build create five `ontime_<folder>` datasets (US
+  multi-region) Terraform never creates and destroy never removes; the SA's
+  dataset-scoped `dataEditor` cannot create one (pinned:
+  `test_no_role_can_create_a_dataset`; an operator's Owner ADC can — round 5
+  N), so 9b's reconciliation MUST add
+  `generate_schema_name` (BigQuery → `models_dataset`; DuckDB's layout is 9b's
+  call) — a DUE BACKLOG row, which also tells 9b that `test-int-bigquery` needs
+  an explicit `enable_ci_wif = true` apply. Rejected: Terraform-managed
+  per-folder datasets + IAM (seven datasets against a two-dataset pin; more
+  IAM surface for no read benefit). **J** — `workload_identity_provider` is a
+  root output (the `google-github-actions/auth` value); the module output
+  carries the `enable_ci_wif ? …[0].name : null` guard and the root output is
+  a bare passthrough that propagates the null — the test pins the conditional
+  on the module and the passthrough on the root (an unguarded `[0]` is "Invalid index … empty tuple" on every
+  default plan — `terraform validate` does not catch it; the tester's surviving
+  hand-mutation). Rejected: an offline plan check (a real plan needs the google
+  provider's data sources). **K** — `github_repository` has NO default: a fork
+  enabling WIF with H's pinned default still trusted this repo's `main`; now
+  the pool carries `lifecycle.precondition { github_repository != null }`, so
+  the toggle without a repo is a named plan-time refusal (invariant 1 holds —
+  `default = null` is a default). Rejected: a precondition against a hard-coded
+  repo name (a fork carries the very name it must reject). **L** —
+  `budget_alert_thresholds_usd` → `budget_alert_thresholds`; the records say
+  "50/150 in the billing account's currency". **M** — `.claude/settings.json`
+  (an empty `{}`) untracked + gitignored; the Claude-settings pin (today
+  `test_tracked_claude_config_is_prose_and_hook_scripts_only`, round 6) pins
+  that no tracked `.claude/settings*.json` carries `hooks`
+  (CLAUDE.md: a committed hook would auto-execute an inbound branch's hook).
+  Landed here rather than on a `fix/` branch: a one-line security finding at
+  the phase exit. Test fixes: the `tfstate` scan re-implemented ONCE against
+  invariant 5 (header labels + bodies of every managed block — its second
+  regression in two rounds, the cap's re-implement rule applied to one test);
+  a data-source allowlist (`google_project`, `google_billing_account`); the
+  key scan over EVERY tracked text file with whitespace-insensitive needles +
+  a PEM header; `budget_amount = min(...)` pinned. Operator IAM for apply is
+  now in DEPLOYMENT (Service Usage Consumer; Billing Account Viewer + Costs
+  Manager) with a preflight so a gap fails before 17 resources exist —
+  rejected: reading the billing account at root without `depends_on` (breaks
+  invariant 8, a fresh project plans). The 2026-08-29 destroy reserved the
+  `ontime-pipeline` id until ~2026-09-28 (DEPLOYMENT; 9b's first apply
+  `undelete`s or waits).
+- **Review round 5 (confirmation round, 20 findings): Amendments N–O, both
+  record-only.** **N** — Amendment I's "impossible by IAM" is narrowed to the
+  pipeline identity: the SA cannot create a dataset, but an operator running
+  `make dbt-build TARGET=bigquery` on an Owner ADC can, so until 9b lands
+  `generate_schema_name` DEPLOYMENT forbids a BigQuery build, and 9b's manual
+  builds impersonate the SA so the IAM control covers the human path.
+  Rejected: stripping the operator's `datasets.create` (Owner is the bootstrap
+  role). **O** — two more 9b carry-ins on the DUE row: `dbt/profiles.yml`'s
+  `bigquery` output sets no `location` (dbt-bigquery defaults to the US
+  multi-region; the datasets are `us-central1`) and reads
+  `OTR_GCP_PROJECT`, which nothing sets or documents — 9b sets `location`
+  from Terraform's value and has `make dbt-build TARGET=bigquery` export the
+  project from the validated `PROJECT`. Rejected: fixing `profiles.yml` in
+  9a (Phase 2 code, 9b's surface) — *superseded by round 7 **S**: the `''`
+  default made a pre-9b build runnable, so 9a dropped it after all.* Test widening (#12): the Claude-settings
+  pin rejects any auto-configuring key (`hooks`, `permissions`, `env`,
+  `mcpServers`, `enableAllProjectMcpServers`) and a tracked `.mcp.json`, not
+  `hooks` alone. Accepted (#13): invariant 7 is static-pinned only until 9b's
+  opt-in apply — the first live WIF proof. Evidence row 5 re-planned on the
+  post-J/K/L tree (see the spec). The rest: the BACKLOG count (14, not 13),
+  superseded-by pointers (J/K on the SA/WIF entry, K on round 3's rejected
+  "empty default", M on Phase 0's `settings.json` pin), and currency /
+  "THIS repo" / "four macros" wording sweeps.
+- **Review round 6 (24 findings, 19 record/wording): Amendments P–Q; the
+  round's cause named.** Six rounds kept producing findings from three
+  structural sources, not from defects: (1) the `.tf` tree was pinned one
+  property at a time — an unbounded denylist over ~150 attributes, 3–5 unpinned
+  ones per round; (2) every record-only amendment is restated in ~7 files, so
+  each narrowing spawned new drift; (3) Amendment M's key scan pinned a
+  surface Claude Code owns. **P** — `infra/MANIFEST.sha256` (the `fixtures/`
+  format) pins every `.tf` + the provider lock byte-for-byte (*widened by round
+  7 R:* `*.tf.json` too, the lock never rewritten — `-lockfile=readonly`)
+  (`test_tf_tree_matches_manifest`); `make tf-freeze CONFIRM=yes`
+  (`$(origin)`-gated like `freeze`) is its only writer, the manifest hunk in
+  the same commit is the declaration (no per-re-freeze DECISIONS entry — the
+  `.tf` diff is the review). Rejected: `python-hcl2` (a package, still a
+  property list); a `terraform show -json` golden (not offline). **Q** —
+  `operator_principal` (root var, default `null`, member-shape validated)
+  count-gates one `google_service_account_iam_member` granting
+  `roles/iam.serviceAccountTokenCreator` ON the SA, so Amendment N's
+  impersonation is a Terraform-managed control, not an assumed permission;
+  default plan unchanged (`18 to add`). Rejected: documenting the permission
+  only (a convention). Test re-implementation (#1/#2/#6/#7/#21, once): the
+  Claude-config pin is a PATH allowlist (`.claude/{agents,commands}/*.md`,
+  `hooks/*.py` only) with `core.excludesFile` disabled in `check-ignore`;
+  `.mcp.json` + `.claude/scheduled_tasks.{lock,json}` gitignored. New property pins (#3/#4/#5):
+  budget scope + denominator, every grant's `member`. Reverted (#13/#14): the
+  Phase 0 spec note and the PROJECT_BRIEF "five macros" edit — a merged phase's
+  records are not this branch's; PROJECT_BRIEF stays the origin record. The
+  rest wording: Done-when 5 / invariant 2 narrowed to the SA (#12), Evidence
+  rows 1/5 corrected (#11/#19), a dated BACKLOG row for the SA-id reservation
+  (#20), the DAG-landing row named among 9b's (#17).
+- **Review round 7 (25 findings, 18 record/wording): Amendments R–S.** **R** —
+  the manifest is the allowlist's closure: `*.tf.json` pinned, the fixtures'
+  `generator.manifest.diff` reused (one implementation, one predicate),
+  `tf-validate`'s init `-input=false -lockfile=readonly` (a platform can never
+  rewrite the pin — on a platform the single-`h1` lock lacks it FAILs until a
+  deliberate `terraform providers lock` + `tf-freeze`, §8 Gotchas), `tf-freeze`
+  refuses a vanished pinned file. **S** — no BigQuery build before 9b:
+  `loader/cli.py` refuses `TARGET=bigquery` outright (exit 2, before `load()`)
+  and `profiles.yml` reads `OTR_GCP_PROJECT` with no default (supersedes round
+  5's "not in 9a"). Rejected: a doc-only "runnable but don't". The Claude-config
+  ignore check runs in a scratch repo (no local exclude file stands in);
+  `group:` dropped from `operator_principal`.
+- **Review round 8 (23 findings, 18 record/wording): Amendment T; the exit
+  protocol changed.** Every correctness/security row was about a control added
+  in rounds 6–7 or the fringe it opened, none about the Terraform that ships —
+  the amendments were reviewing each other. **T** — `tf-plan`/`tf-apply`/
+  `tf-destroy` refuse while an auto-loaded `terraform.tfvars` /
+  `*.auto.tfvars{,.json}` sits under `infra/` (gitignored, unpinned, so the one
+  input outside the argv and the manifest; reproduced live by a local file);
+  `tf-validate` ungated. Rejected: a threat-model note only (a claim); echoing
+  resolved toggles (the file, not the value, is the smuggling path). Test-only
+  pins: `profiles.yml` no-default, nonzero terraform step → exit 1, module
+  sources local `./modules/<name>`, `git init --template=<empty>` in the
+  scratch repo; the test-only pinned-files helper deleted (`compute_manifest` is the one
+  predicate). Protocol: the whole-repo coherence pass has run twice (rounds 4
+  and 8); round 9 is scoped to `review-round-8..HEAD`, and a record finding on
+  unchanged text goes to BACKLOG with a 9b trigger — the phase-exit rule's
+  "re-defer with a trigger, never drop", applied to review residue.
 
 ### Phase 8b
 
@@ -618,7 +917,8 @@ annotated **Superseded by …** in place and never deleted.
 - **One Python entry point (`loader/cli.py`) behind `load`, `dbt-build`,
   `drop-db`.** It validates `PROFILE` and `TARGET` (`[a-z0-9_]+`) before any
   path exists, derives `data/<profile>.duckdb`, sets `OTR_DUCKDB_PATH` (the one
-  env var `dbt/profiles.yml` reads) and invokes dbt in-process via
+  env var `dbt/profiles.yml` read until Phase 9a's Amendment S added
+  `OTR_GCP_PROJECT` for the `bigquery` target) and invokes dbt in-process via
   `dbtRunner`. `dbt-build` loads first so CI is one target. Rejected: `dbt`
   invoked from the Makefile with `--vars` (an unvalidated name would reach a
   path).
@@ -790,7 +1090,8 @@ annotated **Superseded by …** in place and never deleted.
   `make mutate` is also run standalone.
 - **`PIPELINE_DIRS` is derived from the tree.** Every top-level package not in
   an explicit exemption set (`tests`, `scripts`, `eval`, `generator`, docs,
-  specs, fixtures, infra, data, dotdirs) is a pipeline directory; a new package is
+  specs, fixtures, infra, data, dotdirs — *Phase 9a dropped `infra` from the
+  set: it is a guarded pipeline dir*) is a pipeline directory; a new package is
   guarded the day it appears, and a positive-control test proves the grep
   finds a planted reference. Rejected: a hand-maintained list (vacuous on day
   one, forgotten later).

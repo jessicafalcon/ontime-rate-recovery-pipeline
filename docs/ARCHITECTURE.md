@@ -301,6 +301,16 @@ demo day, destroyed the same hour. Budget alerts do not stop spend — stated,
 with the optional billing-disable function as the real guardrail. Terraform
 state in GCS (bootstrapped manually); WIF for CI, never JSON keys.
 
+Implemented in Phase 9a (`infra/`, behind `enable_*` toggles that default false;
+`project_id` the only required var; one least-privilege service account, with
+the CI WIF pool/provider opt-in behind `enable_ci_wif` so a default apply builds
+no cross-repo trust; an optional `operator_principal` gets
+`serviceAccountTokenCreator` ON the SA so manual BigQuery builds impersonate it
+rather than run as an operator's Owner ADC).
+`docs/DEPLOYMENT.md` is the runbook — auth (ADC/WIF), the one-time state-backend
+bootstrap, the cost table, the optional billing kill-switch, and the teardown
+that leaves nothing billable.
+
 ## 7. Validation stance
 
 Synthetic data cannot prove retention lift. The pipeline reports (a) label
@@ -375,3 +385,45 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   (Phase 8b). If a secret ever slipped past `.dockerignore` it persists in the
   image layer; recovery is `docker image rm otr-airflow-8b:latest` (or `down
   --rmi local`), documented in `.dockerignore`.
+- **A service account and a Workload Identity pool/provider soft-delete for 30
+  days, reserving their ids** (Phase 9a). `infra` uses fixed ids
+  (`ontime-pipeline`, `ontime-github-pool`), so an `apply → destroy → apply`
+  cycle *within 30 days* fails re-creating them ("exists in a deleted state").
+  Recover with `gcloud iam service-accounts undelete` /
+  `gcloud iam workload-identity-pools undelete`, or wait out the window
+  (`docs/DEPLOYMENT.md`). Harmless for a single demo-day apply/destroy; the
+  destroy itself still leaves nothing billable. Datasets and the bucket have no
+  such reservation.
+- **User ADC has no quota project; `billingbudgets.googleapis.com` refuses it**
+  (Phase 9a, found on the first live apply). A developer's `gcloud auth
+  application-default login` credential carries no quota project, and the
+  Billing Budgets API 403s (`SERVICE_DISABLED` on the gcloud default consumer
+  project) — 17 of 18 resources applied, the budget did not. Fix in the tree,
+  not per machine: `provider "google"` sets `user_project_override = true` +
+  `billing_project = var.project_id`, so every call is billed/quota'd against
+  our own project (whose APIs Terraform enables). The alternative
+  `gcloud auth application-default set-quota-project` would have to be
+  remembered on every machine. WIF/SA credentials are unaffected.
+- **A budget's currency must be the billing account's** (Phase 9a, the apply
+  after the quota-project fix — the first stopped at 17/18 before reaching the
+  budget). `currency_code = "USD"` on an MXN billing account is a bare 400
+  "Request contains an invalid argument" — no field named. The module now reads
+  `data.google_billing_account.currency_code` and uses that, so
+  `budget_alert_thresholds` are numbers in the account's currency (the
+  "$50/$150" in the records assumes a USD account; the variable lost its `_usd`
+  suffix in round 4, Amendment L). The data source lives inside
+  `modules/budget`, which `depends_on` the API enablement, so it is read at
+  apply time and a fresh project still plans.
+- **`terraform init` rewrites the provider lock unless told not to** (Phase 9a,
+  review round 7). `.terraform.lock.hcl` carries per-platform `h1:` hashes and
+  a plain `init` adds the current platform's — silently changing a file the
+  manifest pins. `tf-validate` runs `init -lockfile=readonly`, so on a platform
+  the lock lacks (the pin is darwin/arm64 only) it FAILs instead of mutating;
+  the fix is a deliberate `terraform providers lock -platform=…` plus `make
+  tf-freeze CONFIRM=yes` in one commit (`docs/DEPLOYMENT.md`). Provable only
+  from a second platform — static-pinned in the suite.
+- **Terraform auto-loads `terraform.tfvars` and `*.auto.tfvars{,.json}`**
+  (Phase 9a, review round 8, reproduced by a local file). They are gitignored
+  and outside the manifest, so a toggle could reach an apply with nothing in
+  the tree or the argv showing it; `infra/cli.py` refuses plan/apply/destroy
+  while one exists (Amendment T).

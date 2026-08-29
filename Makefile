@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline test-int-airflow
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline test-int-airflow tf-validate tf-plan tf-apply tf-destroy tf-freeze
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -12,7 +12,7 @@
 # environment is `$(origin VAR)`; every future CONFIRM knob tests
 # `$(origin CONFIRM)` = `command line` inside its recipe (spec threat model,
 # corrected in review round 1; pinned by tests/test_makefile.py).
-unexport SPEC BASE DELETED CONFIRM PROFILE TARGET WRITE THROUGH FULL
+unexport SPEC BASE DELETED CONFIRM PROFILE TARGET WRITE THROUGH FULL PROJECT
 _Q = '$(subst ','\'',$(1))'
 
 setup:
@@ -170,3 +170,30 @@ pipeline:
 # (writes only the container's data/ and `docker compose down -v`). Needs Docker.
 test-int-airflow:
 	OTR_INT=1 uv run pytest tests/integration/test_int_airflow.py
+
+# ------------------------------------------------------------------ Phase 9a
+# Terraform foundation (infra/cli.py): validates PROJECT (a GCP project-id shape)
+# before deriving the -var, runs terraform -chdir=infra. Auth is ADC/WIF only —
+# never a keyfile. tf-validate is offline (init -backend=false -input=false
+# -lockfile=readonly + validate + fmt -check; downloads the provider once from the registry — outside `make test`).
+# tf-plan reads GCP APIs. tf-apply/tf-destroy are cloud-cost/destructive:
+# CONFIRM=yes must have COMMAND-LINE origin ($(origin CONFIRM)); ask first.
+tf-validate:
+	uv run python -m infra.cli validate
+
+tf-plan:
+	uv run python -m infra.cli plan --project $(call _Q,$(value PROJECT))
+
+tf-apply:
+	uv run python -m infra.cli apply --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
+
+tf-destroy:
+	uv run python -m infra.cli destroy --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
+
+# The ONLY writer of infra/MANIFEST.sha256 — the content pin over every file
+# Terraform loads (*.tf, *.tf.json) and the provider lock (Amendments P/R): any
+# edit to one is red in `make test` until the
+# manifest is rewritten here, in the same commit. Overwrites a committed pin, so
+# CONFIRM=yes must have COMMAND-LINE origin ($(origin CONFIRM)), like freeze.
+tf-freeze:
+	uv run python -m infra.cli freeze --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'

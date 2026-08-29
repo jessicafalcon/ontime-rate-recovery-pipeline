@@ -41,7 +41,7 @@ CLAUDE.md, docs/ARCHITECTURE.md, docs/PHASES.md, DECISIONS.md, the specs in
 - Makefile targets vs CI steps vs CLAUDE.md → Commands vs the Airflow DAG's
   task commands — same names, same behavior?
 - Spec DONE commands that no longer run as written.
-- The four dispatch macros: still exactly four, and each proven on both
+- The five dispatch macros: still exactly five, and each proven on both
   targets once Phase 9 lands.
 
 ### 2. Architecture erosion

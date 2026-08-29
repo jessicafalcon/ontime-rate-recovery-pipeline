@@ -188,7 +188,9 @@ def test_column_spec_refuses_a_quoted_identifier(tmp_path: Path) -> None:
     con.close()
 
 
-def test_cloud_target_requires_confirm_from_the_command_line() -> None:
+def test_cloud_target_requires_confirm_from_the_command_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
     for confirm, origin in (
         ("", "file"),
         ("yes", "environment"),
@@ -201,6 +203,22 @@ def test_cloud_target_requires_confirm_from_the_command_line() -> None:
     with pytest.raises(SystemExit) as e:
         cli.dbt_build("nosuchprofile", "duckdb")
     assert e.value.code == 2
+
+
+def test_bigquery_target_is_refused_before_9b(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Amendment S: a confirmed bigquery build is still refused before 9b —
+    before load() (no DuckDB file appears) and before any dbt call."""
+
+    def never(*a: object, **k: object) -> int:
+        raise AssertionError("load() ran before the 9b refusal")
+
+    monkeypatch.setattr(cli, "load", never)
+    with pytest.raises(SystemExit) as e:
+        cli.dbt_build("tiny", "bigquery", "yes", "command line")
+    assert e.value.code == 2
+    assert "lands in Phase 9b" in capsys.readouterr().out
 
 
 def test_load_reports_its_source_and_refuses_manifest_drift(
