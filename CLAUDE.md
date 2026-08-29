@@ -357,7 +357,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `final` forever (Phase 7: `status` column on `attribution`, out of the golden;
   incremental partition `prompt_date` = local send date, computed on
   `attribution`). The three incremental models name their overwrite column
-  under `overwrite_partition_col` — `partition_by` is a key BOTH adapters
+  under `meta.overwrite_partition_col` — `partition_by` is a key BOTH adapters
   interpret (dbt-bigquery: its native dict; dbt-duckdb: rejects a dict), so
   the native BigQuery `partition_by` dict is set under `target.type ==
   'bigquery'` only (Phase 9b, §8). Vars `skew_max_min` (5 = `generator/models.py`),

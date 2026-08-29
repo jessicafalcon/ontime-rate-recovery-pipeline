@@ -158,7 +158,7 @@ Drift between the plan and what main actually is, and the carry-overs due at
    (`{field, data_type, granularity}`) — a bare string is a compile error
    there. So no single value of `partition_by` satisfies both. Resolution
    (design change, small): the models name the overwrite column under a key
-   neither adapter reads — `overwrite_partition_col` — which the strategy
+   neither adapter reads — `meta.overwrite_partition_col` (a custom key under `meta`, as dbt ≥ 1.10 asks) — which the strategy
    macro reads instead; and set dbt-bigquery's NATIVE `partition_by` only on
    that dialect (`partition_by=({'field': …, 'data_type': 'date'} if
    target.type == 'bigquery' else none)` inside `config()`), so the BigQuery

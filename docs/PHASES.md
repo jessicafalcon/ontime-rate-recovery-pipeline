@@ -354,7 +354,7 @@ five, no `default__`. `generate_schema_name` (a hook override, not a sixth
 macro) lands every model in the `ontime` dataset on `target.type == 'bigquery'`
 only; DuckDB keeps `main_<folder>` and no reader changed — two datasets stays
 9a's pin. The three incremental models name their overwrite column under
-`overwrite_partition_col` and set BigQuery's native `partition_by` dict on that
+`meta.overwrite_partition_col` and set BigQuery's native `partition_by` dict on that
 dialect only (`partition_by` is a key both adapters interpret — §8). The
 landing `loader/bq.py` (`make bq-load`) uploads the same files `load` selects
 to `gs://<id>-ontime/landing/<p>/` and loads `raw.events`/`raw.dim_user` with

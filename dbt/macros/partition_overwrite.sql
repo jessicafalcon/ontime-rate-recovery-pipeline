@@ -27,18 +27,22 @@
 
 {#- The custom incremental strategy (dbt resolves incremental_strategy=
     'partition_overwrite' to this name). It is dbt plumbing, not a dispatch macro
-    — it names the partition column from the model's `overwrite_partition_col`
-    config (a key neither adapter interprets: dbt-bigquery parses `partition_by`
+    — it names the partition column from the model's `meta.overwrite_partition_col`
+    (a custom key under `meta`, as dbt ≥ 1.10 requires; one neither adapter interprets: dbt-bigquery parses `partition_by`
     as its native partitioning dict and dbt-duckdb rejects a dict there — Phase
     9b, ARCHITECTURE §8) and the columns from dest_columns, then calls the one
     dispatched seam above. The conventions test counts dispatch macros, so this
     adds none. -#}
 {% macro get_incremental_partition_overwrite_sql(arg_dict) %}
     {% set dest_cols = arg_dict["dest_columns"] | map(attribute="quoted") | join(", ") %}
+    {% set partition_col = config.get("meta", {}).get("overwrite_partition_col") %}
+    {% if not partition_col %}
+        {{ exceptions.raise_compiler_error("partition_overwrite: the model must set meta.overwrite_partition_col") }}
+    {% endif %}
     {% do return(partition_overwrite(
         arg_dict["target_relation"],
         arg_dict["temp_relation"],
-        config.require("overwrite_partition_col"),
+        partition_col,
         dest_cols
     )) %}
 {% endmacro %}

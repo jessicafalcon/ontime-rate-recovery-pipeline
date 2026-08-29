@@ -150,7 +150,7 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
   two-statement script. Rejected: dbt-bigquery's `insert_overwrite` (a second
   mechanism for one seam whose semantics the goldens already pin); a
   `default__` (the rule).
-- **`overwrite_partition_col` names the overwrite column; the native
+- **`meta.overwrite_partition_col` names the overwrite column; the native
   `partition_by` dict is dialect-guarded.** Found reading main: `partition_by`
   is parsed by dbt-bigquery as its partitioning dict (a string errors) AND read
   by dbt-duckdb (a dict raises) — no single value satisfies both (§8). The

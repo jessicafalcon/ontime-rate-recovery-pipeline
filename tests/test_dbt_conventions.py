@@ -197,13 +197,13 @@ def test_generate_schema_name_collapses_only_on_bigquery() -> None:
 def test_incremental_models_partition_config_is_dialect_safe() -> None:
     """Phase 9b invariant 8 (ARCHITECTURE §8): dbt-bigquery parses `partition_by`
     as its native dict and dbt-duckdb rejects a dict there, so the overwrite
-    column lives under `overwrite_partition_col` (a key neither adapter reads)
+    column lives under `meta.overwrite_partition_col` (a key neither adapter reads)
     and the native dict is set on the bigquery target only; the strategy reads
     the neutral key."""
     for stem in ("stg_events", "stg_prompts", "attribution"):
         path = next((DBT / "models").rglob(f"{stem}.sql"))
         text = path.read_text()
-        col = re.search(r"overwrite_partition_col='(\w+)'", text)
+        col = re.search(r"meta=\{'overwrite_partition_col': '(\w+)'\}", text)
         assert col, stem
         assert re.search(
             r"partition_by=\(\{'field': '"
@@ -213,7 +213,7 @@ def test_incremental_models_partition_config_is_dialect_safe() -> None:
         ), stem
         assert not re.search(r"partition_by='", text), stem
     strategy = (DBT / "macros" / "partition_overwrite.sql").read_text()
-    assert 'config.require("overwrite_partition_col")' in strategy
+    assert 'config.get("meta", {}).get("overwrite_partition_col")' in strategy
     assert 'config.require("partition_by")' not in strategy
 
 

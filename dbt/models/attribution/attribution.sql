@@ -26,7 +26,7 @@
 {{ config(
     materialized='incremental',
     incremental_strategy='partition_overwrite',
-    overwrite_partition_col='prompt_date',
+    meta={'overwrite_partition_col': 'prompt_date'},
     partition_by=({'field': 'prompt_date', 'data_type': 'date'} if target.type == 'bigquery' else none),
     unique_key='prompt_id',
 ) }}

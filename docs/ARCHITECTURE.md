@@ -437,7 +437,7 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   dbt-duckdb's `duckdb__get_partitioned_by` reads it too (a string is warned
   and ignored for non-DuckLake tables; a **dict raises** in
   `normalize_string_or_list`). No single value satisfies both. The models now
-  name the column under `overwrite_partition_col` (a key neither adapter reads)
+  name the column under `meta.overwrite_partition_col` (a custom key under `meta`, as dbt ≥ 1.10 asks; one neither adapter reads)
   and set the native dict only under `target.type == 'bigquery'` inside
   `config()`; pinned by `tests/test_dbt_conventions.py::
   test_incremental_models_partition_config_is_dialect_safe`.
