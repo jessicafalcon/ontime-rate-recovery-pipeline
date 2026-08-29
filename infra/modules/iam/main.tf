@@ -38,14 +38,23 @@ resource "google_storage_bucket_iam_member" "bucket_object_admin" {
 }
 
 # Workload Identity Federation — GitHub Actions OIDC, no key at rest. OPT-IN:
-# `github_repository` defaults to this repo, so an unconditional pool would let
-# this repo's CI impersonate a fork's SA on their default apply (round 3 #9,
-# Amendment H). All three WIF resources are count-gated on enable_ci_wif.
+# all three WIF resources are count-gated on enable_ci_wif (Amendment H), and
+# `github_repository` has no default (Amendment K), so no repo — this one
+# included — is ever trusted unless the operator names it. The precondition
+# turns a missing repo into a named plan-time refusal instead of an
+# interpolation error.
 resource "google_iam_workload_identity_pool" "github" {
   count                     = var.enable_ci_wif ? 1 : 0
   project                   = var.project_id
   workload_identity_pool_id = "ontime-github-pool"
   display_name              = "On-Time GitHub CI"
+
+  lifecycle {
+    precondition {
+      condition     = var.github_repository != null
+      error_message = "enable_ci_wif = true requires github_repository (owner/repo): there is no default trusted repository."
+    }
+  }
 }
 
 resource "google_iam_workload_identity_pool_provider" "github" {

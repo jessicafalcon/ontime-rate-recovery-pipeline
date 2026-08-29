@@ -69,7 +69,8 @@ annotated **Superseded by …** in place and never deleted.
   behind Terraform toggles.** Cloud runs are manual and asked-for; nothing
   billable is left up by default. Realised in Phase 9a: `infra/` with `enable_*`
   toggles defaulting false, `project_id` the only required var, ADC/WIF (never a
-  key), budget alerts $50/$150. ([Phase 0](#phase-0), [Phase 9a](#phase-9a))
+  key), budget alerts 50/150 in the account's currency. ([Phase 0](#phase-0),
+  [Phase 9a](#phase-9a))
 
 ## Process
 
@@ -143,11 +144,16 @@ annotated **Superseded by …** in place and never deleted.
   (`enable_ci_wif`, default false). No `google_service_account_key` resource, no
   keyfile path anywhere (`tests/test_infra.py` greps for it). Rejected: a
   downloaded SA key (a secret at rest — the thing the rule forbids); `roles/editor`
-  (broad). Stands up the WIF the "cross-warehouse dialect drift needs a CI
-  BigQuery job" BACKLOG row needs (closes at 9b exit).
-- **Budget alerts $50/$150; the kill-switch documented, not built.** `modules/
-  budget` sets threshold rules at $50 and $150 on a monthly amount (the total is
-  `min(thresholds)`; the rules are whole-percent multiples of it). A budget only notifies; the real guardrail (Pub/Sub → Cloud
+  (broad). Provides — behind the toggle — the WIF the "cross-warehouse dialect
+  drift needs a CI BigQuery job" BACKLOG row needs; 9b applies it with
+  `enable_ci_wif = true` + its `github_repository` explicitly (a default apply
+  builds none — H, K), and the row closes at 9b exit.
+- **Budget alerts 50/150 in the billing account's currency; the kill-switch
+  documented, not built.** `modules/budget` sets threshold rules at 50 and 150
+  ($50/$150 on a USD account — the currency is the billing account's, round 3's
+  live fix; the variable is `budget_alert_thresholds`, Amendment L) on a monthly
+  amount (the total is `min(thresholds)`; the rules are whole-percent multiples
+  of it). A budget only notifies; the real guardrail (Pub/Sub → Cloud
   Function disabling billing) is documented in `docs/DEPLOYMENT.md` with a resource
   sketch and left unbuilt — nothing billable runs by default, so there is no
   runaway to catch. Closes BACKLOG "Budget alerts do not stop spend". Rejected:
@@ -235,15 +241,57 @@ annotated **Superseded by …** in place and never deleted.
   `validate` argv's `-backend=false`, an any-provider resource allowlist +
   `hashicorp/google ~> 6.0` pin, the FAIL lines asserted via `capsys`, the API pin
   scoped to `local.required_services` as an exact set. Records: this file's
-  `max`→`min` and the superseded-by pointer above. **Gate item:** the
-  apply→destroy Evidence predates the amendments; a fresh cycle re-proves it
-  before merge. **Found on that first live apply** (two §8 gotchas, fixed in
+  `max`→`min` and the superseded-by pointer above. **Gate item — discharged
+  `5d08729` (2026-08-29):** the apply→destroy Evidence predated the amendments;
+  a fresh cycle re-proved it (Evidence row 5). **Found on that first live
+  apply** (two §8 gotchas, fixed in
   the tree): user ADC has no quota project for `billingbudgets` → the provider
   sets `user_project_override` + `billing_project = var.project_id`; a budget's
   currency must be the billing account's → `data.google_billing_account.
   currency_code`, read inside the module at apply time. Rejected: a per-machine
   `set-quota-project` step; a `budget_currency_code` var (a second input on a
   non-USD account, against invariant 1).
+
+- **Review round 4 (phase-exit union, 27 findings): Amendments I–M.** **I** —
+  two datasets stays the pin: `dbt_project.yml`'s per-folder `+schema` would
+  make 9b's first BigQuery build create five `ontime_<folder>` datasets (US
+  multi-region) Terraform never creates and destroy never removes; the SA's
+  dataset-scoped `dataEditor` cannot create one (pinned:
+  `test_no_role_can_create_a_dataset`), so 9b's reconciliation MUST add
+  `generate_schema_name` (BigQuery → `models_dataset`; DuckDB's layout is 9b's
+  call) — a DUE BACKLOG row, which also tells 9b that `test-int-bigquery` needs
+  an explicit `enable_ci_wif = true` apply. Rejected: Terraform-managed
+  per-folder datasets + IAM (seven datasets against a two-dataset pin; more
+  IAM surface for no read benefit). **J** — `workload_identity_provider` is a
+  root output (the `google-github-actions/auth` value), and its
+  `enable_ci_wif ? …[0].name : null` guard is pinned on both the module and
+  root outputs (an unguarded `[0]` is "Invalid index … empty tuple" on every
+  default plan — `terraform validate` does not catch it; the tester's surviving
+  hand-mutation). Rejected: an offline plan check (a real plan needs the google
+  provider's data sources). **K** — `github_repository` has NO default: a fork
+  enabling WIF with H's pinned default still trusted this repo's `main`; now
+  the pool carries `lifecycle.precondition { github_repository != null }`, so
+  the toggle without a repo is a named plan-time refusal (invariant 1 holds —
+  `default = null` is a default). Rejected: a precondition against a hard-coded
+  repo name (a fork carries the very name it must reject). **L** —
+  `budget_alert_thresholds_usd` → `budget_alert_thresholds`; the records say
+  "50/150 in the billing account's currency". **M** — `.claude/settings.json`
+  (an empty `{}`) untracked + gitignored; `test_no_tracked_claude_settings_with_
+  hooks` pins that no tracked `.claude/settings*.json` carries `hooks`
+  (CLAUDE.md: a committed hook would auto-execute an inbound branch's hook).
+  Landed here rather than on a `fix/` branch: a one-line security finding at
+  the phase exit. Test fixes: the `tfstate` scan re-implemented ONCE against
+  invariant 5 (header labels + bodies of every managed block — its second
+  regression in two rounds, the cap's re-implement rule applied to one test);
+  a data-source allowlist (`google_project`, `google_billing_account`); the
+  key scan over EVERY tracked text file with whitespace-insensitive needles +
+  a PEM header; `budget_amount = min(...)` pinned. Operator IAM for apply is
+  now in DEPLOYMENT (Service Usage Consumer; Billing Account Viewer + Costs
+  Manager) with a preflight so a gap fails before 17 resources exist —
+  rejected: reading the billing account at root without `depends_on` (breaks
+  invariant 8, a fresh project plans). The 2026-08-29 destroy reserved the
+  `ontime-pipeline` id until ~2026-09-28 (DEPLOYMENT; 9b's first apply
+  `undelete`s or waits).
 
 ### Phase 8b
 
@@ -925,7 +973,8 @@ annotated **Superseded by …** in place and never deleted.
   `make mutate` is also run standalone.
 - **`PIPELINE_DIRS` is derived from the tree.** Every top-level package not in
   an explicit exemption set (`tests`, `scripts`, `eval`, `generator`, docs,
-  specs, fixtures, infra, data, dotdirs) is a pipeline directory; a new package is
+  specs, fixtures, infra, data, dotdirs — *Phase 9a dropped `infra` from the
+  set: it is a guarded pipeline dir*) is a pipeline directory; a new package is
   guarded the day it appears, and a positive-control test proves the grep
   finds a planted reference. Rejected: a hand-maintained list (vacuous on day
   one, forgotten later).

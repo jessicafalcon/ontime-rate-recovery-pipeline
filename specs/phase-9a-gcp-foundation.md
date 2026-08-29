@@ -380,11 +380,11 @@ authoritative if the landing diverges.)
 
 | Done-when | Proof (test file / `make` target / command output) |
 |---|---|
-| 1 | `tests/test_infra.py::test_project_id_is_the_only_required_var` (brace-matched: exactly one variable without a `default =`), `::test_required_apis_are_enabled_and_survive_destroy`, `::test_modules_depend_on_the_service_enablement`, `::test_stated_defaults_are_pinned`; manual `make tf-plan PROJECT=<id>` (with the two bootstrap APIs on) → a clean plan, no prompt for a second var |
-| 2 | `tests/test_infra.py::test_enable_toggles_default_false`, `::test_optional_modules_are_count_gated`, `::test_every_declared_resource_type_is_on_the_allowlist` (ANY provider's type — a `google_spanner_instance`/`null_resource` at root → red), `::test_required_providers_is_hashicorp_google_only`, `::test_ci_wif_is_opt_in_and_count_gated` (H: drop the `count` from any of the three WIF resources → red); manual `make tf-plan` → `0 to add` for the toggled modules and no WIF resource |
-| 3 | `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars` (`git ls-files` matches no `*.tfstate*`/`*.tfvars`/private-key filetypes; tracked JSON **content-scanned** for `"type": "service_account"`/`"private_key"` — the content scan, not the name, is what catches a gcloud-shaped key), `::test_auth_is_adc_or_wif_never_keyfile`, `::test_wif_provider_condition_is_the_repo_and_ref_conjunction` (also pins `issuer_uri` and the `repo_ref` mapping composition), `::test_wif_impersonation_binds_on_combined_repo_and_ref` (exact `${repo}@${ref}` member); `*.tfvars.json`/`*.auto.tfvars*` gitignored and scanned |
+| 1 | `tests/test_infra.py::test_project_id_is_the_only_required_var` (brace-matched: exactly one variable without a `default =`), `::test_required_apis_are_enabled_and_survive_destroy`, `::test_modules_depend_on_the_service_enablement`, `::test_stated_defaults_are_pinned` (round 4: `github_repository` default `null` + the pool precondition — K), `::test_wif_output_is_null_guarded` (J: both `workload_identity_provider` outputs `enable_ci_wif ? … : null`, so a default plan never indexes an empty tuple); manual `make tf-plan PROJECT=<id>` (with the two bootstrap APIs on) → a clean plan, no prompt for a second var |
+| 2 | `tests/test_infra.py::test_enable_toggles_default_false`, `::test_optional_modules_are_count_gated`, `::test_every_declared_resource_type_is_on_the_allowlist` (ANY provider's type — a `google_spanner_instance`/`null_resource` at root → red), `::test_required_providers_is_hashicorp_google_only`, `::test_ci_wif_is_opt_in_and_count_gated` (H: drop the `count` from any of the three WIF resources → red), `::test_every_data_source_type_is_on_the_allowlist` (round 4 #7: `google_project`, `google_billing_account` exactly), `::test_no_role_can_create_a_dataset` (I: no `dataOwner`/`admin`/`user`/owner/editor anywhere; exactly two `google_bigquery_dataset` blocks), `::test_budget_amount_is_the_smallest_threshold` (`min` → `max` red), `::test_budget_currency_is_the_billing_accounts` (`currency_code` from the data source, never a literal); manual `make tf-plan` → `0 to add` for the toggled modules and no WIF resource |
+| 3 | `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars` (`git ls-files` matches no `*.tfstate*`/`*.tfvars`/private-key filetypes; EVERY tracked text file **content-scanned** for a SA-key body — a `type` of `service_account`, a `private_key` member, a PEM `PRIVATE KEY` header, whitespace-insensitive so a minified key matches (round 4 #8) — the content scan, not the name, is what catches a gcloud-shaped key), `::test_auth_is_adc_or_wif_never_keyfile` (also pins the provider's `user_project_override` + `billing_project = var.project_id` — the quota project, §8), `::test_no_tracked_claude_settings_with_hooks` (M), `::test_wif_provider_condition_is_the_repo_and_ref_conjunction` (also pins `issuer_uri` and the `repo_ref` mapping composition), `::test_wif_impersonation_binds_on_combined_repo_and_ref` (exact `${repo}@${ref}` member); `*.tfvars.json`/`*.auto.tfvars*` gitignored and scanned |
 | 4 | `tests/test_infra.py::test_sa_roles_are_least_privilege` (roles in ANY `.tf` ⊆ allowlist; owner/editor absent), `::test_project_level_grant_is_only_bigquery_jobuser` (whole tree: the only `google_project_iam_member` role anywhere is `jobUser`; `objectAdmin` bucket-scoped, `dataEditor` dataset-scoped — a project-wide move → red) |
-| 5 | manual cycle **2026-08-29 on `ontime-rate-recovery` (post-Amendment-H tree, `71e30ce`)**: `make tf-plan` → `Plan: 18 to add, 0 to change, 0 to destroy` (9 API enablements, 2 datasets, 1 bucket, 1 SA + 4 scoped grants, 1 budget — **no WIF pool/provider/binding, no Composer/Spanner**); `make tf-apply … CONFIRM=yes` → `Apply complete! Resources: 18 added` (after two live fixes: quota project, budget currency — §8 Gotchas); `bq ls` = `ontime`,`raw`; buckets = `ontime-rate-recovery-ontime`; SA = `ontime-pipeline@…`; `gcloud iam workload-identity-pools list` = **empty**; budget `ontime-ontime-rate-recovery`; `make tf-destroy … CONFIRM=yes` → `Destroy complete! Resources: 18 destroyed`; state list 0; `bq ls` / buckets / SAs / WIF pools / our budget all **empty** (the API enablements stay on, `disable_on_destroy = false`, free); `tests/test_infra.py::test_every_resource_is_destroyable`, `::test_bucket_is_hardened`, `::test_no_staging_bucket_variable_and_the_managed_bucket_is_derived`, `::test_region_and_dataset_location_are_us_central1` |
+| 5 | manual cycle **2026-08-29 on `ontime-rate-recovery` (post-Amendment-H tree, `71e30ce`)**: `make tf-plan` → `Plan: 18 to add, 0 to change, 0 to destroy` (9 API enablements, 2 datasets, 1 bucket, 1 SA + 4 scoped grants, 1 budget — **no WIF pool/provider/binding, no Composer/Spanner**); `make tf-apply … CONFIRM=yes` → `Apply complete! Resources: 18 added` (after two live fixes: quota project, budget currency — §8 Gotchas); `bq ls` = `ontime`,`raw`; buckets = `ontime-rate-recovery-ontime`; SA = `ontime-pipeline@…`; `gcloud iam workload-identity-pools list` = **empty**; budget `ontime-ontime-rate-recovery`; `make tf-destroy … CONFIRM=yes` → `Destroy complete! Resources: 18 destroyed`; state list 0; `bq ls` / buckets / SAs / WIF pools / our budget all **empty** (the API enablements stay on, `disable_on_destroy = false`, free); `tests/test_infra.py::test_every_resource_is_destroyable`, `::test_bucket_is_hardened`, `::test_no_staging_bucket_variable_and_the_managed_bucket_is_derived` (round 4 #4: header labels of managed blocks scanned too), `::test_region_and_dataset_location_are_us_central1`. **Live consequence:** this destroy reserved the `ontime-pipeline` SA id on that project until ~2026-09-28 (DEPLOYMENT) |
 | 6 | `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only` (fake runner), `::test_tf_targets_pass_project_as_one_literal`; `tests/test_infra.py::test_cli_validates_project`, `::test_cli_requires_confirm_origin`, `::test_cli_validates_before_running`, `::test_cli_builds_the_expected_argv`, `::test_cli_missing_terraform_is_a_clean_fail` (FAIL lines asserted), `::test_cli_validate_argv_is_offline` (`-backend=false`); `::test_project_id_validation_mirrors_the_cli_regex` (the HCL `validation` equals `PROJECT_RE`, so a tfvars/direct apply is shape-checked too), `::test_input_shape_validations_exist`; mutations `require_confirm invert-guard`/`delete-call`, `validate_project invert-guard`, `tf constant-return:0` all KILLED |
 
 ## Invariants (REQUIRED)
@@ -392,12 +392,12 @@ authoritative if the landing diverges.)
 | Invariant ("for all …, … holds") | Falsified by (scenario test) |
 |---|---|
 | 1. **Only `project_id` is required.** For all fresh clones, every Terraform variable except `project_id` has a `default =` assignment, so a plan needs only that one input (brace-matched, so a nested `validation {}` can't hide a required var; keyed on the assignment, so a description containing "default" doesn't read as one). | `tests/test_infra.py::test_project_id_is_the_only_required_var` (a second default-less var → red) |
-| 2. **Meter off by default; a default apply creates only what was asked for.** For all default applies, no billable resource is created outside the count-gated composer/spanner modules and no WIF trust outside the count-gated `enable_ci_wif` resources; `enable_*` default false, the gated modules/resources are `count = var.enable_* ? 1 : 0`, every declared resource type (any provider) is on an explicit allowlist, and the only provider is `hashicorp/google ~> 6.0`. | `tests/test_infra.py::test_enable_toggles_default_false`, `::test_optional_modules_are_count_gated`, `::test_ci_wif_is_opt_in_and_count_gated`, `::test_every_declared_resource_type_is_on_the_allowlist` (a `google_spanner_instance`/`null_resource` at root → red), `::test_required_providers_is_hashicorp_google_only`; manual `tf-plan` zero toggled resources |
-| 3. **No secret at rest.** For all commits, no tfstate/tfvars/`tfvars.json`/private-key filetype is tracked (and Terraform's auto-loaded `*.auto.tfvars*`/`*.tfvars.json` are gitignored), and every tracked JSON is content-scanned for a SA-key body (the **content scan**, not the filename, is what catches a gcloud-shaped `<project>-<keyid>.json`); no `.tf`/`profiles.yml` sets a `credentials`/`keyfile` argument; auth is ADC/WIF. | `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars`, `::test_auth_is_adc_or_wif_never_keyfile` |
+| 2. **Meter off by default; a default apply creates only what was asked for.** For all default applies, no billable resource is created outside the count-gated composer/spanner modules and no WIF trust outside the count-gated `enable_ci_wif` resources; `enable_*` default false, the gated modules/resources are `count = var.enable_* ? 1 : 0`, every declared resource type AND data-source type (any provider) is on an explicit allowlist, the only provider is `hashicorp/google ~> 6.0`, exactly two datasets exist and no role can create another (I), and the budget's amount is `min(thresholds)` in the billing account's currency. | `tests/test_infra.py::test_enable_toggles_default_false`, `::test_optional_modules_are_count_gated`, `::test_ci_wif_is_opt_in_and_count_gated`, `::test_every_declared_resource_type_is_on_the_allowlist` (a `google_spanner_instance`/`null_resource` at root → red), `::test_every_data_source_type_is_on_the_allowlist`, `::test_required_providers_is_hashicorp_google_only`, `::test_no_role_can_create_a_dataset`, `::test_budget_amount_is_the_smallest_threshold`, `::test_budget_currency_is_the_billing_accounts`; manual `tf-plan` zero toggled resources |
+| 3. **No secret at rest.** For all commits, no tfstate/tfvars/`tfvars.json`/private-key filetype is tracked (and Terraform's auto-loaded `*.auto.tfvars*`/`*.tfvars.json` are gitignored), and EVERY tracked text file is content-scanned for a SA-key body — whitespace-insensitive `type`/`service_account`, a `private_key` member, a PEM `PRIVATE KEY` header (the **content scan**, not the filename, is what catches a gcloud-shaped `<project>-<keyid>.json` or a key pasted into a `.md`); no `.tf`/`profiles.yml` sets a `credentials`/`keyfile` argument; auth is ADC/WIF, and the provider sends `project_id` as the quota project (`user_project_override` + `billing_project`) so user ADC needs no per-machine step; no tracked `.claude/settings*.json` carries a `hooks` key (M). | `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars`, `::test_auth_is_adc_or_wif_never_keyfile`, `::test_no_tracked_claude_settings_with_hooks` |
 | 4. **Least privilege, scoped.** For all IAM role grants in ANY `.tf`, the SA gets only the BQ data/job + bucket-object + WIF roles, never owner/editor; and the only PROJECT-level grant is `bigquery.jobUser` — `objectAdmin` is bucket-scoped, `dataEditor` dataset-scoped. | `tests/test_infra.py::test_sa_roles_are_least_privilege` (a `roles/owner` at root → red), `::test_project_level_grant_is_only_bigquery_jobuser` (a project-wide `objectAdmin` → red) |
-| 5. **Destroy is total; the managed bucket is not the state bucket.** For all applied resources, `terraform destroy` removes them — no `prevent_destroy`, datasets `delete_contents_on_destroy`, bucket `force_destroy` + hardened (public-access-prevention, versioning, lifecycle); the managed bucket is derived `${project_id}-ontime` (never a var), and no MANAGED block (`resource|data|module|variable|output|locals` — not the `terraform {}` backend block, which may legitimately name it) mentions `tfstate`. | `tests/test_infra.py::test_every_resource_is_destroyable`, `::test_bucket_is_hardened`, `::test_no_staging_bucket_variable_and_the_managed_bucket_is_derived`; manual apply→destroy→empty listing |
+| 5. **Destroy is total; the managed bucket is not the state bucket.** For all applied resources, `terraform destroy` removes them — no `prevent_destroy`, datasets `delete_contents_on_destroy`, bucket `force_destroy` + hardened (public-access-prevention, versioning, lifecycle); the managed bucket is derived `${project_id}-ontime` (never a var), and no MANAGED block (`resource|data|module|variable|output|locals` — header labels included, not the `terraform {}` backend block, which may legitimately name it) mentions `tfstate`. | `tests/test_infra.py::test_every_resource_is_destroyable`, `::test_bucket_is_hardened`, `::test_no_staging_bucket_variable_and_the_managed_bucket_is_derived`; manual apply→destroy→empty listing |
 | 6. **Cloud/destructive targets gated, validated first, correct argv — and the HCL re-validates.** For all `tf-apply`/`tf-destroy`, `CONFIRM=yes` from the command line is required; `PROJECT` is validated before the runner runs; the argv carries `-var project_id=…` + `-input=false` (+ `-auto-approve` for the mutating pair); `tf-validate`'s init carries `-backend=false`; (injected fake runner) no test spawns real terraform; and `variable "project_id"` carries the same shape as a `validation`, so a tfvars / direct `terraform apply` cannot bypass it (#13). | `tests/test_infra.py::test_cli_requires_confirm_origin`, `::test_cli_validates_project` (rejects `my-proj\n`), `::test_cli_validates_before_running`, `::test_cli_builds_the_expected_argv`, `::test_cli_validate_argv_is_offline`, `::test_cli_missing_terraform_is_a_clean_fail`, `::test_project_id_validation_mirrors_the_cli_regex`; `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only` |
-| 7. **WIF trust is opt-in and branch-scoped, at both the provider and the binding.** For all CI token exchanges, the WIF resources exist only under `enable_ci_wif = true` (H); the provider's issuer is GitHub's OIDC endpoint exactly, its `attribute_condition` requires repo AND ref (`&&`, not `||`), `attribute.repo_ref` is composed from both claims, and the impersonation binds on the exact `attribute.repo_ref/${repo}@${ref}` — not repo-only. | `tests/test_infra.py::test_ci_wif_is_opt_in_and_count_gated`, `::test_wif_provider_condition_is_the_repo_and_ref_conjunction` (`&&`→`||` red; issuer → `evil.example.com` red), `::test_wif_impersonation_binds_on_combined_repo_and_ref` (widening to `attribute.repository/*` red) |
+| 7. **WIF trust is opt-in and branch-scoped, at both the provider and the binding.** For all CI token exchanges, the WIF resources exist only under `enable_ci_wif = true` (H) AND a named `github_repository` (K — no default repository; the pool's precondition refuses the toggle without one); the provider name reaches the operator as the root `workload_identity_provider` output, null otherwise (J); the provider's issuer is GitHub's OIDC endpoint exactly, its `attribute_condition` requires repo AND ref (`&&`, not `||`), `attribute.repo_ref` is composed from both claims, and the impersonation binds on the exact `attribute.repo_ref/${repo}@${ref}` — not repo-only. | `tests/test_infra.py::test_ci_wif_is_opt_in_and_count_gated`, `::test_stated_defaults_are_pinned` (a default repo slug → red; the precondition dropped → red), `::test_wif_output_is_null_guarded`, `::test_wif_provider_condition_is_the_repo_and_ref_conjunction` (`&&`→`||` red; issuer → `evil.example.com` red), `::test_wif_impersonation_binds_on_combined_repo_and_ref` (widening to `attribute.repository/*` red) |
 | 8. **A fresh project applies (with the two bootstrap APIs on).** For all required APIs, `google_project_service` enables them (`disable_on_destroy = false`) and the modules `depends_on` it; the two bootstrap APIs (`serviceusage`, `cloudresourcemanager`) that `google_project_service`/`data.google_project` themselves need are a documented one-time `gcloud services enable` on a brand-new project. | `tests/test_infra.py::test_required_apis_are_enabled_and_survive_destroy`, `::test_modules_depend_on_the_service_enablement` |
 
 Rules — the Terraform HCL is configuration no mutation operator addresses (the
@@ -460,8 +460,10 @@ implementation on a scratch copy (the Phase 6/7 pattern):
   (create the versioned bucket, `terraform init -migrate-state`). Rejected: a GCS
   backend required from clone one (a chicken-and-egg the bucket can't resolve in
   its own apply).
-- **Budget alerts $50 / $150; the kill-switch documented, not built (item 4)** —
-  `modules/budget` sets threshold rules at $50 and $150 on a monthly amount;
+- **Budget alerts 50 / 150 in the billing account's currency ($50/$150 on USD);
+  the kill-switch documented, not built (item 4)** — `modules/budget` sets
+  threshold rules at 50 and 150 (`budget_alert_thresholds`, Amendment L) on a
+  monthly amount;
   `docs/DEPLOYMENT.md` documents the optional Pub/Sub → Cloud Function billing
   disable as the real guardrail. Closes BACKLOG "Budget alerts do not stop
   spend". Rejected: building the kill-switch now (nothing billable runs by
@@ -488,7 +490,9 @@ set precedes the modules (D) with the two bootstrap APIs documented (G).
 ## Scope (files)
 
 - `infra/main.tf`, `infra/variables.tf`, `infra/outputs.tf`,
-  `infra/terraform.tfvars.example`,
+  `infra/terraform.tfvars.example`, `infra/.terraform.lock.hcl` (tracked — the
+  provider hash pin `tf-validate`'s init writes; `.terraform/` itself is
+  ignored),
   `infra/modules/bigquery/{main,variables,outputs}.tf`,
   `infra/modules/gcs/{main,variables,outputs}.tf`,
   `infra/modules/iam/{main,variables,outputs}.tf`,
@@ -506,33 +510,44 @@ set precedes the modules (D) with the two bootstrap APIs documented (G).
   four tf targets), `tests/test_truth_isolation.py` (drop `infra` from EXEMPT)
 - `docs/DEPLOYMENT.md` (new — bootstrap, cost table, teardown, kill-switch)
 - Records: `DECISIONS.md`, `docs/PHASES.md`, `CLAUDE.md`, `docs/ARCHITECTURE.md`
-  (§6; §8 the SA/WIF 30-day soft-delete gotcha), `BACKLOG.md`
+  (§6; §8 the SA/WIF 30-day soft-delete, quota-project and budget-currency
+  gotchas), `BACKLOG.md`
+- `.gitignore` — `*.tfvars.json` (round 3 #12) and `.claude/settings.json`
+  (Amendment M; the file itself is untracked)
 - Untouched by contract: `generator/`, `dbt/`, `loader/`, `eval/`, `serving/`,
-  `orchestration/`, `fixtures/`, `tests/pins.py`, `pyproject.toml`, `uv.lock`,
-  `.gitignore` (its Terraform block already exists)
+  `orchestration/`, `fixtures/`, `tests/pins.py`, `pyproject.toml`, `uv.lock`
 
 ## Record updates (REQUIRED)
 
 - [ ] `DECISIONS.md` — Phase 9a entries: `infra/` layout + `enable_*` toggles;
-      least-privilege SA + WIF (ADC/WIF only; superseded-by pointer to B/F/H);
-      two datasets + region; state backend bootstrap-documented; budget $50/$150
-      (amount = `min`) + kill-switch documented; `infra/cli.py` + the four gated
-      targets; the review-round entries (A–D, E–G, H). Note on the in-force
+      least-privilege SA + opt-in WIF (ADC/WIF only; superseded-by pointer to B/F/H/K);
+      two datasets + region; state backend bootstrap-documented; budget 50/150
+      in the account's currency (amount = `min`) + kill-switch documented;
+      `infra/cli.py` + the four gated targets; the review-round entries (A–D,
+      E–G, H, I–M). Note on the in-force
       Infra line (the toggles are real now).
 - [ ] `docs/PHASES.md` — Phase 9 "Delivered" paragraph (9a half); Done-when as
-      landed for the infra clauses
+      landed for the infra clauses (incl. "with the two bootstrap APIs on" — G)
 - [ ] `CLAUDE.md` — Current status; Commands (`tf-validate|tf-plan|tf-apply|
       tf-destroy`); Repo map (`infra/` real); `unexport` list (`PROJECT`); Open
       BACKLOG rows: **13**
 - [ ] `docs/ARCHITECTURE.md` — §6 (state backend bootstrap, WIF, budget as
-      landed); §8 Gotchas: the SA/WIF pool 30-day soft-delete on apply→destroy→apply
+      landed); §8 Gotchas: the SA/WIF pool 30-day soft-delete on
+      apply→destroy→apply; user ADC's quota project (`user_project_override`);
+      the budget's currency is the billing account's
 - [ ] `BACKLOG.md` — "Budget alerts do not stop spend" struck (`DONE Phase 9a` —
       documented as optional); "Spanner 90-day trial expiry" re-checked,
       re-deferred (module written, `enable_spanner=false`, no apply); count 14 → 13
 - [ ] `docs/DEPLOYMENT.md` — new (bootstrap, cost table, teardown, optional
       kill-switch; Spanner/Composer teardown dates; CI WIF opt-in via
       `enable_ci_wif`)
-- [ ] `.gitignore` — `*.tfvars.json` (Terraform auto-loads it; #12)
+- [ ] `.gitignore` — `*.tfvars.json` (Terraform auto-loads it; #12);
+      `.claude/settings.json` (M)
+- [ ] `docs/DEPLOYMENT.md` — operator permissions table + billing preflight
+      (round 4 #10); the 2026-08-29 SA-id reservation (#27); the WIF pair
+      (`enable_ci_wif` + `github_repository`) and the root output (J, K)
+- [ ] `.claude/agents/code-reviewer.md` — five dispatch macros (#16)
+- [ ] `.claude/agents/coherence-auditor.md` — five dispatch macros (#16)
 - [ ] `infra/terraform.tfvars.example` — the `enable_ci_wif` opt-in shown
 - [ ] Spec amendments — none (the phase-9b spec does not exist yet; it is
       finalized after 9a merges, per the predecessor-merged rule)
@@ -551,8 +566,9 @@ resources and `tf-destroy` deletes them: both `$(origin)`-gated (`CONFIRM=yes`
 command-line only), ask-first every time. Cost if run twice: `tf-apply` is
 idempotent (Terraform diffs to no-op on a second run — no double spend);
 `tf-destroy` is idempotent (nothing left to delete). What `tf-destroy` removes:
-every resource in state — the two datasets, the bucket, the SA + WIF, the budget
-— returning the project to zero billable resources.
+every resource in state — the two datasets, the bucket, the SA (+ the WIF
+pool/provider/binding only if `enable_ci_wif` was on), the budget — returning
+the project to zero billable resources.
 
 | Target | empty | `../x` | `"; ` | env-exported | `$(origin)` on CONFIRM | Pinned by |
 |---|---|---|---|---|---|---|

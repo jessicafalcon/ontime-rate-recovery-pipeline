@@ -292,13 +292,16 @@ attachment — the container test does, trigger CI gains Docker).
 ## Phase 9 — GCP foundation (Terraform, BigQuery)
 
 **Goal.** `infra/`: BigQuery datasets, GCS bucket, service account + least-
-privilege IAM, budget alerts ($50/$150), GCS state backend (bootstrap documented),
+privilege IAM, budget alerts (50/150 in the account's currency), GCS state
+backend (bootstrap documented),
 `terraform.tfvars` gitignored; `make tf-plan | tf-apply | tf-destroy`. dbt
 `bigquery` target; the five macros proven on BigQuery (the fifth,
 `to_local_time`, added in Phase 2); `make test-int-bigquery`.
 
 **Done when.** `terraform plan` clean from a fresh clone with only
-`project_id`; `make dbt-build TARGET=bigquery PROFILE=tiny` green with the same
+`project_id` (the two bootstrap APIs, `serviceusage` + `cloudresourcemanager`,
+on — a one-time `gcloud services enable` on a brand-new project); `make
+dbt-build TARGET=bigquery PROFILE=tiny` green with the same
 pins as DuckDB; `terraform destroy` leaves nothing billable.
 
 **Split 9a/9b** (the Done-when is naturally two, disjoint surfaces; ≤6 pinned
@@ -313,8 +316,12 @@ default. `infra/` with one module per concern — `bigquery` (datasets `raw` +
 defaulting false, so a default plan makes zero of them. One least-privilege
 service account (BQ `jobUser` + dataset-scoped `dataEditor`, bucket
 `objectAdmin`; never owner/editor) + a WIF pool/provider for CI, opt-in behind
-`enable_ci_wif` (default false) — ADC/WIF only, no key at rest. Budget alerts $50/$150 (notify only); the billing kill-switch is
-documented optional in `docs/DEPLOYMENT.md`, not built. `project_id` the only
+`enable_ci_wif` (default false, and no default `github_repository` — a fork
+trusts nothing it did not name) — ADC/WIF only, no key at rest. Budget alerts
+at 50/150 in the billing account's currency ($50/$150 on USD; notify only);
+the billing kill-switch is documented optional in `docs/DEPLOYMENT.md`, not
+built. Exactly two datasets: 9b's dbt build must land inside `ontime`
+(`generate_schema_name`) — the SA cannot create a dataset. `project_id` the only
 required var (`region` defaults `us-central1`; the budget's billing account +
 project number are a `google_project` data source). `infra/cli.py` validates
 `PROJECT` and gates `tf-apply`/`tf-destroy` on `CONFIRM=yes $(origin)`; four

@@ -36,3 +36,4 @@ __pycache__/
 # Phase 8b test-int-airflow secret canary (planted then removed; ignored so an
 # aborted run leaves no untracked key-shaped file — round 4 #5)
 *otr-canary*
+.claude/settings.json

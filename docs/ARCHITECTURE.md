@@ -402,11 +402,13 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   our own project (whose APIs Terraform enables). The alternative
   `gcloud auth application-default set-quota-project` would have to be
   remembered on every machine. WIF/SA credentials are unaffected.
-- **A budget's currency must be the billing account's** (Phase 9a, same first
-  apply). `currency_code = "USD"` on an MXN billing account is a bare 400
+- **A budget's currency must be the billing account's** (Phase 9a, the apply
+  after the quota-project fix — the first stopped at 17/18 before reaching the
+  budget). `currency_code = "USD"` on an MXN billing account is a bare 400
   "Request contains an invalid argument" — no field named. The module now reads
   `data.google_billing_account.currency_code` and uses that, so
-  `budget_alert_thresholds_usd` are numbers in the account's currency (the
-  "$50/$150" in the records assumes a USD account). The data source lives inside
+  `budget_alert_thresholds` are numbers in the account's currency (the
+  "$50/$150" in the records assumes a USD account; the variable lost its `_usd`
+  suffix in round 4, Amendment L). The data source lives inside
   `modules/budget`, which `depends_on` the API enablement, so it is read at
   apply time and a fresh project still plans.

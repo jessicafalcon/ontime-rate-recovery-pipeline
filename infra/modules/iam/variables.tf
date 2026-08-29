@@ -19,7 +19,8 @@ variable "enable_ci_wif" {
 }
 
 variable "github_repository" {
-  type = string
+  type     = string
+  nullable = true
 }
 
 variable "github_ref" {

@@ -97,7 +97,11 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `modules/{composer,spanner}` `count`-gated behind `enable_*` toggles that
   default false (so is the CI WIF layer inside `iam`: `enable_ci_wif`).
   `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy` on `CONFIRM=yes
-  $(origin)`) drives `make tf-validate|tf-plan|tf-apply|tf-destroy`. `terraform.tfvars.example` only; ADC/WIF, never a key.
+  $(origin)`) drives `make tf-validate|tf-plan|tf-apply|tf-destroy`.
+  `terraform.tfvars.example` only (never a `*.tfvars`); `.terraform.lock.hcl`
+  is tracked (the provider pin); ADC/WIF, never a key. A pipeline dir — guarded
+  by `test_truth_isolation.py`; the `.tf` tree is pinned by the static
+  `tests/test_infra.py`.
 - `fixtures/tiny/` — golden `raw/events_<upload-date>.jsonl` + `dims/` +
   `truth/` + `expected/attribution.csv` (Phase 3) + `MANIFEST.sha256`. **READ-ONLY**: the
   review gate FAILs any change without a `Freeze:` line in the phase spec;
@@ -267,16 +271,22 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   project-id shape) before deriving `-var project_id=<id>`, then `terraform
   -chdir=infra plan`. Reads GCP APIs (ADC/WIF); shows the diff, creates nothing
 - `make tf-apply | tf-destroy PROJECT=<id> CONFIRM=yes` *(Phase 9a)* — apply
-  creates the free-tier layer (two BigQuery datasets, a GCS bucket, a
-  least-privilege service account + WIF, budget alerts $50/$150); destroy removes
-  everything in state (nothing billable left). Cloud-cost / destructive: `CONFIRM=
-  yes` must have COMMAND-LINE origin (`$(origin CONFIRM)`); ask first, every time.
-  Auth ADC/WIF only — never a keyfile. `enable_composer`/`enable_spanner` default
-  false, so a default apply makes zero Composer/Spanner resources; `enable_ci_wif`
-  defaults false, so it also builds no WIF trust (CI auth is an explicit opt-in)
+  creates the free-tier layer: 9 API enablements (free, kept on by destroy),
+  two BigQuery datasets, a GCS staging bucket, a least-privilege service
+  account with 4 scoped grants, and budget alerts at 50/150 in the billing
+  account's currency ($50/$150 on USD; notify only) — `Plan: 18 to add`;
+  destroy removes everything in state (nothing billable left). Cloud-cost /
+  destructive: `CONFIRM=yes` must have COMMAND-LINE origin (`$(origin
+  CONFIRM)`); ask first, every time. Auth ADC/WIF only — never a keyfile.
+  `enable_composer`/`enable_spanner` default false, so a default apply makes
+  zero Composer/Spanner resources; `enable_ci_wif` defaults false, so it builds
+  no WIF pool/provider/binding — CI auth is an explicit opt-in that also needs
+  `github_repository` (no default repo is trusted); the provider name is then
+  the `workload_identity_provider` output
 - Later phases add:
-  `test-int-bigquery` (9b — the DuckDB≡BigQuery pin-parity run behind `OTR_INT`/
-  WIF). Each lands with its phase and is listed here in the same PR.
+  `test-int-bigquery` (9b — the DuckDB≡BigQuery pin-parity run behind `OTR_INT`;
+  in CI it needs an explicit `enable_ci_wif = true` apply, never the default
+  one). Each lands with its phase and is listed here in the same PR.
 
 ## Event model facts (from ARCHITECTURE.md §2; update if reality differs)
 
@@ -351,8 +361,8 @@ DECISIONS.md or fix it.
   write-back twice is a no-op; a `final` label never changes.
 - Truth isolation: `truth/` is never a dbt source, never an input to
   `features`/`scores`. `tests/test_truth_isolation.py` greps every pipeline
-  directory (`loader/`, `dbt/`, `serving/`, `orchestration/`) for the word; in
-  `generator/` only `truth.py` (the writer), `models.py` (record types) and
+  directory (`loader/`, `dbt/`, `serving/`, `orchestration/`, `infra/`) for the
+  word; in `generator/` only `truth.py` (the writer), `models.py` (record types) and
   `cli.py` (the entry point that calls the writer) may name it — generation
   logic never does.
 - Model scoring and simulation are seeded; the generated blocks of
@@ -605,7 +615,8 @@ zero of them. One **least-privilege** service account (BQ `jobUser` +
 dataset-scoped `dataEditor`, bucket `objectAdmin`; never `roles/owner|editor`) +
 a **WIF** pool/provider for CI, opt-in behind `enable_ci_wif` (default false) —
 **ADC/WIF only, no key at rest**. Budget alerts
-**$50/$150** (notify only); the billing kill-switch is documented optional in
+**50/150 in the billing account's currency** ($50/$150 on USD; notify only);
+the billing kill-switch is documented optional in
 `docs/DEPLOYMENT.md`, not built. **`project_id` is the only required var**
 (`region` defaults `us-central1`; the budget's billing account + project number
 are a `google_project` data source). `infra/cli.py` validates `PROJECT` before
@@ -638,11 +649,21 @@ item discharged:** a fresh plan→apply→destroy cycle on `ontime-rate-recovery
 re-proved Done-when 1/2/5 on the post-H tree (18 added, 18 destroyed, no WIF
 resource, nothing billable left) and surfaced two live gotchas fixed in-tree
 (§8: ADC quota project → provider `user_project_override`; budget currency →
-derived from the billing account). Next: round 4 confirms green → merge
-→ 9b (its first
-commit reconciles against main-with-9a; it also fixes the 8b-opened row "the
-DAG's build owns its landing" — `dbt_build(TARGET=bigquery)` must not call the
-DuckDB `load()`). Open BACKLOG rows: **13** (9a struck "Budget alerts do not stop
-spend"; Spanner re-deferred; the four 9b-triggered rows stay open).
+derived from the billing account). **Review round 4 applied (27 findings,
+phase-exit union): 5 amendments** — I (two datasets stays the pin; 9b's
+reconciliation must add `generate_schema_name` so the BigQuery build lands in
+`ontime`, and `test-int-bigquery` needs an explicit `enable_ci_wif = true`
+apply — a DUE BACKLOG row), J (root `workload_identity_provider` output, null
+guard pinned), K (no default `github_repository`; the pool's precondition
+refuses the toggle without one), L (`budget_alert_thresholds`, the account's
+currency), M (`.claude/settings.json` untracked + pinned); 4 test fixes
+(`tfstate` scan covers header labels — re-implemented once; data-source
+allowlist; whole-tree key scan; `min` pin); the rest records. Next: round 5
+confirms green → merge → 9b (its first commit reconciles against
+main-with-9a: `generate_schema_name`, the "DAG's build owns its landing" row —
+`dbt_build(TARGET=bigquery)` must not call the DuckDB `load()` — and the
+`ontime-pipeline` SA id reserved until ~2026-09-28 by the 2026-08-29 destroy).
+Open BACKLOG rows: **14** (9a struck "Budget alerts do not stop spend"; Spanner
+re-deferred; the four 9b-triggered rows re-deferred in-row; one new 9b row).
 
 (Update this section at the end of every working day.)

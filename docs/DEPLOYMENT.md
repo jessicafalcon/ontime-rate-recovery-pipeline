@@ -17,11 +17,38 @@ is applied until you run `make tf-apply` yourself.
   scoped to **both** the repository (`var.github_repository`) **and** the
   trusted ref (`var.github_ref`, default `refs/heads/main`) — a non-main branch's
   CI cannot mint the token. A workflow uses `google-github-actions/auth` with the
-  provider and the `ontime-pipeline` service account — a short-lived credential,
-  no secret at rest. The toggle **defaults false**: a default apply builds no WIF
-  trust at all, so a fork cannot end up trusting *this* repo's `main` (the
-  `github_repository` default) to impersonate *its* service account. A fork that
-  wants CI sets `enable_ci_wif = true` **and** its own `github_repository`.
+  provider (the `workload_identity_provider` root output — `null` until the
+  toggle is on) and the `ontime-pipeline` service account — a short-lived
+  credential, no secret at rest. The toggle **defaults false**, and
+  `github_repository` **has no default**: a default apply builds no WIF trust at
+  all, and `enable_ci_wif = true` without a repository is refused at plan by
+  the pool's precondition — so no repository, this one included, is ever trusted
+  unless you name it (Amendments H, K). CI setup is therefore always the pair:
+  `enable_ci_wif = true` **and** `github_repository = "<owner>/<repo>"` (plus
+  `github_ref` if not `refs/heads/main`). 9b's `test-int-bigquery` in CI needs
+  exactly this opt-in apply.
+
+### Operator permissions for `tf-apply` (your ADC identity, not the SA)
+
+Beyond creating the project resources (project Owner, or Editor + Project IAM
+Admin for the SA grants), two mechanisms need permissions a project role does
+not carry:
+
+| Mechanism | Permission | Minimal predefined role |
+|---|---|---|
+| `user_project_override` (every API call is quota'd on `project_id`) | `serviceusage.services.use` on the project | `roles/serviceusage.serviceUsageConsumer` (in Owner/Editor) |
+| `data.google_billing_account` (the budget's currency) | `billing.accounts.get` on the billing account | `roles/billing.viewer` on the billing account |
+| `google_billing_budget` create/delete | `billing.budgets.create` / `.delete` on the billing account | `roles/billing.costsManager` on the billing account |
+
+The billing-account read is deferred to apply (the budget module `depends_on`
+the API enablement so a brand-new project still plans), so a missing billing
+permission fails **mid-apply with 17 resources already created** — not at
+plan. Preflight it once before the first apply:
+
+```
+gcloud billing projects describe <project_id>                # shows billingAccountName
+gcloud billing accounts describe <billingAccountName>        # 403 here = missing billing.accounts.get
+```
 
 ## One-time API bootstrap (a brand-new project only)
 
@@ -114,8 +141,8 @@ make tf-destroy PROJECT=<project_id> CONFIRM=yes
 Removes every resource in state — the two datasets
 (`delete_contents_on_destroy`, so they go even with 9b's tables), the staging
 bucket (`force_destroy`, so it goes even with objects), the service account (+
-the WIF pool if `enable_ci_wif` was on), and the budget. The bootstrap **tfstate bucket is not managed and is not
-removed** (it holds the state). The **API enablements stay on**
+the WIF pool if `enable_ci_wif` was on), and the budget. The bootstrap
+**tfstate bucket is not managed and is not removed** (it holds the state). The **API enablements stay on**
 (`disable_on_destroy = false`) — deliberately, so a re-apply works and a
 project-wide API another workload may use is never disabled by our teardown;
 enabled APIs are free, so this leaves nothing billable. Verify the meter is at
@@ -130,7 +157,9 @@ gcloud billing budgets list --billing-account=<acct>  # no ontime-<project> budg
 
 Nothing else is created outside Terraform, and no resource carries
 `prevent_destroy`, so `tf-destroy` is total for the managed resources — the
-Phase 9a Done-when.
+Phase 9a Done-when. That holds for 9b's tables too only because the dbt build
+lands inside `ontime` (`generate_schema_name`; the SA cannot create a dataset,
+so a per-folder `ontime_<folder>` layout would fail, not sprawl — Amendment I).
 
 **Gotcha — 30-day soft-delete on re-apply (ARCHITECTURE §8).** GCP soft-deletes
 a service account and a Workload Identity pool/provider and **reserves their ids
@@ -139,7 +168,12 @@ for 30 days**. Because `infra` uses fixed ids (`ontime-pipeline`,
 fails re-creating them ("already exists, in a deleted state"). Recover with
 `gcloud iam service-accounts undelete <id>` /
 `gcloud iam workload-identity-pools undelete`, or wait out the window, before the
-second apply. Harmless for a single demo-day apply/destroy.
+second apply. Harmless for a single demo-day apply/destroy. **Live:** the
+Evidence-row-5 destroy on `ontime-rate-recovery` ran **2026-08-29**, so
+`ontime-pipeline@ontime-rate-recovery` is reserved until **~2026-09-28**; a 9b
+apply on that project before then runs
+`gcloud iam service-accounts undelete` first (the pool was never created — no
+reservation).
 
 ## Spanner trial (Phase 10) and Composer (Phase 11) — teardown dates
 

@@ -17,3 +17,8 @@ output "pipeline_service_account" {
   description = "The least-privilege pipeline service account email."
   value       = module.iam.service_account_email
 }
+
+output "workload_identity_provider" {
+  description = "The WIF provider resource name for google-github-actions/auth (`workload_identity_provider:`); null unless enable_ci_wif = true."
+  value       = module.iam.workload_identity_provider
+}

@@ -115,7 +115,7 @@ module "budget" {
   source           = "./modules/budget"
   billing_account  = data.google_project.this.billing_account
   project_number   = data.google_project.this.number
-  alert_thresholds = var.budget_alert_thresholds_usd
+  alert_thresholds = var.budget_alert_thresholds
   display_name     = "ontime-${var.project_id}"
 
   depends_on = [google_project_service.required]

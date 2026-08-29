@@ -38,14 +38,14 @@ variable "enable_ci_wif" {
 }
 
 variable "github_repository" {
-  description = "owner/repo the WIF provider trusts for CI (short-lived OIDC, no key at rest). Only used when enable_ci_wif is true — a fork sets its own."
+  description = "owner/repo the WIF provider trusts for CI (short-lived OIDC, no key at rest). No default: required when enable_ci_wif is true (the pool's precondition), so no repo — this one included — is trusted unless named (Amendment K)."
   type        = string
-  default     = "jessicafalcon/ontime-rate-recovery-pipeline"
+  default     = null
 
   # Interpolated into the provider's CEL attribute_condition and the principalSet
   # member — a shape check keeps a hostile TF_VAR from injecting CEL/`||`.
   validation {
-    condition     = can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", var.github_repository))
+    condition     = var.github_repository == null || can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", var.github_repository))
     error_message = "github_repository must be owner/repo."
   }
 }
@@ -61,16 +61,16 @@ variable "github_ref" {
   }
 }
 
-variable "budget_alert_thresholds_usd" {
-  description = "Budget alert thresholds in the billing account's currency (USD on a USD account; notify only — a budget does not stop spend)."
+variable "budget_alert_thresholds" {
+  description = "Budget alert thresholds in the billing account's currency (50/150 = $50/$150 on a USD account; notify only — a budget does not stop spend)."
   type        = list(number)
   default     = [50, 150]
 
   # Non-empty AND every threshold strictly positive — the budget amount is the
   # smallest threshold, so a 0 would divide-by-zero the percents.
   validation {
-    condition     = length(var.budget_alert_thresholds_usd) > 0 && alltrue([for t in var.budget_alert_thresholds_usd : t > 0])
-    error_message = "budget_alert_thresholds_usd must be non-empty and all strictly positive."
+    condition     = length(var.budget_alert_thresholds) > 0 && alltrue([for t in var.budget_alert_thresholds : t > 0])
+    error_message = "budget_alert_thresholds must be non-empty and all strictly positive."
   }
 }
 

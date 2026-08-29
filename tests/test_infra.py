@@ -13,6 +13,7 @@ spawns terraform, and the argv it builds is asserted."""
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -61,6 +62,16 @@ def _blocks(text: str, header_re: str) -> list[str]:
     for m in re.finditer(header_re + r"\s*\{", text):
         body, _ = _brace_body(text, m.end() - 1)
         out.append(body)
+    return out
+
+
+def _blocks_with_headers(text: str, header_re: str) -> list[str]:
+    """Header + body of every matching block — the header's labels
+    (`resource "google_storage_bucket" "tfstate"`) are part of the block."""
+    out = []
+    for m in re.finditer(header_re + r"\s*\{", text):
+        body, _ = _brace_body(text, m.end() - 1)
+        out.append(m.group(0) + body)
     return out
 
 
@@ -119,9 +130,10 @@ def test_no_staging_bucket_variable_and_the_managed_bucket_is_derived() -> None:
     )
     # Scoped to MANAGED blocks: the `terraform {}` block (where the documented
     # `backend "gcs"` names the bootstrap bucket) is not a managed resource, so
-    # uncommenting it does not redden (round 3 #7).
+    # uncommenting it does not redden (round 3 #7). Header labels count (round 4
+    # #4): `resource "google_storage_bucket" "tfstate"` is a managed block too.
     for f, body in _stripped_files().items():
-        for block in _blocks(body, MANAGED_BLOCK_RE):
+        for block in _blocks_with_headers(body, MANAGED_BLOCK_RE):
             assert "tfstate" not in block, f
 
 
@@ -153,7 +165,7 @@ def test_input_shape_validations_exist() -> None:
         "project_id": "regex(",
         "github_repository": 'regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"',
         "github_ref": 'regex("^refs/(heads|tags)/',
-        "budget_alert_thresholds_usd": "alltrue(",
+        "budget_alert_thresholds": "alltrue(",
     }
     for var, needle in expect.items():
         conds = _validation_conditions(_block(text, rf'variable "{var}"'))
@@ -180,6 +192,24 @@ ALLOWED_RESOURCE_TYPES = {
     "google_service_account_iam_member",
     "google_billing_budget",
 }
+
+
+# Every `data` source type the tree may read (round 4 #7): a data source is a
+# live API call at plan/apply, so a new one is a conscious addition too.
+ALLOWED_DATA_SOURCE_TYPES = {"google_project", "google_billing_account"}
+
+
+def test_every_data_source_type_is_on_the_allowlist() -> None:
+    declared: set[str] = set()
+    for f in _tf_files():
+        if f.parent in GATED_MODULE_DIRS:
+            continue
+        declared |= set(
+            re.findall(
+                r'\bdata\s+"([a-z0-9_]+)"\s+"', _strip_hcl_comments(f.read_text())
+            )
+        )
+    assert declared == ALLOWED_DATA_SOURCE_TYPES, declared ^ ALLOWED_DATA_SOURCE_TYPES
 
 
 def test_enable_toggles_default_false() -> None:
@@ -266,6 +296,25 @@ def test_ci_wif_is_opt_in_and_count_gated() -> None:
     )
 
 
+def test_wif_output_is_null_guarded() -> None:
+    """Amendment J (round 4 #2/#5): the provider name is a ROOT output, and both
+    the module and root outputs are `enable_ci_wif ? …[0].name : null` — an
+    unguarded `[0]` index is "Invalid index … empty tuple" on every default plan
+    (the tester's surviving hand-mutation; `terraform validate` does not catch
+    it)."""
+    module_out = _block(
+        _stripped("modules", "iam", "outputs.tf"),
+        r'output "workload_identity_provider"',
+    )
+    assert re.search(
+        r"value\s*=\s*var\.enable_ci_wif \? "
+        r"google_iam_workload_identity_pool_provider\.github\[0\]\.name : null",
+        module_out,
+    )
+    root_out = _block(_stripped("outputs.tf"), r'output "workload_identity_provider"')
+    assert re.search(r"value\s*=\s*module\.iam\.workload_identity_provider", root_out)
+
+
 # ---------------------------------------------------------------- invariant 3
 
 
@@ -276,6 +325,7 @@ def _ignored(relpath: str) -> bool:
 
 
 PRIVATE_KEY_SUFFIXES = (".pem", ".p12", ".pfx", ".key", ".p8")
+BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".duckdb", ".pyc", ".ico"}
 
 
 def test_no_tracked_secret_state_or_tfvars() -> None:
@@ -298,11 +348,19 @@ def test_no_tracked_secret_state_or_tfvars() -> None:
         )
     ]
     assert bad == [], bad
+    # Content scan over EVERY tracked text file, not just .json (round 4 #8): a
+    # key pasted into a .md/.py/.yml, or a minified one, is caught. Needles are
+    # assembled so this file does not match itself.
+    sa_type = re.compile(r'"type"\s*:\s*"service' + r'_account"')
+    private_key = re.compile(
+        r'"private' + r'_key"\s*:|-----BEGIN [A-Z ]*PRIVATE' + r" KEY-----"
+    )
     for p in tracked:
-        if p.endswith(".json"):
-            body = (ROOT / p).read_text(errors="ignore")
-            assert '"type": "service_account"' not in body, p
-            assert '"private_key"' not in body, p
+        if p.endswith(PRIVATE_KEY_SUFFIXES) or (ROOT / p).suffix in BINARY_SUFFIXES:
+            continue
+        body = (ROOT / p).read_text(errors="ignore")
+        assert not sa_type.search(body), p
+        assert not private_key.search(body), p
     assert (INFRA / "terraform.tfvars.example").exists()
     assert _ignored("infra/terraform.tfvars")
     # Terraform auto-loads *.auto.tfvars and *.tfvars.json too (round 3 #12).
@@ -438,6 +496,14 @@ def test_modules_depend_on_the_service_enablement() -> None:
 # ---------------------------------------------------------------- invariant 4
 
 
+DATASET_CREATING_ROLES = {
+    "roles/bigquery.dataOwner",
+    "roles/bigquery.admin",
+    "roles/bigquery.user",
+    "roles/owner",
+    "roles/editor",
+}
+
 LEAST_PRIVILEGE_ROLES = {
     "roles/bigquery.jobUser",
     "roles/bigquery.dataEditor",
@@ -454,6 +520,21 @@ def test_sa_roles_are_least_privilege() -> None:
     assert roles, "no IAM roles found"
     assert roles <= LEAST_PRIVILEGE_ROLES, roles - LEAST_PRIVILEGE_ROLES
     assert "roles/owner" not in roles and "roles/editor" not in roles
+
+
+def test_no_role_can_create_a_dataset() -> None:
+    """Amendment I (round 4 #1): Terraform creates exactly the two datasets and
+    nothing else can — no role in the tree carries `bigquery.datasets.create`
+    (dataOwner/admin/owner/editor), so 9b's dbt build must land inside them."""
+    roles: set[str] = set()
+    for f in _tf_files():
+        roles |= set(re.findall(r'role\s*=\s*"(roles/[^"]+)"', f.read_text()))
+    assert not roles & DATASET_CREATING_ROLES, roles & DATASET_CREATING_ROLES
+    datasets = _blocks(
+        _stripped("modules", "bigquery", "main.tf"),
+        r'resource "google_bigquery_dataset"[^{]*',
+    )
+    assert len(datasets) == 2
 
 
 def test_project_level_grant_is_only_bigquery_jobuser() -> None:
@@ -505,6 +586,17 @@ def test_budget_currency_is_the_billing_accounts() -> None:
     assert not re.search(r'currency_code\s*=\s*"', budget), "literal currency"
 
 
+def test_budget_amount_is_the_smallest_threshold() -> None:
+    """Round 4 #3: the amount is `min(...)` of the thresholds so every
+    threshold_percent is a whole multiple (50 → 1.0, 150 → 3.0) and the plan
+    never drifts on a repeating decimal; `max` → red."""
+    budget = _stripped("modules", "budget", "main.tf")
+    assert re.search(
+        r"budget_amount\s*=\s*min\(var\.alert_thresholds\.\.\.\)",
+        _block(budget, r"locals"),
+    )
+
+
 def test_bucket_is_hardened() -> None:
     """Round 2 #8: public-access prevention enforced, uniform access, versioning
     on, and a lifecycle rule so versioning doesn't accrete cost — each pinned, so
@@ -538,20 +630,48 @@ def test_region_and_dataset_location_are_us_central1() -> None:
 
 
 def test_stated_defaults_are_pinned() -> None:
-    """DECISIONS/CLAUDE state $50/$150, the repo slug, and refs/heads/main as
-    facts; pin the actual variable defaults (review round 1 #20 / round 2)."""
+    """DECISIONS/CLAUDE state 50/150 (the billing account's currency — Amendment
+    L), NO default repository (Amendment K), and refs/heads/main as facts; pin
+    the actual variable defaults (review round 1 #20 / round 2 / round 4)."""
     text = _read("variables.tf")
     assert re.search(
         r"default\s*=\s*\[\s*50\s*,\s*150\s*\]",
-        _block(text, r'variable "budget_alert_thresholds_usd"'),
+        _block(text, r'variable "budget_alert_thresholds"'),
     )
+    assert not _blocks(text, r'variable "budget_alert_thresholds_usd"')
     assert re.search(
-        r'default\s*=\s*"jessicafalcon/ontime-rate-recovery-pipeline"',
-        _block(text, r'variable "github_repository"'),
+        r"^\s*default\s*=\s*null", _block(text, r'variable "github_repository"'), re.M
+    )
+    # The pool refuses the toggle without a repo — a named plan-time error, not
+    # trust in a baked-in slug.
+    pool = _block(_stripped("modules", "iam", "main.tf"), WIF_RESOURCES[0])
+    assert re.search(
+        r"condition\s*=\s*var\.github_repository != null",
+        _block(_block(pool, r"lifecycle"), r"precondition"),
     )
     assert re.search(
         r'default\s*=\s*"refs/heads/main"', _block(text, r'variable "github_ref"')
     )
+
+
+def test_no_tracked_claude_settings_with_hooks() -> None:
+    """Amendment M (round 4 #9): hook wiring lives only in the gitignored
+    `.claude/settings.local.json` — a committed settings file would auto-execute
+    an inbound branch's hook for anyone opening it (CLAUDE.md § Project tooling).
+    `.claude/settings.json` is untracked and ignored; any tracked settings file
+    carries no `hooks` key."""
+    tracked = subprocess.run(
+        ["git", "ls-files", ".claude"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    settings = [p for p in tracked if re.search(r"^\.claude/settings[^/]*\.json$", p)]
+    for p in settings:
+        assert "hooks" not in json.loads((ROOT / p).read_text()), p
+    assert _ignored(".claude/settings.json")
+    assert _ignored(".claude/settings.local.json")
 
 
 # ---------------------------------------------------------------- invariant 6 (cli)
