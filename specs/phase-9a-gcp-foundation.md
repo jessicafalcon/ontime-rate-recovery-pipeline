@@ -360,6 +360,45 @@ are fixes and record corrections landing without amendments.
   finding); granting it to the project's Owner group (no such group exists;
   a named principal is least privilege).
 
+- **R — The manifest is the allowlist's closure (round 7 #1, #3, #4, #5, #6).**
+  Restores invariant 9 (the pinned `.tf` tree is one allowlist). Round 7 showed
+  four holes in P's gate: the assertion function had no mutation line (a
+  neutered `manifest_diff` stays green), Terraform also loads `*.tf.json`
+  outside the glob, a platform-dependent `init` can rewrite the pinned lock
+  file, and `freeze` silently drops a vanished file. Mechanism: (a)
+  `infra/cli.py` drops its own `manifest_diff` and calls
+  `generator.manifest.diff` over a path predicate covering `*.tf`, `*.tf.json`
+  and `.terraform.lock.hcl` (pruning `.terraform/`) — one diff implementation,
+  one glob, shared by `pinned_files`, `freeze` and the test; (b) `tf-validate`
+  runs `init -backend=false -input=false -lockfile=readonly`, so no platform
+  can mutate the pin (a missing platform hash is a reported FAIL, fixed by a
+  deliberate `terraform providers lock` + `tf-freeze`); (c) `freeze` refuses
+  when a path the committed manifest lists is absent on disk (the `make
+  freeze` rule), printing the missing paths; (d) the mutations block gains
+  `manifest_diff constant-return:[]` and `pinned_files constant-return:[]`,
+  `test_tf_tree_matches_manifest` asserts directly on the diff list, and a
+  scratch-tree test proves an extra `x.tf.json` reads `extra`. Rejected:
+  keeping the local copy with a mutation line only (fixes #1, leaves #3–#6);
+  ignoring `*.tf.json` via `.gitignore` (a tracked one would still apply).
+  Scope: `infra/cli.py`, `tests/test_infra.py`, this spec, a re-freeze of
+  `infra/MANIFEST.sha256` carrying #9 (`group:` dropped from
+  `operator_principal`'s shape) and #25 (the budget comment reflow).
+
+- **S — No BigQuery build before 9b (round 7 #7).** Restores Done-when 5 and
+  Amendment N: the docs claimed `TARGET=bigquery` was not runnable before 9b,
+  but `dbt/profiles.yml` only defaulted `OTR_GCP_PROJECT` to `''`, so an
+  exported value gave a runnable build that creates per-folder datasets
+  outside Terraform. Mechanism: `loader/cli.py dbt-build` refuses
+  `TARGET=bigquery` outright (`dbt-build: TARGET=bigquery lands in Phase 9b
+  (generate_schema_name)`), before `load()` and before any dbt call;
+  `profiles.yml` keeps `env_var('OTR_GCP_PROJECT')` without a default so a
+  missing export is a dbt parse error too. 9b's reconciliation lifts the
+  refusal in the same commit that adds `generate_schema_name` (the DUE BACKLOG
+  row gains this clause). Test: `TARGET=bigquery CONFIRM=yes` exits 1 with
+  that line and no runner call. Rejected: a doc-only correction ("runnable,
+  but don't") — Done-when 5's "cannot appear" would stay a claim, not a
+  property.
+
 ## Teaching notes (first appearance in this project)
 
 - **Terraform state, modules, and backends.** Terraform records what it created
