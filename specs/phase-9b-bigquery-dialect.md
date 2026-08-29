@@ -322,10 +322,11 @@ clients/landings so no line can spawn a cloud call.
 
 ```mutations
 loader/cli.py::validate_project      delete-call
-loader/cli.py::land                  delete-call
+loader/cli.py::require_confirm       invert-guard
+loader/cli.py::land                  constant-return:0
 loader/cli.py::land                  invert-guard
-loader/bq.py::selected_files         constant-return:[]
-loader/bq.py::load_job_config        constant-return:None
+loader/bq.py::selected_files         constant-return:{'events': [], 'dim_user': []}
+loader/bq.py::load_job_config        constant-return:{}
 eval/golden.py::normalize_cell       constant-return:'x'
 ```
 
@@ -336,10 +337,15 @@ scratch copy:
   `PROJECT_RE`); its `invert-guard` line already lives in the 9a spec and is
   killed there — 9b's `delete-call` pins that `dbt_build` CALLS it (a build
   with an unvalidated project reaching the env is the failure).
-- `loader/bq.py::bq_load constant-return:0` — REFUSED: with the fake clients the
-  return value is not what the test asserts (the recorded calls are);
-  `selected_files constant-return:[]` and `load_job_config constant-return:None`
-  are the killing lines (no files uploaded / no schema or disposition).
+- `loader/cli.py::land delete-call` — REFUSED: `land` is called inside an
+  `if` (`if land(...): return 1`), not as a statement, so the operator finds
+  no call; `constant-return:0` (no landing before the build) is the killing
+  line, alongside `invert-guard` (the other target's landing).
+- `loader/bq.py::bq_load constant-return:(0, 0, 0)` — REFUSED: with the fake
+  clients the return value is not what the test asserts (the recorded calls
+  are); `selected_files constant-return:{'events': [], 'dim_user': []}` and
+  `load_job_config constant-return:{}` are the killing lines (nothing
+  uploaded / no schema or disposition).
 
 ## Pinned decisions (do not re-litigate)
 

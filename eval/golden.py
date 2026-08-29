@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -69,21 +71,39 @@ SCORES_SEND_TIME = Golden(
 COLUMNS = ATTRIBUTION.columns  # the Phase 3 name, kept for its readers
 
 
-def _cell(v: object) -> str:
-    return "" if v is None else str(v)
+def normalize_cell(v: object) -> str:
+    """One cell, one rendering, whichever engine produced the value (Phase
+    9b): NULL → ''; a tz-aware timestamp (BigQuery's TIMESTAMP) → its UTC wall
+    time, naive, as DuckDB's `timestamp` renders; everything else `str()` (ints,
+    floats, dates, bools and naive timestamps already agree)."""
+    if v is None:
+        return ""
+    if isinstance(v, datetime) and v.tzinfo is not None:
+        return str(v.astimezone(UTC).replace(tzinfo=None))
+    return str(v)
+
+
+def rows_from(rows: Iterable[tuple[object, ...]]) -> list[tuple[str, ...]]:
+    """Rendered and sorted by the declared key — the one path for both engines."""
+    return sorted(
+        (tuple(normalize_cell(v) for v in r) for r in rows),
+        key=lambda r: (r[0], r[1]),
+    )
 
 
 def export_rows(db: Path, spec: Golden = ATTRIBUTION) -> list[tuple[str, ...]]:
     con = duckdb.connect(str(db))  # dbt may hold its own in-process handle
     try:
-        rows = con.execute(
-            f"select {', '.join(spec.columns)} from {spec.relation}"
-        ).fetchall()
+        rows = con.execute(select_sql(spec)).fetchall()
     finally:
         con.close()
-    return sorted(
-        (tuple(_cell(v) for v in r) for r in rows), key=lambda r: (r[0], r[1])
-    )
+    return rows_from(rows)
+
+
+def select_sql(spec: Golden, relation: str | None = None) -> str:
+    """The golden's projection; `relation` overrides the DuckDB name (BigQuery
+    reads `<project>.ontime.<table>` — Phase 9b)."""
+    return f"select {', '.join(spec.columns)} from {relation or spec.relation}"
 
 
 def render(rows: list[tuple[str, ...]], spec: Golden = ATTRIBUTION) -> str:

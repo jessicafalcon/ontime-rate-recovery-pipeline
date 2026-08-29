@@ -1,7 +1,9 @@
 """dbt conventions the code-reviewer would otherwise check by eye (spec
-Phase 2 invariants 3, 4, 6): no clock on a data path, exactly five dispatch
-macros each with a duckdb body and a bigquery stub that raises, no default
-body, no freshness config, no dbt package."""
+Phase 2 invariants 3, 4, 6; Phase 9b invariants 1, 5, 8): no clock on a data
+path, exactly five dispatch macros each with a duckdb body and a bigquery body
+(Phase 9b — they raised until then), no default body, `generate_schema_name`
+collapsing on the bigquery target only, a dialect-safe partition config, no
+freshness config, no dbt package."""
 
 from __future__ import annotations
 
@@ -87,9 +89,15 @@ def test_no_freshness_block() -> None:
         assert "freshness:" not in p.read_text(), p
 
 
+# Macro files that are dbt HOOK overrides, not dispatch macros (Phase 9b).
+HOOKS = ("generate_schema_name",)
+
+
 def test_exactly_five_dispatch_macros() -> None:
     files = sorted(p.stem for p in (DBT / "macros").glob("*.sql"))
-    assert files == sorted(MACROS)
+    assert files == sorted(MACROS + HOOKS)
+    for hook in HOOKS:
+        assert "adapter.dispatch" not in (DBT / "macros" / f"{hook}.sql").read_text()
     for name in MACROS:
         text = (DBT / "macros" / f"{name}.sql").read_text()
         assert f"adapter.dispatch('{name}', 'ontime')" in text
@@ -99,15 +107,51 @@ def test_exactly_five_dispatch_macros() -> None:
             assert "adapter.dispatch" not in p.read_text(), p
 
 
-def test_each_macro_has_duckdb_body_and_bigquery_stub_that_raises() -> None:
+def _body(name: str, dialect: str) -> str:
+    text = (DBT / "macros" / f"{name}.sql").read_text()
+    m = re.search(
+        rf"{{% macro {dialect}__{name}\((.*?)%}}(.*?){{% endmacro %}}", text, re.S
+    )
+    assert m, (name, dialect)
+    return m.group(2)
+
+
+def test_each_macro_has_duckdb_and_bigquery_bodies() -> None:
+    """Phase 9b (invariant 5): both bodies exist and neither raises — the
+    `raise_compiler_error` stubs of Phases 2–8 are gone."""
     for name in MACROS:
-        text = (DBT / "macros" / f"{name}.sql").read_text()
-        assert re.search(rf"{{% macro duckdb__{name}\(", text), name
-        stub = re.search(
-            rf"{{% macro bigquery__{name}\((.*?)%}}(.*?){{% endmacro %}}", text, re.S
-        )
-        assert stub, name
-        assert "exceptions.raise_compiler_error" in stub.group(2), name
+        for dialect in ("duckdb", "bigquery"):
+            body = _body(name, dialect)
+            assert body.strip(), (name, dialect)
+            assert "raise_compiler_error" not in body, (name, dialect)
+
+
+def test_bigquery_bodies_are_the_named_forms() -> None:
+    """Phase 9b pinned decision: the five BigQuery forms and their casts —
+    json_value (NULL on a JSON null / missing key); timestamp_diff END first,
+    both sides cast to timestamp (DATE/DATETIME callers); safe_divide with a
+    float64 numerator (integer/integer would truncate); datetime(ts, tz) (the
+    naive wall time); the overwrite is delete-in-set + insert like DuckDB."""
+    assert re.search(
+        r"json_value\(\{\{ col \}\}, '\$\.\{\{ key \}\}'\)",
+        _body("json_extract", "bigquery"),
+    )
+    td = _body("timestamp_diff", "bigquery")
+    assert re.search(
+        r"timestamp_diff\(cast\(\{\{ end_ts \}\} as timestamp\), "
+        r"cast\(\{\{ start_ts \}\} as timestamp\), \{\{ unit \}\}\)",
+        td,
+    )
+    assert re.search(
+        r"safe_divide\(cast\(\{\{ numerator \}\} as float64\), \{\{ denominator \}\}\)",
+        _body("safe_divide", "bigquery"),
+    )
+    assert re.search(
+        r"datetime\(\{\{ ts_utc \}\}, \{\{ tz \}\}\)",
+        _body("to_local_time", "bigquery"),
+    )
+    po = _body("partition_overwrite", "bigquery")
+    assert "delete from" in po and "insert into" in po and "select distinct" in po
 
 
 def test_no_default_dispatch_body() -> None:
@@ -131,15 +175,46 @@ def test_partition_overwrite_renders_delete_and_insert_on_duckdb() -> None:
     assert text.count("adapter.dispatch('partition_overwrite', 'ontime')") == 1
 
 
-def test_partition_overwrite_raises_on_bigquery() -> None:
-    """The BigQuery body raises until Phase 9 — no default__ fallback that could
-    build and be silently wrong (the seam contract)."""
-    text = (DBT / "macros" / "partition_overwrite.sql").read_text()
-    stub = re.search(
-        r"{% macro bigquery__partition_overwrite\(.*?%}(.*?){% endmacro %}", text, re.S
-    ).group(1)
-    assert "exceptions.raise_compiler_error" in stub
-    assert "default__partition_overwrite" not in text
+def test_generate_schema_name_collapses_only_on_bigquery() -> None:
+    """Phase 9b invariant 1: on the bigquery target every model resolves to
+    target.schema (the `ontime` dataset — two datasets is 9a's pin); any other
+    target keeps dbt's default `<target.schema>_<custom>` (the `main_<folder>`
+    names every DuckDB reader hard-codes). Keyed on target.type — a second
+    duckdb-typed target would collapse under a target.name key. Not
+    generate_schema_name_for_env (collapses every non-prod target)."""
+    text = (DBT / "macros" / "generate_schema_name.sql").read_text()
+    assert "{% macro generate_schema_name(custom_schema_name, node)" in text
+    assert re.search(
+        r"if target\.type == 'bigquery'.*?\{\{ target\.schema \}\}", text, re.S
+    )
+    body = text.split("-#}", 1)[1]  # after the leading comment
+    assert "target.name" not in body
+    assert "generate_schema_name_for_env" not in body
+    assert "{{ target.schema }}_{{ custom_schema_name | trim }}" in text
+    assert "adapter.dispatch" not in text
+
+
+def test_incremental_models_partition_config_is_dialect_safe() -> None:
+    """Phase 9b invariant 8 (ARCHITECTURE §8): dbt-bigquery parses `partition_by`
+    as its native dict and dbt-duckdb rejects a dict there, so the overwrite
+    column lives under `overwrite_partition_col` (a key neither adapter reads)
+    and the native dict is set on the bigquery target only; the strategy reads
+    the neutral key."""
+    for stem in ("stg_events", "stg_prompts", "attribution"):
+        path = next((DBT / "models").rglob(f"{stem}.sql"))
+        text = path.read_text()
+        col = re.search(r"overwrite_partition_col='(\w+)'", text)
+        assert col, stem
+        assert re.search(
+            r"partition_by=\(\{'field': '"
+            + col.group(1)
+            + r"', 'data_type': 'date'\} if target\.type == 'bigquery' else none\)",
+            text,
+        ), stem
+        assert not re.search(r"partition_by='", text), stem
+    strategy = (DBT / "macros" / "partition_overwrite.sql").read_text()
+    assert 'config.require("overwrite_partition_col")' in strategy
+    assert 'config.require("partition_by")' not in strategy
 
 
 def test_incremental_models_use_the_partition_overwrite_strategy() -> None:
@@ -185,6 +260,7 @@ SINGULAR = {
     "assert_cohort_day_partition.sql": "ref('ontime_rate_daily')",
     "assert_cohort_day_key_unique.sql": "ref('ontime_rate_daily')",
     "assert_send_time_within_band.sql": "ref('scores_send_time')",
+    "assert_no_conflicting_duplicates.sql": "source('raw', 'events')",
 }
 
 

@@ -111,6 +111,29 @@ def test_score_cli_reproduces_the_pin(built: Path, monkeypatch, capsys) -> None:
 
 # ------------------------------------------------- Phase 4: report
 
+
+def test_bigquery_rows_render_like_duckdb_rows() -> None:
+    """Phase 9b invariant 2: one renderer for both engines. A tz-aware TIMESTAMP
+    (what google-cloud-bigquery returns) renders as DuckDB's naive UTC
+    timestamp; a DATE, an int, a float, a bool and a NULL render as they do
+    from DuckDB; rows sort by the declared key, not arrival order."""
+    from datetime import UTC, date, datetime, timedelta, timezone
+
+    aware = datetime(2026, 1, 12, 0, 47, tzinfo=UTC)
+    tokyo = datetime(2026, 1, 12, 9, 47, tzinfo=timezone(timedelta(hours=9)))
+    naive = datetime(2026, 1, 12, 0, 47)
+    assert golden.normalize_cell(aware) == golden.normalize_cell(naive)
+    assert golden.normalize_cell(tokyo) == "2026-01-12 00:47:00"
+    assert golden.normalize_cell(None) == ""
+    assert golden.normalize_cell(date(2026, 1, 5)) == "2026-01-05"
+    assert golden.normalize_cell(0.609756) == "0.609756"
+    assert golden.normalize_cell(3) == "3" and golden.normalize_cell(True) == "True"
+    rows = golden.rows_from([("u-2", "c", aware), ("u-1", "c", None)])
+    assert rows == [("u-1", "c", ""), ("u-2", "c", "2026-01-12 00:47:00")]
+    sql = golden.select_sql(golden.SCORES_SEND_TIME, "p.ontime.scores_send_time")
+    assert sql.endswith("from p.ontime.scores_send_time")
+
+
 DAILY = golden.ONTIME_RATE_DAILY
 
 

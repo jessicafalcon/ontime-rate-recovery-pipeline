@@ -15,21 +15,30 @@
     select {{ dest_cols }} from {{ batch_relation }}
 {% endmacro %}
 
+{#- The same delete-in-set + insert, as one two-statement BigQuery script; the target is natively
+    date-partitioned on partition_col (the models' dialect-guarded partition_by), so the delete prunes to the
+    batch's partitions (Phase 9b). -#}
 {% macro bigquery__partition_overwrite(target_relation, batch_relation, partition_col, dest_cols) %}
-    {{ exceptions.raise_compiler_error("partition_overwrite: the BigQuery body lands in Phase 9") }}
+    delete from {{ target_relation }}
+    where {{ partition_col }} in (select distinct {{ partition_col }} from {{ batch_relation }});
+    insert into {{ target_relation }} ({{ dest_cols }})
+    select {{ dest_cols }} from {{ batch_relation }}
 {% endmacro %}
 
 {#- The custom incremental strategy (dbt resolves incremental_strategy=
     'partition_overwrite' to this name). It is dbt plumbing, not a dispatch macro
-    — it names the partition column from the model's `partition_by` config and
-    the columns from dest_columns, then calls the one dispatched seam above. The
-    conventions test counts dispatch macros, so this adds none. -#}
+    — it names the partition column from the model's `overwrite_partition_col`
+    config (a key neither adapter interprets: dbt-bigquery parses `partition_by`
+    as its native partitioning dict and dbt-duckdb rejects a dict there — Phase
+    9b, ARCHITECTURE §8) and the columns from dest_columns, then calls the one
+    dispatched seam above. The conventions test counts dispatch macros, so this
+    adds none. -#}
 {% macro get_incremental_partition_overwrite_sql(arg_dict) %}
     {% set dest_cols = arg_dict["dest_columns"] | map(attribute="quoted") | join(", ") %}
     {% do return(partition_overwrite(
         arg_dict["target_relation"],
         arg_dict["temp_relation"],
-        config.require("partition_by"),
+        config.require("overwrite_partition_col"),
         dest_cols
     )) %}
 {% endmacro %}

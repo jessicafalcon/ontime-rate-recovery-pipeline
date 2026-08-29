@@ -484,6 +484,18 @@ def test_bigquery_profile_project_has_no_default(
     assert m.group(1) == "'OTR_GCP_PROJECT'", m.group(1)
 
 
+def test_bigquery_profile_location_is_the_datasets() -> None:
+    """Phase 9b (Amendment O of 9a): the bigquery output's `location` equals the
+    Terraform `region` default the two datasets are created in — dbt-bigquery
+    would otherwise default to the US multi-region and fail "Dataset … not
+    found in location US"."""
+    bq = _yaml_block((ROOT / "dbt" / "profiles.yml").read_text(), "bigquery")
+    m = re.search(r"^\s*location:\s*(\S+)", bq, re.M)
+    assert m, bq
+    region = _block(_stripped("variables.tf"), r'variable "region"')
+    assert re.search(r'default\s*=\s*"' + re.escape(m.group(1)) + '"', region)
+
+
 def _yaml_block(text: str, key: str) -> str:
     lines, out, grab, indent = text.splitlines(), [], False, None
     for line in lines:
