@@ -660,9 +660,17 @@ guard pinned), K (no default `github_repository`; the pool's precondition
 refuses the toggle without one), L (`budget_alert_thresholds`, the account's
 currency), M (`.claude/settings.json` untracked + pinned); 4 test fixes
 (`tfstate` scan covers header labels — re-implemented once; data-source
-allowlist; whole-tree key scan; `min` pin); the rest records. Next: round 5
-confirms green → merge → 9b (its first commit reconciles against
-main-with-9a: `generate_schema_name`, the "DAG's build owns its landing" row —
+allowlist; whole-tree key scan; `min` pin); the rest records. **Review round
+5 applied (20 findings, no correctness finding in round 4's fixes — cap not
+triggered): 2 record-only amendments** — N (Amendment I's "impossible by IAM"
+narrowed to the SA; an operator's Owner ADC can create datasets, so no BigQuery
+build before 9b, then as the SA), O (9b must set the `bigquery` output's
+`location` and export `OTR_GCP_PROJECT` from the validated `PROJECT`); the
+settings pin widened to every auto-configuring key + `.mcp.json`; a read-only
+`tf-plan` on the post-J/K/L tree re-proved `18 to add` with a null WIF output;
+the rest records/wording. Next: round 6 confirms green → merge → 9b (its first
+commit reconciles against main-with-9a: `generate_schema_name`, `location`,
+`OTR_GCP_PROJECT`, the "DAG's build owns its landing" row —
 `dbt_build(TARGET=bigquery)` must not call the DuckDB `load()` — and the
 `ontime-pipeline` SA id reserved until ~2026-09-28 by the 2026-08-29 destroy).
 Open BACKLOG rows: **14** (9a struck "Budget alerts do not stop spend"; Spanner
