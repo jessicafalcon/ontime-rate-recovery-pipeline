@@ -572,7 +572,8 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 8b implemented, in review (`phase-8b-airflow-dag`).** Phases 0–7 merged
+**Phase 8b implemented; review complete (rounds 1–5 + exit audit), ready for PR
+(`phase-8b-airflow-dag`).** Phases 0–7 merged
 (PRs #1–#9); 8a merged (PR #10). Phase 9a (`phase-9-gcp-foundation`,
 GCP/Terraform) is **parked** (its working-tree leftovers stashed). Phase 8 is
 split 8a/8b: **8a** landed the write-back + `make pipeline`; **8b** is the
