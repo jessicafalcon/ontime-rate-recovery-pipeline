@@ -140,3 +140,11 @@ SEND_SCHEDULE_ROWS_TINY = 20  # == SCORES_ROWS
 SEND_SCHEDULE_SHA256_TINY = (
     "4dab2540765a776cca8b41634861b34c5e0978a9db19b81dcc7405abc08e491e"
 )
+
+# fixtures/tiny — Phase 8b (Airflow DAG, backfill≡union). The three-interval
+# backfill cut: 2026-01-07, then LANDING_SPLIT_TINY (2026-01-12), then
+# LATE_FILE_TINY (2026-01-13 = the union). Consecutive gaps (5, 1) are ≤
+# LOOKBACK_DAYS (5), so the incremental landings converge to a single union build
+# (the Phase 7 `<=` reprocess-window boundary makes gap = lookback work); the
+# final send_schedule == SEND_SCHEDULE_SHA256_TINY.
+BACKFILL_THROUGHS_TINY = ("2026-01-07", LANDING_SPLIT_TINY, LATE_FILE_TINY)

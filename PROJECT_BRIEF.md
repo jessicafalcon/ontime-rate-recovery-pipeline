@@ -89,7 +89,7 @@ and carries **#3** as a retention feature.
 | **BigQuery** | Analytical warehouse: all marts, attribution queries, feature tables. | **Load-bearing.** Right tool, no caveat. |
 | **dbt** | Transformation layer: staging → attribution → on-time marts → features, with tests as the quality gate. Cross-warehouse macros let the same SQL run on BigQuery (prod) and DuckDB (local). | **Load-bearing.** Sweet-spot fit. |
 | **Amplitude** | Upstream instrumentation: app SDKs → Amplitude → raw-event export into BigQuery. Also the reverse-ETL activation target for send-time cohorts. Bookends the pipeline (source + activation). **Its three clocks (`client_event_time`, `server_received_time`, `server_upload_time`) are the reliability-attribution signal** — on-time-by-capture vs on-time-by-receipt disagreeing *is* the upload fault, no heuristics needed. | **Elegant fit.** Stubbed in repo (event generator emits the **exact Amplitude export schema**, incl. `insert_id`, so the stub is faithful and the swap is a source-config change). |
-| **Airflow (Cloud Composer)** | Orchestrates the batch path: load → `dbt build` (tests gate downstream models by dependency — no separate branch needed) → eval → write-back, on a daily, data-interval-aware schedule with `catchup` for backfill. | **Justified** by the DAG shape (retries, backfill, quality gate). Heavier than a cron job, but the workflow warrants it. Local Docker Airflow against real BigQuery is the fallback demo path. |
+| **Airflow (Cloud Composer)** | Orchestrates the batch path's writing steps: `dbt build` (tests gate downstream models by dependency) → write-back, on a daily, data-interval-aware schedule; backfill is invoked on demand (`catchup=False` — no auto-catch-up-to-now). (`eval` is a union-only validation gate in `make pipeline`/CI, not a per-interval DAG task — Phase 8b Amendments 1–2.) | **Justified** by the DAG shape (retries, backfill, quality gate). Heavier than a cron job, but the workflow warrants it. Local Docker Airflow against real BigQuery is the fallback demo path. |
 | **Terraform** | Infrastructure as code: BigQuery datasets, GCS bucket, Spanner instance, service account, IAM, budget alerts, Composer env. | **Load-bearing.** Declaratively complete; author deploys with own project ID. |
 | **Spanner** | Transactional **application DB** (NOT an analytics tool). Two legitimate roles only: (1) source of slowly-changing dims (user/friend state, **user timezone as SCD2**) → BigQuery; (2) **write-back target** for the send-time serving table the notification service reads. Closes the loop. Demo reads dims via **BigQuery federation (`EXTERNAL_QUERY`)** — zero Dataflow workers; change streams documented as the production path when SCD history matters. | **Fits precisely** in those two roles; would be cargo-cult anywhere else. |
 
@@ -115,7 +115,7 @@ Spanner (serving) → app sends better-timed prompt → new events.
    sends timed
    prompt ──► generates new events (loop closes)
 
-   Airflow (Composer): orchestrates load → dbt build (tests gate) → eval → write-back
+   Airflow (Composer): orchestrates dbt build (tests gate) → write-back (eval is a make-pipeline/CI gate, not a DAG task — Phase 8b)
    Terraform: provisions BigQuery, GCS, Spanner, Composer, IAM, budget alerts
 ```
 

@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline test-int-airflow
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -81,10 +81,11 @@ load:
 # LOOKBACK_DAYS reprocessing window (Phase 7). TARGET selects the dbt target
 # (default duckdb); any other is a cloud-cost command needing CONFIRM=yes from
 # the COMMAND LINE ($(origin CONFIRM)). FULL=yes from the COMMAND LINE
-# ($(origin FULL)) passes --full-refresh (rebuild-from-scratch). Names validated
-# in Python before any path.
+# ($(origin FULL)) passes --full-refresh (rebuild-from-scratch). THROUGH lands
+# only files uploaded on or before it — a per-interval build (Phase 8b); unset
+# loads all. Names validated in Python before any path.
 dbt-build:
-	uv run python -m loader.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --full $(call _Q,$(value FULL)) --full-origin '$(origin FULL)'
+	uv run python -m loader.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --full $(call _Q,$(value FULL)) --full-origin '$(origin FULL)' --through $(call _Q,$(value THROUGH))
 
 # Deletes data/<PROFILE>.duckdb and its .wal (gitignored; `make load` recreates it). The only
 # deleter this phase adds: CONFIRM=yes must have COMMAND-LINE origin.
@@ -153,6 +154,19 @@ writeback:
 
 # The local pipeline with no scheduler (serving/cli.py pipeline): dbt build →
 # eval → write-back in one validated process, producing scores_send_time and
-# send_schedule. Phase 8b's Airflow DAG orders the same steps as make targets.
+# send_schedule. eval here is the union-only validation gate (it asserts the
+# full-data pins and reads truth). Phase 8b's Airflow DAG orders the WRITING
+# steps (dbt build → write-back); eval is not a per-interval DAG task, so the DAG
+# produces the same two tables byte-identically without gating on partial data.
 pipeline:
 	uv run python -m serving.cli pipeline $(call _Q,$(value PROFILE))
+
+# Phase 8b integration: spin the Docker-local Airflow (SequentialExecutor +
+# SQLite), run the DAG (a union run + a three-interval backfill) and assert both
+# tables == make pipeline (the send_schedule hash), then tear down. Exports
+# OTR_INT=1 in-recipe so tests/integration/ collects (conftest skips it
+# otherwise); CI never runs this. Takes NO variable (tiny by definition — the
+# DAG's PROFILE=tiny is a manifest literal); non-destructive to tracked files
+# (writes only the container's data/ and `docker compose down -v`). Needs Docker.
+test-int-airflow:
+	OTR_INT=1 uv run pytest tests/integration/test_int_airflow.py

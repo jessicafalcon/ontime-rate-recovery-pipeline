@@ -57,9 +57,11 @@ annotated **Superseded by …** in place and never deleted.
   `written_at = computed_as_of` (data-derived, never a clock), which keeps
   `send_schedule` byte-identical on a re-run and under a backfill. ([Phase 8a](#phase-8a))
 - **Airflow contains no logic — a task is a `make` target or a dbt command.**
-  `make pipeline` is the same chain minus the scheduler; the DAG's only
-  "computation" is Airflow's own `data_interval` rendered to a `THROUGH` date via
-  templating. ([Phase 0](#phase-0), [Phase 8a](#phase-8a))
+  The DAG orders `make pipeline`'s WRITING steps (`dbt build → write-back`; `eval`
+  is a union-only validation gate in `make pipeline`/CI, not a DAG task — Phase 8b
+  Amendment 1); the DAG's only "computation" is Airflow's own `data_interval`
+  rendered to a `THROUGH` date via templating. ([Phase 0](#phase-0),
+  [Phase 8a](#phase-8a), [Phase 8b](#phase-8b))
 
 **Infra**
 
@@ -107,6 +109,96 @@ annotated **Superseded by …** in place and never deleted.
   anyone opening the repo in Claude Code.
 
 ## Appendix — by phase
+
+### Phase 8b
+
+*Airflow DAG, `test-int-airflow`, backfill≡union (`phase-8b-airflow-dag`, spec
+`specs/phase-8b-airflow-dag.md`).*
+
+- **`eval` is NOT a per-interval DAG task (Amendment 1, 2026-08-28).** `make eval`
+  asserts the FULL-data MAE/accuracy pins and reads `truth/`, so it fails on every
+  partial backfill interval (`THROUGH=2026-01-07`: accuracy 0.871, MAE 0.928762)
+  and, upstream of write-back, would skip the interval's write and redden the run.
+  The pins are **union properties** (a regression check on the complete build) and
+  truth is not a serving input (a production DAG has no truth), so `eval` belongs
+  in `make pipeline`/CI, not the scheduler chain. It writes neither
+  `scores_send_time` nor `send_schedule`, so removing it leaves the DAG's two
+  output tables byte-identical to `make pipeline`'s. The DAG runs the two writing
+  steps `dbt_build >> writeback`. Rejected: a report-only `eval` in the DAG (a make
+  variant + noise on every partial interval); an Airflow `trigger_rule` letting
+  write-back run past a failed eval (config to paper over a step that does not
+  belong).
+- **`THROUGH` on `make dbt-build`, not a separate `load` task (reconciliation item
+  2, kept 2026-08-28).** The build owns the landing: `make dbt-build … THROUGH=<ds>`
+  lands ≤ `<ds>` and builds it in one task, so no interval is ever built against a
+  landing it did not load, and there is no separate `load` task for the build to
+  clobber (`loader/cli.py::dbt_build` threads `through` into its internal
+  `load`). A build-only target + a separate `load` task is the **Phase 9** shape,
+  not now: there the load is GCS→BigQuery and `dbt_build(TARGET=bigquery)` still
+  calling the DuckDB `load()` (`loader/cli.py`) is already wrong, so the split
+  earns its keep — deferred as a BACKLOG row (trigger: Phase 9 reconciliation /
+  first `TARGET≠duckdb` DAG). Doing it in 8b is speculative churn against an
+  implemented, committed shape (the minimal-but-scalable + review-cap rules).
+  Rejected: build-only now (a benefit two phases away, a new target and a third
+  task for nothing 8b proves).
+- **The DAG is BashOperators over `make` targets, ordered `>>`, from an
+  Airflow-free manifest.** `orchestration/tasks.py` holds the ordered
+  `(task_id, command)` list; `dags/pipeline_dag.py` wraps each in a `BashOperator`
+  and the offline `test_dag_structure.py` imports the same manifest — so "DAG ==
+  pipeline" is a fast structure test, not a container-only claim, and the test
+  needs no `import airflow` (apache-airflow is Docker-only). The interval reaches
+  the build only as the literal token `{{ data_interval_end | ds }}` Airflow
+  renders — `airflow dags test D` gives `data_interval_end = D`, so `THROUGH = D`
+  (what the tests use), while a *scheduled* `@daily` run owning `[D, D+1)` gives
+  `data_interval_end = D+1`, so `THROUGH = D+1` (Phase 11/Composer) — the same
+  template over a different interval; we compute nothing, so "Airflow contains no
+  logic" holds. Rejected: a Python
+  callable computing `THROUGH` (logic in the DAG); AST-parsing the DAG file for
+  the command list (more fragile than one shared manifest); `{{ ds }}` (that is
+  `data_interval_start` = D−1, the wrong cut).
+- **Single-writer by construction: `max_active_runs=1` + linear task order.** The
+  DAG runs `dbt-build` (loads + builds) and write-back as SEPARATE processes on
+  `data/<p>.duckdb` (8a was one process); DuckDB is single-writer, so overlap is
+  *prevented* (`max_active_runs=1` serialises concurrent runs; `dbt_build >>
+  writeback` linearises within a run), not caught by a lock error. `test-int-airflow`
+  demonstrates the hand-off by driving a green three-interval backfill where each
+  BashOperator is its own subprocess. Rejected: relying on the file lock to error
+  on overlap (a race turned into an exception is not a guarantee).
+- **Backfill ≡ union holds when intervals are spaced ≤ `lookback_days`.** scores/
+  marts are table (recomputed each build), stg/attribution converge to the union
+  at the final landing (Phase 7), and `computed_as_of = max(client_event_time)` is
+  monotone as opens arrive, so the union interval's rows win the write-back's
+  replace-iff-greater and per-row `written_at = computed_as_of` keeps them
+  byte-identical. The precondition is a consecutive-interval gap ≤ `lookback_days`
+  (verified: `07 → full(13)`, gap 6 > 5, diverges — a partition finalises while
+  its late events sit in a skipped landing; `07 → 12 → 13`, max gap 5 =
+  `lookback_days`, converges exactly, the Phase 7 `<=` boundary). The DAG's
+  `@daily` schedule gives gap 1, always safe; the offline `test_backfill.py` cut
+  sits at the boundary on purpose. `test-int-airflow` is a lean single-service
+  container (`SequentialExecutor` + SQLite, `airflow dags test`) behind `OTR_INT`,
+  CI never running it. Rejected: the upstream heavyweight `apache/airflow` compose
+  (webserver + scheduler + Postgres for a synchronous single-DAG test);
+  catchup-to-`now` (months of runs, a wall-clock dependence — the test uses
+  explicit logical dates).
+- **`catchup=False`; a backfill is invoked explicitly (Amendment 2, review round
+  1, 2026-08-28).** As first landed, `catchup=True` + a past `start_date` +
+  `DAGS_ARE_PAUSED_AT_CREATION=False` would make any scheduler start backfill every
+  day since 2026-01-06 — the catchup-to-`now` this phase rejects. The DAG now sets
+  `catchup=False` and starts paused (`is_paused_upon_creation=True`; `airflow dags
+  test` runs it anyway); a backfill is `airflow dags test <date>` / `airflow dags
+  backfill -s -e`
+  over a bounded range, which ignores `catchup`. Backfill≡union never depended on
+  auto-catchup. Rejected: `catchup=True` (the foot-gun); a report-only `eval` or a
+  `trigger_rule` to keep eval in the DAG (Amendment 1 settled that).
+- **`computed_as_of` is the write-back discriminator; its limitation is recorded,
+  not fixed here (Amendment 2, review round 1).** `backfill ≡ union` relies on
+  every score change advancing `computed_as_of = max(client_event_time)` of the
+  window's opens — true for the backfill's monotone-superset landings (verified,
+  `test_computed_as_of_advances_when_scores_change`). A landing that changed
+  scores via only back-dated opens would tie it and keep the stale row; that is an
+  8a/Phase-5 discriminator gap, unreachable on the fixture, deferred to BACKLOG
+  (replace with a content hash / row version when a reproducing case exists). Not
+  fixed in 8b — it would change the 8a write-back contract (its own fix PR).
 
 ### Phase 8a
 

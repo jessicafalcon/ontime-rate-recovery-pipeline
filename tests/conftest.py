@@ -4,13 +4,16 @@
    `test-int-airflow`, Phase 9 `test-int-bigquery`), which export OTR_INT=1.
    A bare `pytest` (the run-tests hook makes it routine) must never touch a
    live target. Without the
-   marker every `tests/integration` test is SKIPPED, loudly. The directory does
-   not exist yet; the guard is here so adding it cannot forget the rule.
-2. CONFIRM / MAKEFLAGS / PROFILE / TARGET are scrubbed so the Makefile-invoking
-   tests (tests/test_makefile.py) see a clean env.
+   marker every `tests/integration` test is SKIPPED, loudly (Phase 8b added the
+   directory — `test_int_airflow.py`; the guard predates it so adding it could
+   not forget the rule).
+2. The make user-variables (CONFIRM, PROFILE, TARGET, THROUGH, WRITE, FULL) and
+   MAKEFLAGS are scrubbed so the Makefile-invoking tests (tests/test_makefile.py)
+   see a clean env.
 """
 
 import os
+from collections.abc import Iterator
 
 import pytest
 
@@ -31,7 +34,17 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(autouse=True)
-def _scrub_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in ("CONFIRM", "MAKEFLAGS", "PROFILE", "TARGET"):
+def _scrub_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    # The make user-variables + MAKEFLAGS. tests/test_makefile.py::SCRUB is a
+    # superset (it also drops the gate vars SPEC/BASE/DELETED and MFLAGS).
+    for var in (
+        "CONFIRM",
+        "MAKEFLAGS",
+        "PROFILE",
+        "TARGET",
+        "THROUGH",
+        "WRITE",
+        "FULL",
+    ):
         monkeypatch.delenv(var, raising=False)
     yield

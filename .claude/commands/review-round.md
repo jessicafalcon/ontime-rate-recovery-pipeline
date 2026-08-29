@@ -75,7 +75,8 @@ Agents:  <list>
 - **Code touched** (`*.py`, `dbt/**`, `Makefile`, `scripts/`, `tests/`,
   `generator/`, `eval/`, `serving/`, `orchestration/`, `infra/**/*.tf`): spawn
   **code-reviewer** and **functionality-tester** (that order).
-- **Sensitive touched** (`.github/`, `infra/`, `serving/`, `.env*`,
+- **Sensitive touched** (`.github/`, `infra/`, `serving/`, `orchestration/`
+  (Docker / `docker-compose` / `test-int-airflow`), `.env*`, `.dockerignore`,
   `dbt/profiles.yml`, `.claude/hooks/`, `.claude/settings*.json`, a target that
   deletes / applies / takes `CONFIRM`): also **security-reviewer** (round 1;
   later rounds only if the range touches it again).

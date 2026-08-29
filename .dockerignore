@@ -1,0 +1,39 @@
+# Keep the Airflow image build context lean and reproducible (Phase 8b). data/ is
+# gitignored working output — the container generates its own; never bake a stale
+# tiny.duckdb. The venv, caches and VCS metadata are irrelevant to the image.
+#
+# NOTE (round 2 #18): `docker compose down -v` removes containers/volumes but NOT
+# the image. If a secret ever slipped in, `.dockerignore` is the defence AND
+# `docker image rm otr-airflow-8b:latest` (or `docker compose … down --rmi local`)
+# is the recovery — the layer must be dropped, not just the container.
+.git
+data
+.venv
+**/__pycache__
+**/*.pyc
+dbt/target
+dbt/logs
+logs
+*.duckdb
+*.duckdb.wal
+.pytest_cache
+.ruff_cache
+.claude
+# Terraform provider cache (~100 MB) and any future backend state (round 2 #2).
+**/.terraform
+**/.terraform.lock.hcl
+
+# Secrets must never be baked by `COPY . /opt/otr` (review rounds 1–2, #7/#1).
+# `.dockerignore` matches with filepath.Match — a leading `*` does NOT cross `/`,
+# so every pattern is `**/`-anchored to catch nested files (infra/.env,
+# infra/sa-key.json, orchestration/.env). None are committed; these mirror
+# CLAUDE.md's never-commit list.
+**/.env
+**/.env.*
+**/*.tfvars
+**/*.tfstate
+**/*.tfstate.*
+**/*-key.json
+**/*-credentials.json
+**/credentials*
+**/service-account*.json

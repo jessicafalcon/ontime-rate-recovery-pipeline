@@ -15,6 +15,9 @@ REPO_ROOT = Path(__file__).parent.parent
 SOURCE_SUFFIXES = {".py", ".sql", ".yml", ".yaml"}
 # Not pipeline code: tooling, docs, plans, fixtures, infra-as-text, the two
 # sanctioned readers/writers, and every dot-directory.
+# NOTE (Phase 8b coherence audit): `infra` is exempt as infra-as-text (Terraform),
+# but Phase 9 will add `infra/cli.py` (parked 9a already has it on its branch) —
+# when that lands, drop `infra` from EXEMPT so the truth guard covers its Python.
 EXEMPT = {
     "tests",
     "scripts",

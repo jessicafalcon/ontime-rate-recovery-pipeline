@@ -324,3 +324,45 @@ def test_writeback_and_pipeline_pass_profile_as_one_literal(value: str) -> None:
             assert f"serving.cli {target} {quoted}" in out, (target, origin, out)
             assert "pwned" not in out.replace(value, "")
             assert "--confirm" not in out  # no CONFIRM knob
+
+
+# ----------------------------------- Phase 8b: dbt-build THROUGH, test-int-airflow
+
+
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_dbt_build_passes_through_as_one_literal(value: str) -> None:
+    """Phase 8b: `make dbt-build` forwards THROUGH as one single-quoted token from
+    either origin (the DAG's per-interval landing); Python validates it as an
+    upload date and never derives a path."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for origin in ("cmdline", "env"):
+        out = _make_n(
+            "dbt-build",
+            {"PROFILE": "tiny", "THROUGH": value}
+            if origin == "cmdline"
+            else {"PROFILE": "tiny"},
+            {"THROUGH": value} if origin == "env" else {},
+        )
+        assert f"--through {quoted}" in out, (origin, out)
+        assert "pwned" not in out.replace(value, "")
+    # THROUGH unset ⇒ empty (loads all — the default build is unchanged)
+    out = _make_n("dbt-build", {"PROFILE": "tiny"}, {})
+    assert "--through ''" in out
+
+
+def test_test_int_airflow_takes_no_variable_and_exports_otr_int() -> None:
+    """Phase 8b: the integration target is the fixed command — it exports OTR_INT=1
+    in-recipe (so tests/integration/ collects) and takes NO user variable (tiny by
+    definition; the DAG's PROFILE=tiny is a manifest literal). A PROFILE from either
+    origin cannot steer it."""
+    expected = "OTR_INT=1 uv run pytest tests/integration/test_int_airflow.py"
+    for cmdline, env in (
+        ({}, {}),
+        ({"PROFILE": "../x"}, {}),
+        ({}, {"PROFILE": "../x"}),
+    ):
+        out = _make_n("test-int-airflow", cmdline, env)
+        assert expected in out, out
+        assert "../x" not in out  # no variable interpolation at all
