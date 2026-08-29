@@ -185,6 +185,32 @@ CONFIRM gate — `freeze`, `drop-db`, `dbt-build` — trusts make's closed origi
 word-set; the threat model is "mistakes, not a user who controls the environment
 or calls Python directly", DECISIONS Phase 0). No change.
 
+## Amendments (review round 3, approved 2026-08-29 — scoped re-review)
+
+Round 3 killed 9 of round 2's 10 survivors; one design change was missed in
+every earlier round (the security-reviewer's durable fix, over a tfvars comment):
+
+- **H — CI WIF is opt-in: `enable_ci_wif` (default false) count-gates the pool,
+  provider and impersonation binding (#9).** `github_repository` defaults to
+  THIS repo, so a fork's default apply built a WIF trust letting *this* repo's
+  `main` impersonate *their* service account. Now the three WIF resources carry
+  `count = var.enable_ci_wif ? 1 : 0`, so a default apply creates **no
+  cross-repo trust**; CI setup flips the toggle deliberately, with its own
+  `github_repository`. The least-privilege SA still exists unconditionally (9b's
+  `bq load` uses it under ADC). Restores **invariant 2**'s "a default apply
+  creates only what the operator asked for" and extends **invariant 7**: the
+  trust is branch-scoped *and* opt-in. Rejected: a tfvars-comment warning (not a
+  control); defaulting `github_repository` empty (breaks "project_id only" and
+  invariant 1).
+
+The genuine fixes (#2 `issuer_uri` pin, #7 the `tfstate` check scoped to managed
+blocks so the documented backend block can be uncommented, #12 `*.tfvars.json`
+ignored + scanned, #13 `project_id` shape `validation` in HCL), the seven
+test-cluster completions and the five record fixes land without amendments.
+**Gate item before merge (#8):** the apply→destroy Evidence predates the
+amendment commits — a fresh `make tf-apply` → `tf-destroy` cycle (ask-first)
+re-proves Done-when 5.
+
 ## Teaching notes (first appearance in this project)
 
 - **Terraform state, modules, and backends.** Terraform records what it created
