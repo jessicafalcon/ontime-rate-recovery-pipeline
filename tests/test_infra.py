@@ -105,6 +105,9 @@ def test_project_id_is_the_only_required_var() -> None:
     assert required == ["project_id"], required
 
 
+MANAGED_BLOCK_RE = r"(?:resource|data|module|variable|output|locals)\b[^{]*"
+
+
 def test_no_staging_bucket_variable_and_the_managed_bucket_is_derived() -> None:
     """Round 2 #1: the managed bucket is not caller-configurable, so it can never
     be pointed at the bootstrap `<project>-tfstate` state bucket. It is derived
@@ -114,8 +117,47 @@ def test_no_staging_bucket_variable_and_the_managed_bucket_is_derived() -> None:
     assert re.search(
         r'staging_bucket\s*=\s*"\$\{var\.project_id\}-ontime"', _read("main.tf")
     )
+    # Scoped to MANAGED blocks: the `terraform {}` block (where the documented
+    # `backend "gcs"` names the bootstrap bucket) is not a managed resource, so
+    # uncommenting it does not redden (round 3 #7).
     for f, body in _stripped_files().items():
-        assert "tfstate" not in body, f
+        for block in _blocks(body, MANAGED_BLOCK_RE):
+            assert "tfstate" not in block, f
+
+
+def _validation_conditions(var_body: str) -> list[str]:
+    return [
+        re.search(r"condition\s*=\s*(.+)", b).group(1).strip()
+        for b in _blocks(var_body, r"validation")
+    ]
+
+
+def test_project_id_validation_mirrors_the_cli_regex() -> None:
+    """Round 3 #13: a tfvars / direct `terraform apply` bypasses infra/cli.py, so
+    the HCL carries the same shape check — pinned equal to `cli.PROJECT_RE`
+    (`\\Z` ↔ `$`; HCL has no trailing newline to reject)."""
+    conds = _validation_conditions(
+        _block(_read("variables.tf"), r'variable "project_id"')
+    )
+    assert len(conds) == 1, conds
+    hcl = re.search(r'regex\("([^"]+)"', conds[0])
+    assert hcl and hcl.group(1) == cli.PROJECT_RE.pattern.replace(r"\Z", "$"), conds
+
+
+def test_input_shape_validations_exist() -> None:
+    """Round 3 #3: the `validation {}` blocks Amendment F added (CEL-injection
+    shape checks on the two WIF vars, positive thresholds) and #13's project_id
+    exist as assignments — deleting any one reddens."""
+    text = _read("variables.tf")
+    expect = {
+        "project_id": "regex(",
+        "github_repository": 'regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"',
+        "github_ref": 'regex("^refs/(heads|tags)/',
+        "budget_alert_thresholds_usd": "alltrue(",
+    }
+    for var, needle in expect.items():
+        conds = _validation_conditions(_block(text, rf'variable "{var}"'))
+        assert conds and any(needle in c for c in conds), (var, conds)
 
 
 # ---------------------------------------------------------------- invariant 2
@@ -168,13 +210,60 @@ def test_every_declared_resource_type_is_on_the_allowlist() -> None:
     for f in _tf_files():
         if f.parent in GATED_MODULE_DIRS:
             continue
+        # ANY provider's resource type (round 3 #6): a `null_resource` running a
+        # local-exec, or a `random_*`, is off-allowlist too.
         declared |= set(
-            re.findall(
-                r'resource\s+"(google_[a-z0-9_]+)"', _strip_hcl_comments(f.read_text())
-            )
+            re.findall(r'resource\s+"([a-z0-9_]+)"', _strip_hcl_comments(f.read_text()))
         )
     assert declared, "no resources declared"
     assert declared <= ALLOWED_RESOURCE_TYPES, declared - ALLOWED_RESOURCE_TYPES
+
+
+def test_required_providers_is_hashicorp_google_only() -> None:
+    """Round 3 #6: the only provider is `hashicorp/google` at the pinned
+    constraint — a second provider block or a loosened `>=` reddens."""
+    tf = _block(_stripped("main.tf"), r"terraform")
+    providers = _block(tf, r"required_providers")
+    names = re.findall(r"^\s*([a-z0-9_-]+)\s*=\s*\{", providers, re.M)
+    assert names == ["google"], names
+    google = _block(providers, r"google\s*=")
+    assert re.search(r'source\s*=\s*"hashicorp/google"', google)
+    assert re.search(r'version\s*=\s*"~> 6\.0"', google)
+
+
+# ---------------------------------------------------------------- CI WIF opt-in (H)
+
+
+WIF_RESOURCES = (
+    r'resource "google_iam_workload_identity_pool" "github"',
+    r'resource "google_iam_workload_identity_pool_provider" "github"',
+    r'resource "google_service_account_iam_member" "wif_impersonation"',
+)
+
+
+def test_ci_wif_is_opt_in_and_count_gated() -> None:
+    """Amendment H (round 3 #9): `enable_ci_wif` defaults false and count-gates
+    ALL THREE WIF resources (pool, provider, binding) — a default apply builds no
+    cross-repo trust; dropping the count from any one, or flipping the default,
+    reddens. The SA itself stays unconditional."""
+    assert re.search(
+        r"^\s*default\s*=\s*false",
+        _block(_read("variables.tf"), r'variable "enable_ci_wif"'),
+        re.M,
+    )
+    assert re.search(
+        r"^\s*enable_ci_wif\s*=\s*var\.enable_ci_wif",
+        _block(_read("main.tf"), r'module "iam"'),
+        re.M,
+    )
+    iam = _stripped("modules", "iam", "main.tf")
+    for header in WIF_RESOURCES:
+        assert re.search(
+            r"^\s*count\s*=\s*var\.enable_ci_wif \? 1 : 0", _block(iam, header), re.M
+        ), header
+    assert not _has_arg(
+        _block(iam, r'resource "google_service_account" "pipeline"'), "count"
+    )
 
 
 # ---------------------------------------------------------------- invariant 3
@@ -201,7 +290,7 @@ def test_no_tracked_secret_state_or_tfvars() -> None:
         p
         for p in tracked
         if re.search(r"\.tfstate", p)
-        or p.endswith(".tfvars")
+        or p.endswith((".tfvars", ".tfvars.json"))
         or p.endswith(PRIVATE_KEY_SUFFIXES)
         or (
             p.endswith(".json")
@@ -216,6 +305,9 @@ def test_no_tracked_secret_state_or_tfvars() -> None:
             assert '"private_key"' not in body, p
     assert (INFRA / "terraform.tfvars.example").exists()
     assert _ignored("infra/terraform.tfvars")
+    # Terraform auto-loads *.auto.tfvars and *.tfvars.json too (round 3 #12).
+    for auto in ("terraform.tfvars.json", "x.auto.tfvars", "x.auto.tfvars.json"):
+        assert _ignored(f"infra/{auto}"), auto
     assert not _ignored("infra/terraform.tfvars.example")
 
 
@@ -262,6 +354,18 @@ def test_wif_provider_condition_is_the_repo_and_ref_conjunction() -> None:
     assert "assertion.repository ==" in text
     assert "assertion.ref ==" in text
     assert "&&" in text and "||" not in text
+    # Round 3 #2: the issuer is GitHub's OIDC endpoint, exactly — a mutation to
+    # another issuer would let a foreign IdP mint a token that passes the
+    # repo/ref condition.
+    assert re.search(
+        r'issuer_uri\s*=\s*"https://token\.actions\.githubusercontent\.com"',
+        _block(prov, r"oidc"),
+    )
+    # Round 3 #4: the combined attribute is composed from BOTH claims.
+    assert (
+        '"attribute.repo_ref" = "assertion.repository + \\"@\\" + assertion.ref"'
+        in _block(prov, r"attribute_mapping\s*=")
+    )
 
 
 def test_wif_impersonation_binds_on_combined_repo_and_ref() -> None:
@@ -275,8 +379,12 @@ def test_wif_impersonation_binds_on_combined_repo_and_ref() -> None:
             r'resource "google_service_account_iam_member" "wif_impersonation"',
         ),
     )
-    assert member and "attribute.repo_ref/" in member.group(1), member
-    assert "@" in member.group(1)
+    assert member, "no member"
+    # Round 3 #4: exact composition — the principalSet ends with the combined
+    # attribute bound to BOTH vars; `attribute.repository/*` or repo-only reddens.
+    assert member.group(1).endswith(
+        "/attribute.repo_ref/${var.github_repository}@${var.github_ref}"
+    ), member.group(1)
     assert "/attribute.repository/" not in member.group(1)
 
 
@@ -303,8 +411,13 @@ def test_required_apis_are_enabled_and_survive_destroy() -> None:
     main = _stripped("main.tf")
     svc = _block(main, r'resource "google_project_service" "required"')
     assert re.search(r"disable_on_destroy\s*=\s*false", svc)
-    for s in REQUIRED_SERVICES:
-        assert f"{s}.googleapis.com" in main, s
+    assert re.search(r"for_each\s*=\s*toset\(local\.required_services\)", svc)
+    # Scoped to the list the resource iterates (round 3 #11), as an exact set.
+    lst = re.search(r"required_services\s*=\s*\[(.*?)\]", _block(main, r"locals"), re.S)
+    assert lst, "no local.required_services"
+    assert set(re.findall(r'"([^"]+)"', lst.group(1))) == {
+        f"{s}.googleapis.com" for s in REQUIRED_SERVICES
+    }
 
 
 def test_modules_depend_on_the_service_enablement() -> None:
@@ -343,12 +456,14 @@ def test_project_level_grant_is_only_bigquery_jobuser() -> None:
     `bigquery.jobUser` (which must be project-level); `dataEditor` is
     dataset-scoped and `objectAdmin` bucket-scoped — moving `objectAdmin` to a
     project-wide `google_project_iam_member` reddens."""
-    iam = _stripped("modules", "iam", "main.tf")
-    project_roles = {
-        re.search(r'role\s*=\s*"(roles/[^"]+)"', b).group(1)
-        for b in _blocks(iam, r'resource "google_project_iam_member"\s+"[^"]+"')
-    }
+    project_roles: set[str] = set()
+    for body in _stripped_files().values():  # whole tree (round 3 #1)
+        project_roles |= {
+            re.search(r'role\s*=\s*"(roles/[^"]+)"', b).group(1)
+            for b in _blocks(body, r'resource "google_project_iam_member"\s+"[^"]+"')
+        }
     assert project_roles == {"roles/bigquery.jobUser"}, project_roles
+    iam = _stripped("modules", "iam", "main.tf")
     # objectAdmin is granted on the bucket, dataEditor on the datasets
     assert _blocks(iam, r'resource "google_storage_bucket_iam_member"\s+"[^"]+"')
     assert (
@@ -497,7 +612,21 @@ def test_cli_builds_the_expected_argv() -> None:
         )
 
 
-def test_cli_missing_terraform_is_a_clean_fail() -> None:
+def test_cli_validate_argv_is_offline() -> None:
+    """Round 3 #5 (round 2 #9's live survivor): `tf-validate` runs init with
+    `-backend=false` (no state backend touched, no auth) then validate, then
+    fmt -check — dropping the flag or a step reddens."""
+    fake = _FakeRunner()
+    assert cli.tf("validate", runner=fake) == 0
+    steps = [argv[2:] for argv in fake.calls]
+    assert steps == [
+        ["init", "-backend=false", "-input=false"],
+        ["validate"],
+        ["fmt", "-check", "-recursive"],
+    ], steps
+
+
+def test_cli_missing_terraform_is_a_clean_fail(capsys: pytest.CaptureFixture) -> None:
     """No traceback when terraform is not on PATH; a real exit 127 still FAILs
     (None sentinel, not 127) (review round 1 #22 / round 2 #16)."""
 
@@ -505,10 +634,12 @@ def test_cli_missing_terraform_is_a_clean_fail() -> None:
         raise FileNotFoundError(2, "No such file or directory", "terraform")
 
     assert cli.tf("validate", runner=missing) == 1
+    assert "tf-validate FAIL: terraform not on PATH" in capsys.readouterr().out
     assert cli.tf("plan", "my-proj", runner=missing) == 1
-    assert (
-        cli.tf("plan", "my-proj", runner=_FakeRunner(rc=127)) == 1
-    )  # 127 still a FAIL
+    assert "tf-plan FAIL: terraform not on PATH" in capsys.readouterr().out
+    # A real exit 127 is reported as the command's own FAIL line (round 3 #10).
+    assert cli.tf("plan", "my-proj", runner=_FakeRunner(rc=127)) == 1
+    assert "tf-plan FAIL: my-proj" in capsys.readouterr().out
 
 
 def test_cli_module_runs() -> None:

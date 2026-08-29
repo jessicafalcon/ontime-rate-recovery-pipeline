@@ -37,16 +37,21 @@ resource "google_storage_bucket_iam_member" "bucket_object_admin" {
   member = "serviceAccount:${google_service_account.pipeline.email}"
 }
 
-# Workload Identity Federation — GitHub Actions OIDC, no key at rest.
+# Workload Identity Federation — GitHub Actions OIDC, no key at rest. OPT-IN:
+# `github_repository` defaults to this repo, so an unconditional pool would let
+# this repo's CI impersonate a fork's SA on their default apply (round 3 #9,
+# Amendment H). All three WIF resources are count-gated on enable_ci_wif.
 resource "google_iam_workload_identity_pool" "github" {
+  count                     = var.enable_ci_wif ? 1 : 0
   project                   = var.project_id
   workload_identity_pool_id = "ontime-github-pool"
   display_name              = "On-Time GitHub CI"
 }
 
 resource "google_iam_workload_identity_pool_provider" "github" {
+  count                              = var.enable_ci_wif ? 1 : 0
   project                            = var.project_id
-  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github[0].workload_identity_pool_id
   workload_identity_pool_provider_id = "github"
   display_name                       = "GitHub Actions OIDC"
 
@@ -72,7 +77,8 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 # binding is on the combined repo@ref attribute, so even a future second, looser
 # provider on the same pool could not widen it to another branch.
 resource "google_service_account_iam_member" "wif_impersonation" {
+  count              = var.enable_ci_wif ? 1 : 0
   service_account_id = google_service_account.pipeline.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repo_ref/${var.github_repository}@${var.github_ref}"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github[0].name}/attribute.repo_ref/${var.github_repository}@${var.github_ref}"
 }

@@ -312,8 +312,8 @@ default. `infra/` with one module per concern — `bigquery` (datasets `raw` +
 §6); `composer`/`spanner` written but `count`-gated behind `enable_*` toggles
 defaulting false, so a default plan makes zero of them. One least-privilege
 service account (BQ `jobUser` + dataset-scoped `dataEditor`, bucket
-`objectAdmin`; never owner/editor) + a WIF pool/provider for CI — ADC/WIF only,
-no key at rest. Budget alerts $50/$150 (notify only); the billing kill-switch is
+`objectAdmin`; never owner/editor) + a WIF pool/provider for CI, opt-in behind
+`enable_ci_wif` (default false) — ADC/WIF only, no key at rest. Budget alerts $50/$150 (notify only); the billing kill-switch is
 documented optional in `docs/DEPLOYMENT.md`, not built. `project_id` the only
 required var (`region` defaults `us-central1`; the budget's billing account +
 project number are a `google_project` data source). `infra/cli.py` validates

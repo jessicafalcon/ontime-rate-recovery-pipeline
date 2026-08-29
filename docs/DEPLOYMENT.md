@@ -10,12 +10,16 @@ is applied until you run `make tf-apply` yourself.
 - **Local:** `gcloud auth application-default login` sets Application Default
   Credentials; `make tf-plan|tf-apply|tf-destroy` and `bq`/dbt pick them up. No
   service-account key is ever downloaded or committed.
-- **CI:** the `iam` module provisions a Workload Identity Federation pool +
-  provider trusting this repo's GitHub OIDC token, scoped to **both** the
-  repository **and** the trusted ref (`var.github_ref`, default
-  `refs/heads/main`) — a non-main branch's CI cannot mint the token. A workflow
-  uses `google-github-actions/auth` with the provider and the `ontime-pipeline`
-  service account — a short-lived credential, no secret at rest.
+- **CI (opt-in):** with `enable_ci_wif = true` the `iam` module provisions a
+  Workload Identity Federation pool + provider trusting a GitHub OIDC token,
+  scoped to **both** the repository (`var.github_repository`) **and** the
+  trusted ref (`var.github_ref`, default `refs/heads/main`) — a non-main branch's
+  CI cannot mint the token. A workflow uses `google-github-actions/auth` with the
+  provider and the `ontime-pipeline` service account — a short-lived credential,
+  no secret at rest. The toggle **defaults false**: a default apply builds no WIF
+  trust at all, so a fork cannot end up trusting *this* repo's `main` (the
+  `github_repository` default) to impersonate *its* service account. A fork that
+  wants CI sets `enable_ci_wif = true` **and** its own `github_repository`.
 
 ## One-time API bootstrap (a brand-new project only)
 
@@ -71,7 +75,7 @@ The default apply creates only the free/near-free layer:
 |---|---|---|
 | BigQuery datasets `raw`, `ontime` | empty datasets free; storage ~$0.02/GB·mo (tiny ≈ $0); queries $5/TB (tiny ≈ $0) | idempotent — Terraform no-ops, no double spend |
 | GCS staging bucket `<project>-ontime` (NOT the tfstate bucket) | ~$0.02/GB·mo; tiny (≈ $0); noncurrent versions reaped by a lifecycle rule | idempotent |
-| Service account + IAM + WIF | free | idempotent |
+| Service account + IAM (+ WIF only when `enable_ci_wif=true`) | free | idempotent |
 | Budget ($50 / $150 alerts) | free (notifies only — see below) | idempotent |
 | **Composer** (`enable_composer=false`) | **not created** — ~$300+/mo if enabled | — |
 | **Spanner** (`enable_spanner=false`) | **not created** — ~$65+/mo after the 90-day trial | — |
@@ -88,8 +92,9 @@ users** by default — add an `all_updates_rule` with a Cloud Monitoring
 notification channel if you need other recipients or a Pub/Sub trigger. The only
 thing that actually stops spend is disabling billing on the project. The real
 guardrail is a **Pub/Sub → Cloud Function** that, on a budget notification at the
-$150 threshold, calls the Cloud Billing API to detach the billing account. It is **documented here as optional and left unbuilt** (the
-meter is off by default, so there is no runaway to catch yet); build it before
+$150 threshold, calls the Cloud Billing API to detach the billing account. It is
+**documented here as optional and left unbuilt** (the meter is off by default, so
+there is no runaway to catch yet); build it before
 any long-lived apply (Phase 12 demo day) if you want a hard stop. Sketch:
 
 1. `google_pubsub_topic` the budget publishes to (`budget.all_updates_rule`).
@@ -106,8 +111,8 @@ make tf-destroy PROJECT=<project_id> CONFIRM=yes
 
 Removes every resource in state — the two datasets
 (`delete_contents_on_destroy`, so they go even with 9b's tables), the staging
-bucket (`force_destroy`, so it goes even with objects), the service account + WIF
-pool, and the budget. The bootstrap **tfstate bucket is not managed and is not
+bucket (`force_destroy`, so it goes even with objects), the service account (+
+the WIF pool if `enable_ci_wif` was on), and the budget. The bootstrap **tfstate bucket is not managed and is not
 removed** (it holds the state). The **API enablements stay on**
 (`disable_on_destroy = false`) — deliberately, so a re-apply works and a
 project-wide API another workload may use is never disabled by our teardown;

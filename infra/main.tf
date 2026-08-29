@@ -2,7 +2,7 @@
 # free/near-free and unconditional (ARCHITECTURE §6), composer/spanner are
 # count-gated behind enable_* toggles that default false, so a default plan
 # creates zero of them (spec invariant 2). Auth is ADC (local `gcloud`) or WIF
-# (CI) — no service-account key, ever.
+# (CI, opt-in via enable_ci_wif) — no service-account key, ever.
 
 terraform {
   required_version = ">= 1.5"
@@ -97,6 +97,7 @@ module "iam" {
   raw_dataset       = module.bigquery.raw_dataset_id
   models_dataset    = module.bigquery.models_dataset_id
   bucket            = module.gcs.bucket_name
+  enable_ci_wif     = var.enable_ci_wif
   github_repository = var.github_repository
   github_ref        = var.github_ref
 

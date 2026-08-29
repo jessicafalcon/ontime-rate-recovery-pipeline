@@ -95,9 +95,9 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
 - `infra/` *(Phase 9a)* — Terraform. `main.tf`/`variables.tf`/`outputs.tf` +
   `modules/{bigquery,gcs,iam,budget}` (unconditional, free/near-free) and
   `modules/{composer,spanner}` `count`-gated behind `enable_*` toggles that
-  default false. `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`
-  on `CONFIRM=yes $(origin)`) drives `make tf-validate|tf-plan|tf-apply|
-  tf-destroy`. `terraform.tfvars.example` only; ADC/WIF, never a key.
+  default false (so is the CI WIF layer inside `iam`: `enable_ci_wif`).
+  `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy` on `CONFIRM=yes
+  $(origin)`) drives `make tf-validate|tf-plan|tf-apply|tf-destroy`. `terraform.tfvars.example` only; ADC/WIF, never a key.
 - `fixtures/tiny/` — golden `raw/events_<upload-date>.jsonl` + `dims/` +
   `truth/` + `expected/attribution.csv` (Phase 3) + `MANIFEST.sha256`. **READ-ONLY**: the
   review gate FAILs any change without a `Freeze:` line in the phase spec;
@@ -272,7 +272,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   everything in state (nothing billable left). Cloud-cost / destructive: `CONFIRM=
   yes` must have COMMAND-LINE origin (`$(origin CONFIRM)`); ask first, every time.
   Auth ADC/WIF only — never a keyfile. `enable_composer`/`enable_spanner` default
-  false, so a default apply makes zero Composer/Spanner resources
+  false, so a default apply makes zero Composer/Spanner resources; `enable_ci_wif`
+  defaults false, so it also builds no WIF trust (CI auth is an explicit opt-in)
 - Later phases add:
   `test-int-bigquery` (9b — the DuckDB≡BigQuery pin-parity run behind `OTR_INT`/
   WIF). Each lands with its phase and is listed here in the same PR.
@@ -602,7 +603,8 @@ module per concern — `bigquery` (datasets `raw` + `ontime`), `gcs`, `iam`,
 behind `enable_*` toggles that **default false**, so a default plan/apply makes
 zero of them. One **least-privilege** service account (BQ `jobUser` +
 dataset-scoped `dataEditor`, bucket `objectAdmin`; never `roles/owner|editor`) +
-a **WIF** pool/provider for CI — **ADC/WIF only, no key at rest**. Budget alerts
+a **WIF** pool/provider for CI, opt-in behind `enable_ci_wif` (default false) —
+**ADC/WIF only, no key at rest**. Budget alerts
 **$50/$150** (notify only); the billing kill-switch is documented optional in
 `docs/DEPLOYMENT.md`, not built. **`project_id` is the only required var**
 (`region` defaults `us-central1`; the budget's billing account + project number
@@ -626,7 +628,14 @@ re-implemented once against the pinning invariant (resource allowlist, exact WIF
 bucket derived not a var; WIF binds on combined `repo@ref` + CEL-injection
 validations; `serviceusage`+`cloudresourcemanager` bootstrap APIs); fixes
 (`None` sentinel, `-input=false`, positive-threshold validation); #18 accepted
-(sanctioned `$(origin)` pattern). A scoped round 3 follows. Next: 9a review → merge
+(sanctioned `$(origin)` pattern). **Review round 3 applied (18 findings, cap's
+scoped re-review): 1 amendment** — H, CI WIF opt-in (`enable_ci_wif` count-gates
+pool/provider/binding; a fork's default apply no longer trusts this repo's
+`main`); 4 genuine fixes (`project_id` HCL `validation` = `PROJECT_RE`; `issuer_uri`
+pinned; `*.tfvars.json` ignored + scanned; the `tfstate` check scoped to managed
+blocks — a round-2 regression); 7 test-cluster completions; 5 record fixes. **Gate
+item before merge:** a fresh `make tf-apply`→`tf-destroy` cycle (the Evidence
+predates the amendments), then round 4 confirms green. Next: round 4 → merge
 → 9b (its first
 commit reconciles against main-with-9a; it also fixes the 8b-opened row "the
 DAG's build owns its landing" — `dbt_build(TARGET=bigquery)` must not call the

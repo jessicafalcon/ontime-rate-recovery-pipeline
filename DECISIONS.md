@@ -137,14 +137,17 @@ annotated **Superseded by …** in place and never deleted.
   `modules/iam` grants BQ `jobUser` (project) + dataset-scoped `dataEditor` on the
   two datasets + bucket `objectAdmin`, never `roles/owner|editor`; CI
   authenticates through a Workload Identity Federation pool/provider scoped to
-  `attribute.repository == <repo>`. No `google_service_account_key` resource, no
+  `attribute.repository == <repo>`. *Superseded in review:* round 1 **B** made
+  the condition repo AND ref, round 2 **F** bound impersonation on the combined
+  `repo@ref`, and round 3 **H** made the whole WIF layer opt-in
+  (`enable_ci_wif`, default false). No `google_service_account_key` resource, no
   keyfile path anywhere (`tests/test_infra.py` greps for it). Rejected: a
   downloaded SA key (a secret at rest — the thing the rule forbids); `roles/editor`
   (broad). Stands up the WIF the "cross-warehouse dialect drift needs a CI
   BigQuery job" BACKLOG row needs (closes at 9b exit).
 - **Budget alerts $50/$150; the kill-switch documented, not built.** `modules/
   budget` sets threshold rules at $50 and $150 on a monthly amount (the total is
-  `max(thresholds)`). A budget only notifies; the real guardrail (Pub/Sub → Cloud
+  `min(thresholds)`; the rules are whole-percent multiples of it). A budget only notifies; the real guardrail (Pub/Sub → Cloud
   Function disabling billing) is documented in `docs/DEPLOYMENT.md` with a resource
   sketch and left unbuilt — nothing billable runs by default, so there is no
   runaway to catch. Closes BACKLOG "Budget alerts do not stop spend". Rejected:
@@ -213,6 +216,28 @@ annotated **Superseded by …** in place and never deleted.
   positive-threshold validation, DEPLOYMENT bootstrap-bucket hardening / API-stay-on
   notes. **Accepted:** `require_confirm`'s caller-supplied origin is the sanctioned
   repo-wide `$(origin CONFIRM)` pattern (no change). A scoped round 3 follows.
+- **Review round 3 — scoped re-review, one amendment (approved 2026-08-29).**
+  Nine of round 2's ten survivors died; four genuine issues were missed in
+  earlier rounds and one was a round-2 regression. Design change: **(H) CI WIF
+  is opt-in** — `github_repository` defaults to this repo, so a fork's *default*
+  apply built a trust letting this repo's `main` impersonate their SA; the pool,
+  provider and binding are now `count`-gated behind `enable_ci_wif` (default
+  false) and the SA stays unconditional. Rejected: a tfvars-comment warning (not a
+  control); an empty `github_repository` default (breaks invariant 1). Fixes:
+  `project_id` gets the `PROJECT_RE` shape as an HCL `validation` (a tfvars /
+  direct apply no longer bypasses the make-target check; the test pins the two
+  regexes equal); the WIF `issuer_uri` is pinned exactly; `*.tfvars.json` /
+  `*.auto.tfvars*` (auto-loaded by Terraform) are gitignored and in the tracked-
+  secret scan; the `tfstate` check is scoped to managed blocks so the documented
+  `backend "gcs"` block can be uncommented without reddening `make test` (the
+  round-2 regression). Test-cluster completions: whole-tree project-level-grant
+  scan, `validation {}` presence, `repo_ref` mapping + member composition, the
+  `validate` argv's `-backend=false`, an any-provider resource allowlist +
+  `hashicorp/google ~> 6.0` pin, the FAIL lines asserted via `capsys`, the API pin
+  scoped to `local.required_services` as an exact set. Records: this file's
+  `max`→`min` and the superseded-by pointer above. **Gate item:** the
+  apply→destroy Evidence predates the amendments; a fresh cycle re-proves it
+  before merge.
 
 ### Phase 8b
 

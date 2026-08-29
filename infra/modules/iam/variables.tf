@@ -14,6 +14,10 @@ variable "bucket" {
   type = string
 }
 
+variable "enable_ci_wif" {
+  type = bool
+}
+
 variable "github_repository" {
   type = string
 }

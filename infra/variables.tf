@@ -4,6 +4,13 @@
 variable "project_id" {
   description = "The GCP project. The only required variable."
   type        = string
+
+  # The same shape infra/cli.py enforces (PROJECT_RE), so a tfvars / direct
+  # `terraform apply` cannot bypass the make-target validation (round 3 #13).
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", var.project_id))
+    error_message = "project_id must be a GCP project id: [a-z][a-z0-9-]{4,28}[a-z0-9]."
+  }
 }
 
 variable "region" {
@@ -24,8 +31,14 @@ variable "enable_spanner" {
   default     = false
 }
 
+variable "enable_ci_wif" {
+  description = "Create the GitHub WIF pool/provider + SA impersonation binding for CI. Off — a default apply builds no cross-repo trust (Amendment H)."
+  type        = bool
+  default     = false
+}
+
 variable "github_repository" {
-  description = "owner/repo the WIF provider trusts for CI (short-lived OIDC, no key at rest)."
+  description = "owner/repo the WIF provider trusts for CI (short-lived OIDC, no key at rest). Only used when enable_ci_wif is true — a fork sets its own."
   type        = string
   default     = "jessicafalcon/ontime-rate-recovery-pipeline"
 

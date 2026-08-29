@@ -1,10 +1,12 @@
 # Copy to terraform.tfvars (gitignored) and set your project. `project_id` is the
-# only required value; every other input has a default. A FORK must also set
-# github_repository (its own owner/repo) so WIF trusts its CI, not this repo's.
-# Never commit terraform.tfvars.
+# only required value; every other input has a default. Never commit
+# terraform.tfvars (or any *.tfvars.json / *.auto.tfvars* — all gitignored).
 project_id = "your-gcp-project-id"
 
-# A fork's own repo/ref for Workload Identity Federation (CI auth, no key):
+# CI auth by Workload Identity Federation (no key) is OPT-IN: a default apply
+# builds no WIF trust. To enable it, flip the toggle AND set your own repo/ref
+# (the defaults name this repo).
+# enable_ci_wif     = true
 # github_repository = "your-org/your-repo"
 # github_ref        = "refs/heads/main"
 
