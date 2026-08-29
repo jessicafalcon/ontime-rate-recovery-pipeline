@@ -30,6 +30,13 @@ provider "google" {
   project = var.project_id
   region  = var.region
   # No `credentials`/keyfile: ADC or WIF only (spec invariant 3).
+  # User ADC (a developer's `gcloud auth application-default login`) carries no
+  # quota project, and billingbudgets.googleapis.com refuses calls without one
+  # (403 SERVICE_DISABLED on consumer "projects/<gcloud default>"). Send our own
+  # project as the quota/billing project so no per-machine
+  # `set-quota-project` step is needed (ARCHITECTURE §8 Gotchas).
+  user_project_override = true
+  billing_project       = var.project_id
 }
 
 locals {

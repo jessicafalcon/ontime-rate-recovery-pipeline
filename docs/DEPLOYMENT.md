@@ -9,7 +9,9 @@ is applied until you run `make tf-apply` yourself.
 
 - **Local:** `gcloud auth application-default login` sets Application Default
   Credentials; `make tf-plan|tf-apply|tf-destroy` and `bq`/dbt pick them up. No
-  service-account key is ever downloaded or committed.
+  service-account key is ever downloaded or committed. No `set-quota-project`
+  step: the provider sends `project_id` as the quota project itself
+  (`user_project_override`; ARCHITECTURE §8).
 - **CI (opt-in):** with `enable_ci_wif = true` the `iam` module provisions a
   Workload Identity Federation pool + provider trusting a GitHub OIDC token,
   scoped to **both** the repository (`var.github_repository`) **and** the

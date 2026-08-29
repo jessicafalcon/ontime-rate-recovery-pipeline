@@ -392,3 +392,13 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   (`docs/DEPLOYMENT.md`). Harmless for a single demo-day apply/destroy; the
   destroy itself still leaves nothing billable. Datasets and the bucket have no
   such reservation.
+- **User ADC has no quota project; `billingbudgets.googleapis.com` refuses it**
+  (Phase 9a, found on the first live apply). A developer's `gcloud auth
+  application-default login` credential carries no quota project, and the
+  Billing Budgets API 403s (`SERVICE_DISABLED` on the gcloud default consumer
+  project) — 17 of 18 resources applied, the budget did not. Fix in the tree,
+  not per machine: `provider "google"` sets `user_project_override = true` +
+  `billing_project = var.project_id`, so every call is billed/quota'd against
+  our own project (whose APIs Terraform enables). The alternative
+  `gcloud auth application-default set-quota-project` would have to be
+  remembered on every machine. WIF/SA credentials are unaffected.

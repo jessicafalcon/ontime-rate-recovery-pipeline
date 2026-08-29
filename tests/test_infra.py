@@ -319,6 +319,11 @@ def test_auth_is_adc_or_wif_never_keyfile() -> None:
         assert not _has_arg(body, "credentials"), f
         assert not _has_arg(body, "keyfile"), f
         assert not re.search(r"=\s*file\([^)]*\.json", body), f
+    # User ADC needs a quota project for billingbudgets (§8 Gotchas): the
+    # provider sends our own, so no per-machine set-quota-project step.
+    prov = _block(_stripped("main.tf"), r'provider "google"')
+    assert re.search(r"user_project_override\s*=\s*true", prov)
+    assert re.search(r"billing_project\s*=\s*var\.project_id", prov)
     bq = _yaml_block((ROOT / "dbt" / "profiles.yml").read_text(), "bigquery")
     assert "method: oauth" in bq
     assert "keyfile" not in bq and "credentials" not in bq
