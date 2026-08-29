@@ -327,10 +327,16 @@ sets the `bigquery` output's `location` (`us-central1`, the datasets') and
 exports `OTR_GCP_PROJECT` from the validated `PROJECT` (Amendment O). `project_id` the only
 required var (`region` defaults `us-central1`; the budget's billing account +
 project number are a `google_project` data source). `infra/cli.py` validates
-`PROJECT` and gates `tf-apply`/`tf-destroy` on `CONFIRM=yes $(origin)`; four
-targets `tf-validate` (offline) / `tf-plan` / `tf-apply` / `tf-destroy`, plus
-`tf-freeze` — the only writer of `infra/MANIFEST.sha256`, which pins every `.tf`
-byte-for-byte (Amendment P). `operator_principal` (default null) count-gates a
+`PROJECT` and gates `tf-apply`/`tf-destroy`/`tf-freeze` on `CONFIRM=yes
+$(origin)`; four targets `tf-validate` (offline, `-lockfile=readonly`) / `tf-plan` /
+`tf-apply` / `tf-destroy`, plus `tf-freeze` — the only writer of
+`infra/MANIFEST.sha256`, which pins every `.tf`, `.tf.json` and the provider
+lock byte-for-byte (Amendments P, R); plan/apply/destroy refuse an auto-loaded
+`terraform.tfvars`/`*.auto.tfvars*` (T). Beyond `infra/`, 9a carries the two
+refusals that keep a pre-9b cloud build impossible: `make dbt-build
+TARGET=bigquery` exits 2 before `load()` and `profiles.yml` reads
+`OTR_GCP_PROJECT` with no default (Amendment S — lifted by 9b's
+`generate_schema_name` commit). `operator_principal` (default null) count-gates a
 `serviceAccountTokenCreator` grant on the SA for manual builds (Amendment Q).
 State backend bootstrap-documented (local by default). `make tf-validate` OK (google
 provider 6.50.0); the plan-clean and destroy-empty Done-when clauses are proven

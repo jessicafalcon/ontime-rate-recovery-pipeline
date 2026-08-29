@@ -414,3 +414,16 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   suffix in round 4, Amendment L). The data source lives inside
   `modules/budget`, which `depends_on` the API enablement, so it is read at
   apply time and a fresh project still plans.
+- **`terraform init` rewrites the provider lock unless told not to** (Phase 9a,
+  review round 7). `.terraform.lock.hcl` carries per-platform `h1:` hashes and
+  a plain `init` adds the current platform's — silently changing a file the
+  manifest pins. `tf-validate` runs `init -lockfile=readonly`, so on a platform
+  the lock lacks (the pin is darwin/arm64 only) it FAILs instead of mutating;
+  the fix is a deliberate `terraform providers lock -platform=…` plus `make
+  tf-freeze CONFIRM=yes` in one commit (`docs/DEPLOYMENT.md`). Provable only
+  from a second platform — static-pinned in the suite.
+- **Terraform auto-loads `terraform.tfvars` and `*.auto.tfvars{,.json}`**
+  (Phase 9a, review round 8, reproduced by a local file). They are gitignored
+  and outside the manifest, so a toggle could reach an apply with nothing in
+  the tree or the argv showing it; `infra/cli.py` refuses plan/apply/destroy
+  while one exists (Amendment T).

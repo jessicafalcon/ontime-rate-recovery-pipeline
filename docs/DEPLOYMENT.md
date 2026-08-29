@@ -91,15 +91,29 @@ Then uncomment the `backend "gcs"` block in `infra/main.tf` and
 ## Apply and plan
 
 ```
-make tf-validate                              # offline: init -backend=false + validate + fmt -check
-make tf-plan    PROJECT=<project_id>          # reads GCP APIs; shows the diff (free)
+make tf-validate                              # offline: init -backend=false -input=false -lockfile=readonly + validate + fmt -check
+make tf-plan    PROJECT=<project_id>          # reads GCP APIs; shows the diff (free) — ALWAYS before an apply
 make tf-apply   PROJECT=<project_id> CONFIRM=yes   # creates resources — ask first
-make tf-freeze  CONFIRM=yes                   # after ANY .tf edit: rewrites infra/MANIFEST.sha256 (the offline pin)
+make tf-freeze  CONFIRM=yes                   # after ANY .tf / .tf.json / lock edit: rewrites infra/MANIFEST.sha256 (the offline pin)
 ```
 
-`tf-apply` / `tf-destroy` require `CONFIRM=yes` from the command line
-(`$(origin CONFIRM)`); an environment `CONFIRM=yes` is refused. `PROJECT` is
+`tf-apply` / `tf-destroy` / `tf-freeze` require `CONFIRM=yes` from the command
+line (`$(origin CONFIRM)`); an environment `CONFIRM=yes` is refused. `PROJECT` is
 validated as a GCP project-id before any terraform runs.
+
+Toggles are command-line `-var`s only. Terraform would auto-load an
+`infra/terraform.tfvars` or `*.auto.tfvars{,.json}` — gitignored and outside
+the manifest, so a plan could differ from the pinned tree with nothing showing
+it — so `tf-plan`/`tf-apply`/`tf-destroy` refuse while one exists (`tf-plan:
+refused — infra/terraform.tfvars auto-loads …`, Amendment T): delete it and
+pass `-var` (or `TF_VAR_*`) in the command you run. Read the `tf-plan` output
+before every `tf-apply`; the plan is the review.
+
+`tf-validate`'s init is `-lockfile=readonly`: `infra/.terraform.lock.hcl` pins
+one platform hash (`h1:`, darwin/arm64). On another platform the init FAILs
+(exit 1) rather than rewriting the pin; fix deliberately with `terraform
+-chdir=infra providers lock -platform=linux_amd64` (add the platform, keep the
+existing one) then `make tf-freeze CONFIRM=yes`, in one commit.
 
 The default apply creates only the free/near-free layer:
 

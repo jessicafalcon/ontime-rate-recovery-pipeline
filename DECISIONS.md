@@ -125,6 +125,23 @@ annotated **Superseded by …** in place and never deleted.
 9a merges. Design changes approved 2026-08-26; rebased onto Phase-8-complete main
 2026-08-28.
 
+**9a in one screen (standing decisions after review round 8; the round entries
+below are history — an entry a later amendment overrode carries a pointer):**
+`infra/` one module per concern, `composer`/`spanner`/CI-WIF count-gated behind
+`enable_*` toggles defaulting false (A–C, H, K); one least-privilege SA, ADC/WIF
+only, `operator_principal` count-gates a `serviceAccountTokenCreator` grant ON
+the SA (Q); staging bucket derived `${project_id}-ontime`, distinct from the
+bootstrap tfstate bucket (F); budgets at `min`-amount thresholds in the billing
+account's currency, notify only (L); `google_project_service` so a fresh
+project applies (D, G); `infra/cli.py` — `PROJECT` validated before the `-var`,
+`tf-apply`/`tf-destroy`/`tf-freeze` `$(origin)`-gated, `tf()` runner-injectable
+(E, P), auto-loaded tfvars refused (T); the `.tf` tree pinned by
+`infra/MANIFEST.sha256` over `*.tf` + `*.tf.json` + the lock, `tf-validate`
+`-lockfile=readonly` (P, R); no BigQuery build before 9b — `TARGET=bigquery`
+refused, `profiles.yml` no default project (N, S); Claude config a tracked-path
+allowlist (M); the root `workload_identity_provider` output (J); two datasets,
+9b's `generate_schema_name` DUE (I, O).
+
 - **`infra/` is one tree, one module per concern, `enable_*` toggles default
   false.** `main.tf` wires `modules/{bigquery,gcs,iam,budget}` unconditionally
   (all free/near-free — ARCHITECTURE §6) and `modules/{composer,spanner}` behind
@@ -180,8 +197,10 @@ annotated **Superseded by …** in place and never deleted.
   `generator.manifest.diff`, `-lockfile=readonly`, vanished-file refusal). Mirrors `loader/cli.py`: one process validates `PROJECT`
   (`^[a-z][a-z0-9-]{4,28}[a-z0-9]\Z`) before deriving `-var project_id=…`, and
   refuses `tf-apply`/`tf-destroy` unless `CONFIRM=yes` has command-line origin;
-  `tf-validate` (offline: `init -backend=false` + `validate` + `fmt -check`) and
-  `tf-plan` are non-destructive and ungated. The Terraform HCL is configuration no
+  `tf-validate` (offline: `init -backend=false -input=false -lockfile=readonly`
+  + `validate` + `fmt -check`, since R) and
+  `tf-plan` are non-destructive and ungated (T adds the auto-tfvars refusal to
+  plan/apply/destroy). The Terraform HCL is configuration no
   mutation operator addresses — pinned by `tests/test_infra.py` static checks +
   `terraform validate` + the manual plan/apply/destroy Evidence (the Phase 7
   treatment of SQL); the `infra/cli.py` guards carry the mutation lines
@@ -322,7 +341,8 @@ annotated **Superseded by …** in place and never deleted.
   `OTR_GCP_PROJECT`, which nothing sets or documents — 9b sets `location`
   from Terraform's value and has `make dbt-build TARGET=bigquery` export the
   project from the validated `PROJECT`. Rejected: fixing `profiles.yml` in
-  9a (Phase 2 code, 9b's surface). Test widening (#12): the Claude-settings
+  9a (Phase 2 code, 9b's surface) — *superseded by round 7 **S**: the `''`
+  default made a pre-9b build runnable, so 9a dropped it after all.* Test widening (#12): the Claude-settings
   pin rejects any auto-configuring key (`hooks`, `permissions`, `env`,
   `mcpServers`, `enableAllProjectMcpServers`) and a tracked `.mcp.json`, not
   `hooks` alone. Accepted (#13): invariant 7 is static-pinned only until 9b's
@@ -338,7 +358,8 @@ annotated **Superseded by …** in place and never deleted.
   ones per round; (2) every record-only amendment is restated in ~7 files, so
   each narrowing spawned new drift; (3) Amendment M's key scan pinned a
   surface Claude Code owns. **P** — `infra/MANIFEST.sha256` (the `fixtures/`
-  format) pins every `.tf` + the provider lock byte-for-byte
+  format) pins every `.tf` + the provider lock byte-for-byte (*widened by round
+  7 R:* `*.tf.json` too, the lock never rewritten — `-lockfile=readonly`)
   (`test_tf_tree_matches_manifest`); `make tf-freeze CONFIRM=yes`
   (`$(origin)`-gated like `freeze`) is its only writer, the manifest hunk in
   the same commit is the declaration (no per-re-freeze DECISIONS entry — the
@@ -359,6 +380,34 @@ annotated **Superseded by …** in place and never deleted.
   rest wording: Done-when 5 / invariant 2 narrowed to the SA (#12), Evidence
   rows 1/5 corrected (#11/#19), a dated BACKLOG row for the SA-id reservation
   (#20), the DAG-landing row named among 9b's (#17).
+- **Review round 7 (25 findings, 18 record/wording): Amendments R–S.** **R** —
+  the manifest is the allowlist's closure: `*.tf.json` pinned, the fixtures'
+  `generator.manifest.diff` reused (one implementation, one predicate),
+  `tf-validate`'s init `-input=false -lockfile=readonly` (a platform can never
+  rewrite the pin — on a platform the single-`h1` lock lacks it FAILs until a
+  deliberate `terraform providers lock` + `tf-freeze`, §8 Gotchas), `tf-freeze`
+  refuses a vanished pinned file. **S** — no BigQuery build before 9b:
+  `loader/cli.py` refuses `TARGET=bigquery` outright (exit 2, before `load()`)
+  and `profiles.yml` reads `OTR_GCP_PROJECT` with no default (supersedes round
+  5's "not in 9a"). Rejected: a doc-only "runnable but don't". The Claude-config
+  ignore check runs in a scratch repo (no local exclude file stands in);
+  `group:` dropped from `operator_principal`.
+- **Review round 8 (23 findings, 18 record/wording): Amendment T; the exit
+  protocol changed.** Every correctness/security row was about a control added
+  in rounds 6–7 or the fringe it opened, none about the Terraform that ships —
+  the amendments were reviewing each other. **T** — `tf-plan`/`tf-apply`/
+  `tf-destroy` refuse while an auto-loaded `terraform.tfvars` /
+  `*.auto.tfvars{,.json}` sits under `infra/` (gitignored, unpinned, so the one
+  input outside the argv and the manifest; reproduced live by a local file);
+  `tf-validate` ungated. Rejected: a threat-model note only (a claim); echoing
+  resolved toggles (the file, not the value, is the smuggling path). Test-only
+  pins: `profiles.yml` no-default, nonzero terraform step → exit 1, module
+  sources local `./modules/<name>`, `git init --template=<empty>` in the
+  scratch repo; the test-only pinned-files helper deleted (`compute_manifest` is the one
+  predicate). Protocol: the whole-repo coherence pass has run twice (rounds 4
+  and 8); round 9 is scoped to `review-round-8..HEAD`, and a record finding on
+  unchanged text goes to BACKLOG with a 9b trigger — the phase-exit rule's
+  "re-defer with a trigger, never drop", applied to review residue.
 
 ### Phase 8b
 
@@ -868,7 +917,8 @@ annotated **Superseded by …** in place and never deleted.
 - **One Python entry point (`loader/cli.py`) behind `load`, `dbt-build`,
   `drop-db`.** It validates `PROFILE` and `TARGET` (`[a-z0-9_]+`) before any
   path exists, derives `data/<profile>.duckdb`, sets `OTR_DUCKDB_PATH` (the one
-  env var `dbt/profiles.yml` reads) and invokes dbt in-process via
+  env var `dbt/profiles.yml` read until Phase 9a's Amendment S added
+  `OTR_GCP_PROJECT` for the `bigquery` target) and invokes dbt in-process via
   `dbtRunner`. `dbt-build` loads first so CI is one target. Rejected: `dbt`
   invoked from the Makefile with `--vars` (an unvalidated name would reach a
   path).

@@ -4,8 +4,9 @@ One entry point validates every name (`[a-z0-9_]+`) before any path is derived:
 load      — fixtures/<p>/{raw,dims} → data/<p>.duckdb schema `raw`.
 dbt-build — load (THROUGH lands only files uploaded on or before it — a
             per-interval landing, Phase 8b), then `dbt build` against that file
-            (`OTR_DUCKDB_PATH` is the one env var dbt/profiles.yml reads); exit 1
-            on any failure.
+            (`OTR_DUCKDB_PATH` is the env var dbt/profiles.yml's duckdb target
+            reads; the bigquery target's `OTR_GCP_PROJECT` is 9b's — until then
+            TARGET=bigquery is refused, Amendment S); exit 1 on any failure.
 drop-db   — delete data/<p>.duckdb; only with CONFIRM=yes from the command line."""
 
 from __future__ import annotations

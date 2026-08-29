@@ -57,7 +57,7 @@ Rebased onto that main 2026-08-28 (was drafted against `e766e27`, pre-Phase-8).
    Closes the row (documented in Phase 9). **Approved (document-only).**
 
 5. **The four `make` targets (five with `tf-freeze`, Amendment P) — design change.** `tf-validate` (offline: `init
-   -backend=false -lockfile=readonly` + `validate` + `fmt -check`), `tf-plan`, `tf-apply`,
+   -backend=false -input=false -lockfile=readonly` + `validate` + `fmt -check`), `tf-plan`, `tf-apply`,
    `tf-destroy`, driven by a thin `infra/cli.py` that validates `PROJECT`
    (GCP-project-id shape) and derives the `-var`. `tf-apply` and `tf-destroy`
    are cloud-cost / destructive → `CONFIRM=yes` with command-line origin
@@ -368,14 +368,17 @@ are fixes and record corrections landing without amendments.
   file, and `freeze` silently drops a vanished file. Mechanism: (a)
   `infra/cli.py` drops its own `manifest_diff` and calls
   `generator.manifest.diff` over a path predicate covering `*.tf`, `*.tf.json`
-  and `.terraform.lock.hcl` (pruning `.terraform/`) — one diff implementation,
-  one glob, shared by `pinned_files`, `freeze` and the test; (b) `tf-validate`
+  and `.terraform.lock.hcl` (pruning `.terraform/`) — one diff implementation
+  and one predicate (`is_pinned`, through `generator.manifest.compute`), shared
+  by `freeze` and the test (round 8 #3: the test-only `pinned_files` helper is
+  gone; the test asserts on `compute_manifest`'s own keys); (b) `tf-validate`
   runs `init -backend=false -input=false -lockfile=readonly`, so no platform
   can mutate the pin (a missing platform hash is a reported FAIL, fixed by a
   deliberate `terraform providers lock` + `tf-freeze`); (c) `freeze` refuses
   when a path the committed manifest lists is absent on disk (the `make
   freeze` rule), printing the missing paths; (d) the mutations block gains
-  `manifest_diff constant-return:[]` and `pinned_files constant-return:[]`,
+  `manifest_diff constant-return:[]` (round 8: T's `refuse_auto_tfvars
+  delete-call` + `auto_tfvars constant-return:[]` join it, 7/7),
   `test_tf_tree_matches_manifest` asserts directly on the diff list, and a
   scratch-tree test proves an extra `x.tf.json` reads `extra`. Rejected:
   keeping the local copy with a mutation line only (fixes #1, leaves #3–#6);
@@ -394,8 +397,9 @@ are fixes and record corrections landing without amendments.
   `profiles.yml` keeps `env_var('OTR_GCP_PROJECT')` without a default so a
   missing export is a dbt parse error too. 9b's reconciliation lifts the
   refusal in the same commit that adds `generate_schema_name` (the DUE BACKLOG
-  row gains this clause). Test: `TARGET=bigquery CONFIRM=yes` exits 1 with
-  that line and no runner call. Rejected: a doc-only correction ("runnable,
+  row gains this clause). Test: `TARGET=bigquery CONFIRM=yes` exits 2 (`die`,
+  like every refusal) with that line and no runner call
+  (`tests/test_loader.py::test_bigquery_target_is_refused_before_9b`). Rejected: a doc-only correction ("runnable,
   but don't") — Done-when 5's "cannot appear" would stay a claim, not a
   property.
 
@@ -484,8 +488,8 @@ make test && make lint && make review-gate SPEC=specs/phase-9a-gcp-foundation.md
 - `make lint` — ruff over `infra/cli.py` and the tests.
 - `make review-gate SPEC=…` — the offline gate + this spec's Evidence ids and
   Record-updates files; security-reviewer surface flagged.
-- `make tf-validate` — `terraform -chdir=infra init -backend=false && validate
-  && fmt -check -recursive`: config is syntactically valid and canonically
+- `make tf-validate` — `terraform -chdir=infra init -backend=false -input=false
+  -lockfile=readonly && validate && fmt -check -recursive`: config is syntactically valid and canonically
   formatted. Downloads the google provider once from the registry (a setup step,
   outside the offline `make test`); no GCP auth, no cloud call.
 
@@ -530,8 +534,8 @@ authoritative if the landing diverges.)
 | 2 | `tests/test_infra.py::test_enable_toggles_default_false`, `::test_optional_modules_are_count_gated`, `::test_every_declared_resource_type_is_on_the_allowlist` (ANY provider's type — a `google_spanner_instance`/`null_resource` at root → red), `::test_required_providers_is_hashicorp_google_only`, `::test_ci_wif_is_opt_in_and_count_gated` (H: drop the `count` from any of the three WIF resources → red), `::test_every_data_source_type_is_on_the_allowlist` (round 4 #7: `google_project`, `google_billing_account` exactly), `::test_no_role_can_create_a_dataset` (I: no `dataOwner`/`admin`/`user`/owner/editor anywhere; exactly two `google_bigquery_dataset` blocks), `::test_budget_amount_is_the_smallest_threshold` (`min` → `max` red), `::test_budget_currency_is_the_billing_accounts` (`currency_code` from the data source, never a literal), `::test_budget_scope_and_threshold_denominator_are_pinned` (round 6 #3/#4: `budget_filter.projects` = this project; `/ local.budget_amount`, not `/ 100`); `::test_tf_tree_matches_manifest` (P — every attribute, via the content manifest); manual `make tf-plan` → `0 to add` for the toggled modules and no WIF resource |
 | 3 | `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars` (`git ls-files` matches no `*.tfstate*`/`*.tfvars`/private-key filetypes; EVERY tracked text file **content-scanned** for a SA-key body — a `type` of `service_account`, a `private_key` member, a PEM `PRIVATE KEY` header, whitespace-insensitive so a minified key matches (round 4 #8) — the content scan, not the name, is what catches a gcloud-shaped key), `::test_auth_is_adc_or_wif_never_keyfile` (also pins the provider's `user_project_override` + `billing_project = var.project_id` — the quota project, §8), `::test_tracked_claude_config_is_prose_and_hook_scripts_only` (M, re-implemented round 6 #1/#2/#6/#7/#21 as a PATH allowlist: only `.claude/{agents,commands}/*.md` and `.claude/hooks/*.py` may be tracked — a tracked settings*.json / `.mcp.json` / lock file is red whatever it contains, and each is ignored by the repo's OWN `.gitignore`, `core.excludesFile` disabled), `::test_wif_provider_condition_is_the_repo_and_ref_conjunction` (also pins `issuer_uri` and the `repo_ref` mapping composition), `::test_wif_impersonation_binds_on_combined_repo_and_ref` (exact `${repo}@${ref}` member); `*.tfvars.json`/`*.auto.tfvars*` gitignored and scanned |
 | 4 | `tests/test_infra.py::test_sa_roles_are_least_privilege` (roles in ANY `.tf` ⊆ allowlist; owner/editor absent), `::test_project_level_grant_is_only_bigquery_jobuser` (whole tree: the only `google_project_iam_member` role anywhere is `jobUser`; `objectAdmin` bucket-scoped, `dataEditor` dataset-scoped — a project-wide move → red), `::test_every_grant_member_is_pinned` (round 6 #5: every grant TO the SA has `member` = the SA; the grants ON it bind the exact WIF principalSet or the validated `operator_principal`, count-gated — Q; `allAuthenticatedUsers` anywhere → red) |
-| 5 | manual cycle **2026-08-29 on `ontime-rate-recovery` (post-Amendment-H tree, `71e30ce`)**: `make tf-plan` → `Plan: 18 to add, 0 to change, 0 to destroy` (9 API enablements, 2 datasets, 1 bucket, 1 SA + 4 scoped grants, 1 budget — **no WIF pool/provider/binding, no Composer/Spanner**); `make tf-apply … CONFIRM=yes` → `Apply complete! Resources: 18 added` (after two live fixes: quota project, budget currency — §8 Gotchas); `bq ls` = `ontime`,`raw`; buckets = `ontime-rate-recovery-ontime`; SA = `ontime-pipeline@…`; `gcloud iam workload-identity-pools list` = **empty**; budget `ontime-ontime-rate-recovery`; `make tf-destroy … CONFIRM=yes` → `Destroy complete! Resources: 18 destroyed`; state list 0; `bq ls` / buckets / SAs / WIF pools / our budget all **empty** (the API enablements stay on, `disable_on_destroy = false`, free); `tests/test_infra.py::test_every_resource_is_destroyable`, `::test_bucket_is_hardened`, `::test_no_staging_bucket_variable_and_the_managed_bucket_is_derived` (round 4 #4: header labels of managed blocks scanned too), `::test_region_and_dataset_location_are_us_central1`. **Live consequence:** this destroy reserved the `ontime-pipeline` SA id on that project until ~2026-09-28 (DEPLOYMENT). **Re-planned on the post-J/K/L tree (round 5 #5, `a8d2967`, read-only):** `make tf-plan PROJECT=ontime-rate-recovery` → `Plan: 18 to add, 0 to change, 0 to destroy`, the same 18 resources, no WIF/Composer/Spanner, and the outputs diff lists `models_dataset`, `pipeline_service_account`, `raw_dataset`, `staging_bucket` only — `workload_identity_provider` is null on a default plan (J's guard, live). Not re-planned since: `623a05a` changed `infra/` comments only, and round 6 (Q) added one resource count-gated on `operator_principal = null` (`0 : 1`) — `18 to add` holds by construction; a live re-plan is 9b's first `tf-plan` |
-| 6 | `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only` (fake runner), `::test_tf_targets_pass_project_as_one_literal`; `tests/test_infra.py::test_cli_validates_project`, `::test_cli_requires_confirm_origin`, `::test_cli_validates_before_running`, `::test_cli_builds_the_expected_argv`, `::test_cli_missing_terraform_is_a_clean_fail` (FAIL lines asserted), `::test_cli_validate_argv_is_offline` (`-backend=false`); `::test_project_id_validation_mirrors_the_cli_regex` (the HCL `validation` equals `PROJECT_RE`, so a tfvars/direct apply is shape-checked too), `::test_input_shape_validations_exist`; `::test_tf_freeze_requires_confirm_origin_and_writes_the_manifest` + `tests/test_makefile.py::test_tf_freeze_confirm_from_command_line_only` (P: the manifest's only writer is CONFIRM-gated); mutations `require_confirm invert-guard`/`delete-call`, `validate_project invert-guard`, `tf constant-return:0` all KILLED |
+| 5 | manual cycle **2026-08-29 on `ontime-rate-recovery` (post-Amendment-H tree, `71e30ce`)**: `make tf-plan` → `Plan: 18 to add, 0 to change, 0 to destroy` (9 API enablements, 2 datasets, 1 bucket, 1 SA + 4 scoped grants, 1 budget — **no WIF pool/provider/binding, no Composer/Spanner**); `make tf-apply … CONFIRM=yes` → `Apply complete! Resources: 18 added` (after two live fixes: quota project, budget currency — §8 Gotchas); `bq ls` = `ontime`,`raw`; buckets = `ontime-rate-recovery-ontime`; SA = `ontime-pipeline@…`; `gcloud iam workload-identity-pools list` = **empty**; budget `ontime-ontime-rate-recovery`; `make tf-destroy … CONFIRM=yes` → `Destroy complete! Resources: 18 destroyed`; state list 0; `bq ls` / buckets / SAs / WIF pools / our budget all **empty** (the API enablements stay on, `disable_on_destroy = false`, free); `tests/test_infra.py::test_every_resource_is_destroyable`, `::test_bucket_is_hardened`, `::test_no_staging_bucket_variable_and_the_managed_bucket_is_derived` (round 4 #4: header labels of managed blocks scanned too), `::test_region_and_dataset_location_are_us_central1`. **Live consequence:** this destroy reserved the `ontime-pipeline` SA id on that project until ~2026-09-28 (DEPLOYMENT). **Re-planned on the post-J/K/L tree (round 5 #5, `a8d2967`, read-only):** `make tf-plan PROJECT=ontime-rate-recovery` → `Plan: 18 to add, 0 to change, 0 to destroy`, the same 18 resources, no WIF/Composer/Spanner, and the outputs diff lists `models_dataset`, `pipeline_service_account`, `raw_dataset`, `staging_bucket` only — `workload_identity_provider` is null on a default plan (J's guard, live). Not re-planned since: `623a05a` changed `infra/` comments only, and round 6 (Q) added one resource count-gated on `operator_principal = null` (`0 : 1`) — `18 to add` holds by construction; round 7 (R, S) and round 8 (T) changed only `infra/cli.py`, `loader/cli.py`, `profiles.yml` and tests — no `.tf` — so the pinned tree's plan is unchanged; a live re-plan is 9b's first `tf-plan`. Done-when 5's "no build before 9b" half: `tests/test_loader.py::test_bigquery_target_is_refused_before_9b` (S: exit 2 before `load()`), `tests/test_infra.py::test_bigquery_profile_project_has_no_default` (S's `profiles.yml` half — round 8 #1) |
+| 6 | `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only` (fake runner), `::test_tf_targets_pass_project_as_one_literal`; `tests/test_infra.py::test_cli_validates_project`, `::test_cli_requires_confirm_origin`, `::test_cli_validates_before_running`, `::test_cli_builds_the_expected_argv`, `::test_cli_missing_terraform_is_a_clean_fail` (FAIL lines asserted), `::test_cli_nonzero_step_is_a_fail` (round 8 #2: any nonzero step → exit 1 + FAIL line, later steps skipped), `::test_cli_validate_argv_is_offline` (`-backend=false -input=false -lockfile=readonly`), `::test_cli_refuses_auto_loaded_tfvars` (T: `terraform.tfvars`/`*.auto.tfvars{,.json}` → exit 2 before the runner; validate ungated), `::test_module_sources_are_local_paths_only` (round 8 #4: six `./modules/<name>` sources, no registry/git/symlink); `::test_project_id_validation_mirrors_the_cli_regex` (the HCL `validation` equals `PROJECT_RE`, so a tfvars/direct apply is shape-checked too), `::test_input_shape_validations_exist`; `::test_tf_freeze_requires_confirm_origin_and_writes_the_manifest` + `tests/test_makefile.py::test_tf_freeze_confirm_from_command_line_only` (P: the manifest's only writer is CONFIRM-gated); `tests/test_infra.py::test_manifest_gate_reads_tf_json_and_vanished_files` (R); mutations `require_confirm invert-guard`/`delete-call`, `validate_project invert-guard`, `tf constant-return:0`, `manifest_diff constant-return:[]`, `refuse_auto_tfvars delete-call`, `auto_tfvars constant-return:[]` all KILLED (7/7) |
 
 ## Invariants (REQUIRED)
 
@@ -542,10 +546,10 @@ authoritative if the landing diverges.)
 | 3. **No secret at rest.** For all commits, no tfstate/tfvars/`tfvars.json`/private-key filetype is tracked (and Terraform's auto-loaded `*.auto.tfvars*`/`*.tfvars.json` are gitignored), and EVERY tracked text file is content-scanned for a SA-key body — whitespace-insensitive `type`/`service_account`, a `private_key` member, a PEM `PRIVATE KEY` header (the **content scan**, not the filename, is what catches a gcloud-shaped `<project>-<keyid>.json` or a key pasted into a `.md`); no `.tf`/`profiles.yml` sets a `credentials`/`keyfile` argument; auth is ADC/WIF, and the provider sends `project_id` as the quota project (`user_project_override` + `billing_project`) so user ADC needs no per-machine step; the only tracked paths under `.claude/` are `{agents,commands}/*.md` and `hooks/*.py` — an allowlist, so any tracked settings*.json / `.mcp.json` / lock file is red whatever its content — and each local-only Claude Code file is ignored by the repo's own `.gitignore` (M; re-implemented round 6). | `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars`, `::test_auth_is_adc_or_wif_never_keyfile`, `::test_tracked_claude_config_is_prose_and_hook_scripts_only` |
 | 4. **Least privilege, scoped.** For all IAM role grants in ANY `.tf`, the SA gets only the BQ data/job + bucket-object + WIF roles, never owner/editor; the only PROJECT-level grant is `bigquery.jobUser` — `objectAdmin` is bucket-scoped, `dataEditor` dataset-scoped; every grant TO the SA names the SA as `member`, and the two roles ON the SA (`workloadIdentityUser`, `serviceAccountTokenCreator` — Q) appear only in `google_service_account_iam_member` blocks bound to the exact WIF principalSet / the validated `operator_principal`. | `tests/test_infra.py::test_sa_roles_are_least_privilege` (a `roles/owner` at root → red), `::test_project_level_grant_is_only_bigquery_jobuser` (a project-wide `objectAdmin` → red), `::test_every_grant_member_is_pinned` (`allUsers` → red) |
 | 5. **Destroy is total; the managed bucket is not the state bucket.** For all applied resources, `terraform destroy` removes them — no `prevent_destroy`, datasets `delete_contents_on_destroy`, bucket `force_destroy` + hardened (public-access-prevention, versioning, lifecycle); the managed bucket is derived `${project_id}-ontime` (never a var), and no MANAGED block (`resource|data|module|variable|output|locals` — header labels included, not the `terraform {}` backend block, which may legitimately name it) mentions `tfstate`. | `tests/test_infra.py::test_every_resource_is_destroyable`, `::test_bucket_is_hardened`, `::test_no_staging_bucket_variable_and_the_managed_bucket_is_derived`; manual apply→destroy→empty listing |
-| 6. **Cloud/destructive targets gated, validated first, correct argv — and the HCL re-validates.** For all `tf-apply`/`tf-destroy`, `CONFIRM=yes` from the command line is required; `PROJECT` is validated before the runner runs; the argv carries `-var project_id=…` + `-input=false` (+ `-auto-approve` for the mutating pair); `tf-validate`'s init carries `-backend=false`; (injected fake runner) no test spawns real terraform; and `variable "project_id"` carries the same shape as a `validation`, so a tfvars / direct `terraform apply` cannot bypass it (#13). | `tests/test_infra.py::test_cli_requires_confirm_origin`, `::test_cli_validates_project` (rejects `my-proj\n`), `::test_cli_validates_before_running`, `::test_cli_builds_the_expected_argv`, `::test_cli_validate_argv_is_offline`, `::test_cli_missing_terraform_is_a_clean_fail`, `::test_project_id_validation_mirrors_the_cli_regex`; `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only` |
+| 6. **Cloud/destructive targets gated, validated first, correct argv — and the HCL re-validates.** For all `tf-apply`/`tf-destroy`, `CONFIRM=yes` from the command line is required; `PROJECT` is validated before the runner runs; the argv carries `-var project_id=…` + `-input=false` (+ `-auto-approve` for the mutating pair); `tf-validate`'s init carries `-backend=false -input=false -lockfile=readonly` and any nonzero step is exit 1; `tf-plan`/`tf-apply`/`tf-destroy` refuse while an auto-loaded `terraform.tfvars`/`*.auto.tfvars{,.json}` sits under `infra/` (T — the argv is the whole input); every `module` source is a local `./modules/<name>` (nothing outside the pinned tree is loaded); (injected fake runner) no test spawns real terraform; and `variable "project_id"` carries the same shape as a `validation`, so a tfvars / direct `terraform apply` cannot bypass it (#13). | `tests/test_infra.py::test_cli_requires_confirm_origin`, `::test_cli_validates_project` (rejects `my-proj\n`), `::test_cli_validates_before_running`, `::test_cli_builds_the_expected_argv`, `::test_cli_validate_argv_is_offline`, `::test_cli_nonzero_step_is_a_fail`, `::test_cli_refuses_auto_loaded_tfvars`, `::test_module_sources_are_local_paths_only`, `::test_cli_missing_terraform_is_a_clean_fail`, `::test_project_id_validation_mirrors_the_cli_regex`; `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only` |
 | 7. **WIF trust is opt-in and branch-scoped, at both the provider and the binding.** For all CI token exchanges, the WIF resources exist only under `enable_ci_wif = true` (H) AND a named `github_repository` (K — no default repository; the pool's precondition refuses the toggle without one); the provider name reaches the operator as the root `workload_identity_provider` output, null otherwise (J); the provider's issuer is GitHub's OIDC endpoint exactly, its `attribute_condition` requires repo AND ref (`&&`, not `||`), `attribute.repo_ref` is composed from both claims, and the impersonation binds on the exact `attribute.repo_ref/${repo}@${ref}` — not repo-only. | `tests/test_infra.py::test_ci_wif_is_opt_in_and_count_gated`, `::test_stated_defaults_are_pinned` (a default repo slug → red; the precondition dropped → red), `::test_wif_output_is_null_guarded`, `::test_wif_provider_condition_is_the_repo_and_ref_conjunction` (`&&`→`||` red; issuer → `evil.example.com` red), `::test_wif_impersonation_binds_on_combined_repo_and_ref` (widening to `attribute.repository/*` red). **Static-pinned only**: no WIF resource has been applied (Evidence row 5 built none); the first live proof that the slash-bearing `attribute.repo_ref/<owner>/<repo>@refs/heads/main` member binds as written is 9b's opt-in apply (the DUE row) |
 | 8. **A fresh project applies (with the two bootstrap APIs on).** For all required APIs, `google_project_service` enables them (`disable_on_destroy = false`) and the modules `depends_on` it; the two bootstrap APIs (`serviceusage`, `cloudresourcemanager`) that `google_project_service`/`data.google_project` themselves need are a documented one-time `gcloud services enable` on a brand-new project. | `tests/test_infra.py::test_required_apis_are_enabled_and_survive_destroy`, `::test_modules_depend_on_the_service_enablement` |
-| 9. **The `.tf` tree is one allowlist.** For all edits to any file Terraform loads under `infra/` (`*.tf`, `*.tf.json`) or `infra/.terraform.lock.hcl` (which `tf-validate` may never rewrite: `-lockfile=readonly`), the offline suite is red until `infra/MANIFEST.sha256` is rewritten by `make tf-freeze CONFIRM=yes` (its only writer, `$(origin)`-gated, refusing a vanished pinned file) — so every attribute is mutation-lethal, not only the ones a property pin names (P, R). | `tests/test_infra.py::test_tf_tree_matches_manifest` (any byte of any `.tf` → red), `::test_tf_freeze_requires_confirm_origin_and_writes_the_manifest`, `tests/test_makefile.py::test_tf_freeze_confirm_from_command_line_only` |
+| 9. **The `.tf` tree is one allowlist.** For all edits to any file Terraform loads under `infra/` (`*.tf`, `*.tf.json`) or `infra/.terraform.lock.hcl` (which `tf-validate` may never rewrite: `-lockfile=readonly`), the offline suite is red until `infra/MANIFEST.sha256` is rewritten by `make tf-freeze CONFIRM=yes` (its only writer, `$(origin)`-gated, refusing a vanished pinned file) — so every attribute is mutation-lethal, not only the ones a property pin names (P, R). | `tests/test_infra.py::test_tf_tree_matches_manifest` (any byte of any `.tf` → red; the pinned set = `compute_manifest`'s keys vs an independent walk), `::test_manifest_gate_reads_tf_json_and_vanished_files` (a `.tf.json` reads `extra`, a deleted pinned file `missing` and `freeze` refuses, `.terraform/` + `*.tfvars` outside), `::test_tf_freeze_requires_confirm_origin_and_writes_the_manifest`, `tests/test_makefile.py::test_tf_freeze_confirm_from_command_line_only`. **`-lockfile=readonly` is static-pinned only** (like invariant 7): its runtime effect — a FAIL on a platform the single-`h1` lock lacks — is provable only from a second platform |
 
 Rules — the Terraform HCL is configuration no mutation operator addresses (the
 four Python operators act on `.py`; the two SQL operators on `case` arms). It is
@@ -578,8 +582,8 @@ implementation on a scratch copy (the Phase 6/7 pattern):
   returns the validated string, and a constant `'x'` is itself a valid
   project-id shape, so no test distinguishes it. `invert-guard` (skip the regex
   check) is the killing operator and is in the block.
-- The `tf-plan`/`tf-validate` recipes take `PROJECT` but no `CONFIRM` — they are
-  not destructive; the `$(origin)` gate is on `tf-apply`/`tf-destroy` only, and
+- The `tf-plan` recipe takes `PROJECT` but no `CONFIRM` (`tf-validate` takes
+  neither — it passes no variable) — they are not destructive; the `$(origin)` gate is on `tf-apply`/`tf-destroy` only, and
   both `require_confirm` operators (`invert-guard`, `delete-call`) kill via
   `test_cli_requires_confirm_origin`.
 
@@ -675,7 +679,8 @@ set precedes the modules (D) with the two bootstrap APIs documented (G).
   `compute`/`diff` (R): the fixtures' manifest code is the infra pin's
   implementation, so the two cannot drift. Byte-identical output for the
   fixtures (no predicate → every file). `loader/cli.py` + `dbt/profiles.yml`
-  — the pre-9b `TARGET=bigquery` refusal (S)
+  + `tests/test_loader.py` — the pre-9b `TARGET=bigquery` refusal (S; its
+  test split out as `test_bigquery_target_is_refused_before_9b`, round 8 #23)
 - Untouched by contract: `dbt/models`, `eval/`, `serving/`, `orchestration/`,
   `fixtures/`, `tests/pins.py`, `pyproject.toml`, `uv.lock`
 
@@ -685,9 +690,11 @@ set precedes the modules (D) with the two bootstrap APIs documented (G).
       least-privilege SA + opt-in WIF (ADC/WIF only; superseded-by pointer to B/F/H/J/K);
       two datasets + region; state backend bootstrap-documented; budget 50/150
       in the account's currency (amount = `min`) + kill-switch documented;
-      `infra/cli.py` + the five targets (two gated + `tf-freeze`); the review-round entries (A–D,
-      E–G, H, I–M, N–O). Note on the in-force
-      Infra line (the toggles are real now).
+      `infra/cli.py` + the five targets (three `CONFIRM`-gated: apply, destroy,
+      `tf-freeze`); the review-round entries (A–D, E–G, H, I–M, N–O, P–Q, R–S,
+      T) and a "9a in one screen" list of the standing decisions (round 8);
+      superseded pointers on every entry a later amendment overrode. Note on
+      the in-force Infra line (the toggles are real now).
 - [ ] `docs/PHASES.md` — Phase 9 "Delivered" paragraph (9a half); Done-when as
       landed for the infra clauses (incl. "with the two bootstrap APIs on" — G)
 - [ ] `CLAUDE.md` — Current status; Commands (`tf-validate|tf-plan|tf-apply|
@@ -720,13 +727,24 @@ set precedes the modules (D) with the two bootstrap APIs documented (G).
 - [ ] Spec amendments — none (the phase-9b spec does not exist yet; it is
       finalized after 9a merges, per the predecessor-merged rule; a merged
       phase's spec is never edited from this branch — round 6 reverted the
-      Phase 0 note and the PROJECT_BRIEF edit, #13/#14)
+      Phase 0 note and the PROJECT_BRIEF edit, #13/#14; round 8 #8 reverted
+      the Phase 0 note a second time — the same rule)
+- [ ] Architect's answers to the round-8 coherence questions, for the record:
+      (1) 9a is "the Terraform foundation plus the two refusals that keep a
+      pre-9b cloud build impossible" (S), no longer "infra-only"; (2) the 9a
+      DECISIONS section keeps its round history and gains a standing-decisions
+      list at the top — the history is not rewritten; (3) the content manifest
+      (P/R) would be chosen again over property-only pins — it closed the
+      "unpinned attribute" class three property rounds could not; property
+      tests stay as the meaning check; (4) 9b's first commit is ONE
+      reconciliation amendment with numbered items (`generate_schema_name`,
+      `location` + `OTR_GCP_PROJECT`, the DAG-landing split), not three
 - [ ] docs/RESULTS.md, METRICS.md, AB_DESIGN.md — none (no generated block)
 - [ ] README — none (no README in the repo)
 
 ## Threat model (REQUIRED)
 
-`tf-validate`/`tf-plan` take `PROJECT`; `tf-apply`/`tf-destroy` take `PROJECT`
+`tf-validate` takes no variable; `tf-plan` takes `PROJECT`; `tf-apply`/`tf-destroy` take `PROJECT`
 and `CONFIRM`, in the settled shape (one Python process, `PROJECT` validated
 `^[a-z][a-z0-9-]{4,28}[a-z0-9]\Z`, the `-var` derived; `$(call _Q,$(value VAR))`;
 `unexport`ed). `PROJECT` never becomes a path — it is passed to `terraform … -var
@@ -743,10 +761,19 @@ set — Q), the budget — returning the project to zero billable resources.
 `operator_principal` is interpolated into an IAM member: its HCL `validation`
 admits one `user:`/`serviceAccount:` principal, no whitespace or comma (no
 `group:` — round 7 #9), so a `TF_VAR` cannot smuggle a second member.
+**Auto-loaded variable files (T):** Terraform reads `terraform.tfvars` and
+`*.auto.tfvars{,.json}` from `-chdir=infra` unasked; they are gitignored
+(invariant 3) and outside the manifest (invariant 9), so one could flip
+`enable_composer`/`enable_spanner`/`enable_ci_wif` or set `operator_principal`
+with nothing in the tree, the argv or the `CONFIRM` prompt showing it.
+`tf-plan`/`tf-apply`/`tf-destroy` refuse while any exists (exit 2, before the
+runner); `TF_VAR_*` and `-var-file` remain the operator's own shell — visible
+in the command that ran, which the ask-first rule covers. The runbook says
+`tf-plan` before every `tf-apply`.
 
 | Target | empty | `../x` | `"; ` | env-exported | `$(origin)` on CONFIRM | Pinned by |
 |---|---|---|---|---|---|---|
-| `make tf-plan PROJECT=<id>` | refused (`PROJECT: refused — [a-z][a-z0-9-]…`) | refused, never a path | one literal, refused | reaches Python, validated the same | n/a — not destructive | `tests/test_makefile.py::test_tf_targets_pass_project_as_one_literal`; `tests/test_infra.py::test_cli_validates_project` |
+| `make tf-plan PROJECT=<id>` | refused (`PROJECT: refused — [a-z][a-z0-9-]…`) | refused, never a path | one literal, refused | reaches Python, validated the same; an `infra/terraform.tfvars` / `*.auto.tfvars*` on disk is refused (T) | n/a — not destructive | `tests/test_makefile.py::test_tf_targets_pass_project_as_one_literal`; `tests/test_infra.py::test_cli_validates_project` |
 | `make tf-apply PROJECT=<id> CONFIRM=yes` | `PROJECT` refused; `CONFIRM=` refused | refused | one literal, refused | `CONFIRM=yes` from env ignored (`$(origin)` ≠ command line) | honoured only from the command line | `tests/test_makefile.py::test_tf_apply_and_destroy_confirm_from_command_line_only`; `tests/test_infra.py::test_cli_requires_confirm_origin` |
 | `make tf-destroy PROJECT=<id> CONFIRM=yes` | same as apply | refused | one literal, refused | env `CONFIRM=yes` ignored | command-line only | same as apply |
 | `make tf-freeze CONFIRM=yes` | `CONFIRM=` refused, nothing written | takes no path variable (the tree is `infra/`, fixed) | n/a — no value reaches a shell beyond `CONFIRM`, one literal | env `CONFIRM=yes` ignored | command-line only; a pinned file missing on disk is a refusal (R) | `tests/test_makefile.py::test_tf_freeze_confirm_from_command_line_only`; `tests/test_infra.py::test_tf_freeze_requires_confirm_origin_and_writes_the_manifest`, `::test_manifest_gate_reads_tf_json_and_vanished_files` |

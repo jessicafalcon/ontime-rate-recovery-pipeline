@@ -269,13 +269,20 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   equal `make pipeline`'s (the `send_schedule` hash), tears down. Takes no
   variable (`tiny` by definition); needs Docker (Engine + `docker compose`)
 - `make tf-validate` *(Phase 9a)* — offline Terraform check (`infra/cli.py`):
-  `terraform -chdir=infra init -backend=false` + `validate` + `fmt -check
-  -recursive`; prints `tf-validate OK`. Downloads the google provider once from
+  `terraform -chdir=infra init -backend=false -input=false -lockfile=readonly`
+  + `validate` + `fmt -check -recursive`; prints `tf-validate OK`. The init can
+  never rewrite the pinned lock: on a platform `.terraform.lock.hcl` lacks a
+  hash for, it FAILs (exit 1) until a deliberate `terraform providers lock
+  -platform=…` + `tf-freeze` (§8 Gotchas). Downloads the google provider once from
   the registry (a setup step, outside the offline `make test`); no GCP auth, no
   cloud call
 - `make tf-plan PROJECT=<id>` *(Phase 9a)* — validates `PROJECT` (a GCP
   project-id shape) before deriving `-var project_id=<id>`, then `terraform
-  -chdir=infra plan`. Reads GCP APIs (ADC/WIF); shows the diff, creates nothing
+  -chdir=infra plan`. Reads GCP APIs (ADC/WIF); shows the diff, creates nothing.
+  `tf-plan`/`tf-apply`/`tf-destroy` REFUSE (exit 2, before terraform) while an
+  auto-loaded `infra/terraform.tfvars` or `*.auto.tfvars{,.json}` exists —
+  gitignored and unpinned, so a toggle reaches Terraform only as a
+  command-line `-var` (Amendment T); `tf-validate` is not gated
 - `make tf-apply | tf-destroy PROJECT=<id> CONFIRM=yes` *(Phase 9a)* — apply
   creates the free-tier layer: 9 API enablements (free, kept on by destroy),
   two BigQuery datasets, a GCS staging bucket, a least-privilege service
@@ -638,10 +645,10 @@ the billing kill-switch is documented optional in
 `docs/DEPLOYMENT.md`, not built. **`project_id` is the only required var**
 (`region` defaults `us-central1`; the budget's billing account + project number
 are a `google_project` data source). `infra/cli.py` validates `PROJECT` before
-deriving the `-var` and gates `tf-apply`/`tf-destroy` on `CONFIRM=yes $(origin)`;
-`tf-validate` (offline) / `tf-plan` are ungated. `make tf-validate` OK (google
-provider 6.50.0), offline suite green (`tests/test_infra.py` static `.tf` checks
-+ the tf-* makefile tests), `make mutate` 6/6. The plan-clean and
+deriving the `-var` and gates `tf-apply`/`tf-destroy`/`tf-freeze` on `CONFIRM=yes
+$(origin)`; `tf-validate` (offline) / `tf-plan` are ungated. `make tf-validate` OK
+(google provider 6.50.0), offline suite green (`tests/test_infra.py` static `.tf`
+checks + the tf-* makefile tests), `make mutate` 7/7. The plan-clean and
 destroy-leaves-nothing-billable Done-when items are proven by the manual cloud
 runs in Evidence (ask-first). `fixtures/tiny/` untouched; every earlier gate
 byte-identical. **Review round 1 applied (23 findings): 4 amendments** — the
@@ -698,7 +705,16 @@ the allowlist's closure: `*.tf.json` pinned, `generator.manifest.diff` reused,
 — 6/6 killed), S (`TARGET=bigquery` refused outright before 9b; `profiles.yml`
 reads `OTR_GCP_PROJECT` with no default); the Claude-config ignore check runs
 in a scratch repo (no local exclude file can stand in); `group:` dropped from
-`operator_principal`. Next: round 8 confirms green → merge → 9b (its first
+`operator_principal`. **Review round 8 applied (23 findings, 18 record/wording):
+1 amendment** — T (`tf-plan`/`tf-apply`/`tf-destroy` refuse an auto-loaded
+`terraform.tfvars` / `*.auto.tfvars{,.json}` under `infra/`, the one input
+outside the argv and the manifest — reproduced live by a local file); 5
+test-only pins (profiles.yml no-default, nonzero-step FAIL, module sources
+local, `git init --template=<empty>`, the test-only pinned-files helper deleted — `compute_manifest`
+is the one predicate); mutate 7/7; the coherence-auditor's whole-repo pass has
+run twice (rounds 4 and 8) — round 9 is SCOPED to `review-round-8..HEAD`, and a
+record finding on unchanged text goes to BACKLOG with a 9b trigger, not to a
+round 10. Next: round 9 (scoped) → merge → 9b (its first
 commit reconciles against main-with-9a: `generate_schema_name`, `location`,
 `OTR_GCP_PROJECT`, the "DAG's build owns its landing" row —
 `dbt_build(TARGET=bigquery)` must not call the DuckDB `load()` — and the

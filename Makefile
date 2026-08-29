@@ -174,8 +174,8 @@ test-int-airflow:
 # ------------------------------------------------------------------ Phase 9a
 # Terraform foundation (infra/cli.py): validates PROJECT (a GCP project-id shape)
 # before deriving the -var, runs terraform -chdir=infra. Auth is ADC/WIF only —
-# never a keyfile. tf-validate is offline (init -backend=false + validate + fmt
-# -check; downloads the provider once from the registry — outside `make test`).
+# never a keyfile. tf-validate is offline (init -backend=false -input=false
+# -lockfile=readonly + validate + fmt -check; downloads the provider once from the registry — outside `make test`).
 # tf-plan reads GCP APIs. tf-apply/tf-destroy are cloud-cost/destructive:
 # CONFIRM=yes must have COMMAND-LINE origin ($(origin CONFIRM)); ask first.
 tf-validate:
@@ -190,8 +190,9 @@ tf-apply:
 tf-destroy:
 	uv run python -m infra.cli destroy --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
-# The ONLY writer of infra/MANIFEST.sha256 — the content pin over every .tf and
-# the provider lock (Amendment P): any .tf edit is red in `make test` until the
+# The ONLY writer of infra/MANIFEST.sha256 — the content pin over every file
+# Terraform loads (*.tf, *.tf.json) and the provider lock (Amendments P/R): any
+# edit to one is red in `make test` until the
 # manifest is rewritten here, in the same commit. Overwrites a committed pin, so
 # CONFIRM=yes must have COMMAND-LINE origin ($(origin CONFIRM)), like freeze.
 tf-freeze:
