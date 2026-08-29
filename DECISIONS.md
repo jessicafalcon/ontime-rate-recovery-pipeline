@@ -171,6 +171,28 @@ annotated **Superseded by …** in place and never deleted.
   non-`duckdb` `TARGET`, which is wrong once the landing is `bq load` GCS→BigQuery.
   9a touches no dbt/DAG code; 9b splits a build-only path from the landing and
   threads `TARGET`, closing the row.
+- **Review round 1 — four amendments (approved 2026-08-29).** (A) The `gcs`
+  module managed `<project>-tfstate` — the bootstrap backend bucket — so apply
+  collided and destroy would delete its own state; it now manages a distinct
+  staging bucket (`<project>-ontime`, SA `objectAdmin` scoped there,
+  `public_access_prevention` + a noncurrent lifecycle rule), the state bucket
+  stays bootstrap-only and unmanaged, and both datasets gain
+  `delete_contents_on_destroy` (destroy stays total once 9b lands tables).
+  (B) The WIF provider's `attribute_condition` now requires repo AND
+  `assertion.ref` (default `refs/heads/main`) — not any branch — with a test that
+  reddens if either half is deleted. (C) `tf()` takes an injectable runner so no
+  offline test can spawn a real `terraform apply`; `require_confirm delete-call`
+  joined the mutation block (safe with the fake) and a "validated before the
+  runner runs" test landed. (D) A `google_project_service` set (`disable_on_destroy
+  = false`) + module `depends_on` so a fresh project applies. Plus 15
+  test/wording fixes (whole-tree content-based `test_infra.py`: role scan across
+  all `.tf`, a "no billable resource outside a toggled module" pin, brace-matched
+  required-var parse, `default =` assignment not the word; `\Z` not `$`;
+  `FileNotFoundError` → clean FAIL; `infra` dropped from truth-isolation EXEMPT;
+  budget percents whole (amount = min threshold); DEPLOYMENT `MODULE=spanner`
+  corrected and the 30-day SA/WIF soft-delete gotcha to §8). Rejected up front:
+  repository-only WIF; a non-injectable `tf`; managing the state bucket; a
+  `gcloud services enable` runbook step over the `google_project_service` resource.
 
 ### Phase 8b
 

@@ -13,13 +13,13 @@ variable "region" {
 }
 
 variable "enable_composer" {
-  description = "Provision the Cloud Composer module (Phase 11). Off by default — nothing billable is left up."
+  description = "Provision the Cloud Composer module (Phase 11). Off — nothing billable is left up."
   type        = bool
   default     = false
 }
 
 variable "enable_spanner" {
-  description = "Provision the Spanner module (Phase 10). Off by default — the 90-day trial clock only starts on apply."
+  description = "Provision the Spanner module (Phase 10). Off — the 90-day trial clock only starts on apply."
   type        = bool
   default     = false
 }
@@ -30,10 +30,21 @@ variable "github_repository" {
   default     = "jessicafalcon/ontime-rate-recovery-pipeline"
 }
 
+variable "github_ref" {
+  description = "The git ref CI must run on to impersonate the SA (branch scoping — not any branch)."
+  type        = string
+  default     = "refs/heads/main"
+}
+
 variable "budget_alert_thresholds_usd" {
   description = "Budget alert thresholds in USD (notify only — a budget does not stop spend)."
   type        = list(number)
   default     = [50, 150]
+
+  validation {
+    condition     = length(var.budget_alert_thresholds_usd) > 0
+    error_message = "budget_alert_thresholds_usd must list at least one threshold."
+  }
 }
 
 variable "raw_dataset" {
@@ -48,8 +59,8 @@ variable "models_dataset" {
   default     = "ontime"
 }
 
-variable "state_bucket" {
-  description = "GCS bucket for Terraform state + artifacts. Empty derives <project_id>-tfstate."
+variable "staging_bucket" {
+  description = "GCS bucket for pipeline artifacts / the 9b BigQuery landing. Empty derives <project_id>-ontime. NOT the Terraform state bucket (that is bootstrap-only — docs/DEPLOYMENT.md)."
   type        = string
   default     = ""
 }

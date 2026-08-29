@@ -381,3 +381,12 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   (Phase 8b). If a secret ever slipped past `.dockerignore` it persists in the
   image layer; recovery is `docker image rm otr-airflow-8b:latest` (or `down
   --rmi local`), documented in `.dockerignore`.
+- **A service account and a Workload Identity pool/provider soft-delete for 30
+  days, reserving their ids** (Phase 9a). `infra` uses fixed ids
+  (`ontime-pipeline`, `ontime-github-pool`), so an `apply → destroy → apply`
+  cycle *within 30 days* fails re-creating them ("exists in a deleted state").
+  Recover with `gcloud iam service-accounts undelete` /
+  `gcloud iam workload-identity-pools undelete`, or wait out the window
+  (`docs/DEPLOYMENT.md`). Harmless for a single demo-day apply/destroy; the
+  destroy itself still leaves nothing billable. Datasets and the bucket have no
+  such reservation.

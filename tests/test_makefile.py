@@ -414,6 +414,12 @@ def test_tf_apply_and_destroy_confirm_from_command_line_only() -> None:
         # Gotcha (ARCHITECTURE §8): `unexport CONFIRM` makes an unset CONFIRM
         # origin `file`, not `undefined`. Refused either way.
         assert "--confirm '' --confirm-origin 'file'" in out
+
+    # Inject a fake runner so a mutated-away guard (require_confirm delete-call)
+    # can never spawn a real `terraform apply` from the suite.
+    def _fake(argv: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(argv, 0)
+
     for confirm, origin in (
         ("yes", "environment"),
         ("", "undefined"),
@@ -421,5 +427,5 @@ def test_tf_apply_and_destroy_confirm_from_command_line_only() -> None:
     ):
         for cmd in ("apply", "destroy"):
             with pytest.raises(SystemExit) as e:
-                cli.tf(cmd, "my-proj", confirm, origin)
+                cli.tf(cmd, "my-proj", confirm, origin, runner=_fake)
             assert e.value.code == 2

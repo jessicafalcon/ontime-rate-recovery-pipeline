@@ -8,8 +8,8 @@ output "models_dataset" {
   value       = module.bigquery.models_dataset_id
 }
 
-output "state_bucket" {
-  description = "The GCS bucket for Terraform state + artifacts."
+output "staging_bucket" {
+  description = "The GCS artifacts/staging bucket (NOT the Terraform state bucket)."
   value       = module.gcs.bucket_name
 }
 

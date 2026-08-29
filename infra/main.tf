@@ -15,8 +15,11 @@ terraform {
 
   # The Terraform state backend is bootstrap-documented (docs/DEPLOYMENT.md), not
   # applied from a fresh clone: a bucket cannot create the backend that stores
-  # its own state. Default backend is local, so `tf-plan` needs no setup. After
-  # the one-time bootstrap, uncomment and `terraform init -migrate-state`:
+  # its own state, and Terraform must never manage the bucket holding it. The
+  # state bucket (`<project_id>-tfstate`) is created by hand and is NOT one of the
+  # resources below — `module.gcs` manages a separate artifacts/staging bucket.
+  # Default backend is local, so `tf-plan` needs no setup. After the one-time
+  # bootstrap, uncomment and `terraform init -migrate-state`:
   # backend "gcs" {
   #   bucket = "<project_id>-tfstate"
   #   prefix = "terraform/state"
@@ -30,7 +33,17 @@ provider "google" {
 }
 
 locals {
-  state_bucket = var.state_bucket != "" ? var.state_bucket : "${var.project_id}-tfstate"
+  staging_bucket = var.staging_bucket != "" ? var.staging_bucket : "${var.project_id}-ontime"
+  # APIs a fresh project needs before any resource below can be created.
+  required_services = [
+    "bigquery.googleapis.com",
+    "storage.googleapis.com",
+    "iam.googleapis.com",
+    "sts.googleapis.com",
+    "iamcredentials.googleapis.com",
+    "cloudbilling.googleapis.com",
+    "billingbudgets.googleapis.com",
+  ]
 }
 
 # The project's billing account and number — derived, so `project_id` stays the
@@ -39,19 +52,34 @@ data "google_project" "this" {
   project_id = var.project_id
 }
 
+# Enable the APIs before the modules run (a fresh project has them off).
+# disable_on_destroy = false: tearing down our stack must not disable a
+# project-wide API other things may use.
+resource "google_project_service" "required" {
+  for_each = toset(local.required_services)
+
+  project            = var.project_id
+  service            = each.value
+  disable_on_destroy = false
+}
+
 module "bigquery" {
   source         = "./modules/bigquery"
   project_id     = var.project_id
   region         = var.region
   raw_dataset    = var.raw_dataset
   models_dataset = var.models_dataset
+
+  depends_on = [google_project_service.required]
 }
 
 module "gcs" {
   source     = "./modules/gcs"
   project_id = var.project_id
   region     = var.region
-  bucket     = local.state_bucket
+  bucket     = local.staging_bucket
+
+  depends_on = [google_project_service.required]
 }
 
 module "iam" {
@@ -61,6 +89,9 @@ module "iam" {
   models_dataset    = module.bigquery.models_dataset_id
   bucket            = module.gcs.bucket_name
   github_repository = var.github_repository
+  github_ref        = var.github_ref
+
+  depends_on = [google_project_service.required]
 }
 
 module "budget" {
@@ -69,6 +100,8 @@ module "budget" {
   project_number   = data.google_project.this.number
   alert_thresholds = var.budget_alert_thresholds_usd
   display_name     = "ontime-${var.project_id}"
+
+  depends_on = [google_project_service.required]
 }
 
 # Written, not applied: the toggle lands here (false); the body is Phase 11.

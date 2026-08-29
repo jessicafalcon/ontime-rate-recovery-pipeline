@@ -17,3 +17,7 @@ variable "bucket" {
 variable "github_repository" {
   type = string
 }
+
+variable "github_ref" {
+  type = string
+}

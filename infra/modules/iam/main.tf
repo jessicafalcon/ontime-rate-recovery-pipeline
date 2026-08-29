@@ -53,16 +53,21 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   attribute_mapping = {
     "google.subject"       = "assertion.sub"
     "attribute.repository" = "assertion.repository"
+    "attribute.ref"        = "assertion.ref"
   }
-  attribute_condition = "assertion.repository == \"${var.github_repository}\""
+  # Only THIS repo AND only the trusted ref (default refs/heads/main) — not any
+  # branch of the repo — can exchange a token (spec invariant 3, review round 1).
+  attribute_condition = "assertion.repository == \"${var.github_repository}\" && assertion.ref == \"${var.github_ref}\""
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }
 }
 
-# Only CI runs of THIS repo may impersonate the SA (scoped to the repository
-# attribute, not the whole pool).
+# Only CI runs of THIS repo may impersonate the SA. The provider's
+# attribute_condition already rejects any token whose ref is not var.github_ref,
+# so the pool only ever holds this-repo/this-ref identities and binding on the
+# repository attribute is exact.
 resource "google_service_account_iam_member" "wif_impersonation" {
   service_account_id = google_service_account.pipeline.name
   role               = "roles/iam.workloadIdentityUser"
