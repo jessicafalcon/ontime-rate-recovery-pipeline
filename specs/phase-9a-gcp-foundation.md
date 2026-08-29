@@ -315,7 +315,7 @@ are fixes and record corrections landing without amendments.
   reconciliation moves them onto its own line). Rejected: fixing
   `profiles.yml` here (mixes phases; no BigQuery build can run until 9b).
 
-## Amendments (review round 6, approved 2026-08-29 — pin closure)
+## Amendments (review rounds 6–8, approved 2026-08-29 — pin closure; R/S round 7, T round 8)
 
 - **P — The `.tf` tree is pinned by a content manifest, not by one property
   at a time (#3, #4, #5; the round-2 test-design invariant applied to the
@@ -398,6 +398,23 @@ are fixes and record corrections landing without amendments.
   that line and no runner call. Rejected: a doc-only correction ("runnable,
   but don't") — Done-when 5's "cannot appear" would stay a claim, not a
   property.
+
+- **T — No auto-loaded tfvars on a cloud-cost run (round 8 #5).** Restores
+  **invariant 6** ("the argv is the whole input"): Terraform auto-loads
+  `terraform.tfvars` and `*.auto.tfvars{,.json}` from `-chdir=infra`; both are
+  gitignored (invariant 3) and outside the manifest (invariant 9), so a local
+  file could flip `enable_composer`/`enable_spanner`/`enable_ci_wif` or set
+  `operator_principal` for a `make tf-apply` with nothing in the pinned tree,
+  the argv or the `CONFIRM` prompt revealing it. Mechanism: `infra/cli.py`
+  refuses `tf-plan`/`tf-apply`/`tf-destroy` when any such file exists under
+  `infra/` (`tf-<cmd>: refused — infra/terraform.tfvars auto-loads; pass -var`,
+  exit 2, before the runner), so every toggle reaches Terraform only as a
+  `-var` on the command line (or `TF_VAR_*`, which the same shell shows); the
+  runbook says `tf-plan` before every `tf-apply`. Test: a scratch `INFRA_DIR`
+  holding `x.auto.tfvars` → refused, no runner call; `tf-validate` is not
+  gated (offline, creates nothing). Rejected: a threat-model note only (the
+  property stays a claim); echoing resolved toggles (a `-var` and a tfvars
+  would print the same line — the file, not the value, is the smuggling path).
 
 ## Teaching notes (first appearance in this project)
 
