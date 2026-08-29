@@ -301,6 +301,29 @@ privilege IAM, budget alerts ($50/$150), GCS state backend (bootstrap documented
 `project_id`; `make dbt-build TARGET=bigquery PROFILE=tiny` green with the same
 pins as DuckDB; `terraform destroy` leaves nothing billable.
 
+**Split 9a/9b** (the Done-when is naturally two, disjoint surfaces; ≤6 pinned
+decisions each — `specs/phase-9a-gcp-foundation.md`, `specs/phase-9b-*.md`). 9a
+merges before 9b's reconciliation.
+
+**Delivered (9a)** (`phase-9-gcp-foundation`, spec
+`specs/phase-9a-gcp-foundation.md`): the Terraform foundation, meter off by
+default. `infra/` with one module per concern — `bigquery` (datasets `raw` +
+`ontime`, `us-central1`), `gcs`, `iam`, `budget` unconditional (free/near-free,
+§6); `composer`/`spanner` written but `count`-gated behind `enable_*` toggles
+defaulting false, so a default plan makes zero of them. One least-privilege
+service account (BQ `jobUser` + dataset-scoped `dataEditor`, bucket
+`objectAdmin`; never owner/editor) + a WIF pool/provider for CI — ADC/WIF only,
+no key at rest. Budget alerts $50/$150 (notify only); the billing kill-switch is
+documented optional in `docs/DEPLOYMENT.md`, not built. `project_id` the only
+required var (`region` defaults `us-central1`; the budget's billing account +
+project number are a `google_project` data source). `infra/cli.py` validates
+`PROJECT` and gates `tf-apply`/`tf-destroy` on `CONFIRM=yes $(origin)`; four
+targets `tf-validate` (offline) / `tf-plan` / `tf-apply` / `tf-destroy`. State
+backend bootstrap-documented (local by default). `make tf-validate` OK (google
+provider 6.50.0); the plan-clean and destroy-empty Done-when clauses are proven
+by the manual cloud runs in the spec's Evidence (ask-first). 9b (the two Done-when
+warehouse clauses) lands next.
+
 ---
 
 ## Phase 10 — Spanner: dims and write-back

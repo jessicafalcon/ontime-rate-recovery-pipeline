@@ -3,7 +3,8 @@
 Contract for the `phase-9-gcp-foundation` branch (9a). Source: `docs/PHASES.md`
 Phase 9 — the infra half (Terraform, datasets, bucket, IAM, budgets); the
 BigQuery dialect + landing + pin parity is **9b**, a separate spec finalized
-after 9a merges. Depends on Phase 8 merged.
+after 9a merges. Depends on Phase 8 merged (8a write-back `serving/` PR #10, 8b
+Airflow DAG `orchestration/` PR #11 — both in main at `f916949`).
 
 **Status: PROPOSED — do not start until approved.** No new pip dependency:
 Terraform and gcloud are CLI tools, not packages (CLAUDE.md allowlist). Verified
@@ -16,7 +17,8 @@ is 9b's allowlist entry, not 9a's.
 
 Drift between the plan and what main actually is, and the carry-overs due at
 Phase 9. Items marked **design change** were **approved 2026-08-26**. Facts are
-read off main (`e766e27`).
+read off main (`f916949` — Phase 8 complete: 8a write-back, 8b Airflow DAG).
+Rebased onto that main 2026-08-28 (was drafted against `e766e27`, pre-Phase-8).
 
 1. **Some Phase 9 scaffolding pre-exists — fact.** `.gitignore` already ignores
    `.terraform/`, `*.tfstate*`, `*.tfvars` with `!*.tfvars.example` (no change
@@ -78,7 +80,21 @@ read off main (`e766e27`).
    re-checked and **re-deferred** (module written behind `enable_spanner=false`;
    the trial clock starts only on a Phase 10 apply). The 9b-triggered rows
    (conflicting-dup guard, dialect denylist, cross-warehouse drift, THROUGH
-   calendar) stay open until 9b. Count 10 → **9** after 9a.
+   calendar) stay open until 9b. Count 14 → **13** after 9a.
+
+8. **Phase 8 landed under 9a — fact (post-rebase).** main now carries `serving/`
+   (8a write-back) and `orchestration/` (8b Airflow DAG), plus `make writeback |
+   pipeline | test-int-airflow` and a `THROUGH` knob on `make dbt-build`. None is
+   9a's surface (9a is `infra/` only), and 9a's `make` additions merge cleanly
+   beside them. Phase 8b opened **BACKLOG "The DAG's build owns its landing in
+   one task"** whose trigger names **Phase 9 spec reconciliation**: `loader/cli.py
+   ::dbt_build` calls the DuckDB `load()` even for a non-`duckdb` `TARGET`, which
+   is wrong once the landing is `bq load` GCS→BigQuery. This is a **9b** fix (split
+   a build-only path from the landing; thread `TARGET`) — 9a touches no dbt/DAG
+   code, so the row is **re-deferred to 9b** here, acknowledged in the 9b
+   reconciliation-to-come. The related 8b row "`computed_as_of` is not a complete
+   discriminator" and "`model_version` compares as a string" are Phase 10
+   triggers, not 9a/9b.
 
 Design changes — items 2, 3, 4, 5 — **approved 2026-08-26**. Two specs, not one:
 9a is infra with no data and a mandatory security review; 9b is the dbt/dialect
@@ -242,7 +258,7 @@ implementation on a scratch copy (the Phase 6/7 pattern):
   `main.tf` wires `modules/{bigquery,gcs,iam,budget}` unconditionally (all
   free/near-free — ARCHITECTURE §6) and `modules/{composer,spanner}` behind
   `count = var.enable_* ? 1 : 0`. `region` defaults `us-central1`; the budget's
-  billing account is a `google_billing_project_billing_info` data source on
+  billing account and project number are a `google_project` data source on
   `project_id`, so no second required var. Rejected: a flat `main.tf` (a concern
   can't be toggled or destroyed alone); a required `billing_account` var
   (breaks "project_id only").
@@ -312,13 +328,15 @@ implementation on a scratch copy (the Phase 6/7 pattern):
       landed for the infra clauses
 - [ ] `CLAUDE.md` — Current status; Commands (`tf-validate|tf-plan|tf-apply|
       tf-destroy`); Repo map (`infra/` real); `unexport` list (`PROJECT`); Open
-      BACKLOG rows: **9**
+      BACKLOG rows: **13**
 - [ ] `docs/ARCHITECTURE.md` — §6 (state backend bootstrap, WIF, budget as
       landed); §8 Gotchas only if a stack surprise lands (provider version,
       `terraform validate` behavior, budget billing-info data source)
 - [ ] `BACKLOG.md` — "Budget alerts do not stop spend" struck (`DONE Phase 9a` —
       documented as optional); "Spanner 90-day trial expiry" re-checked,
-      re-deferred (module written, `enable_spanner=false`, no apply); count 10 → 9
+      re-deferred (module written, `enable_spanner=false`, no apply); count 14 → 13
+- [ ] `docs/DEPLOYMENT.md` — new (bootstrap, cost table, teardown, optional
+      kill-switch; Spanner/Composer teardown dates)
 - [ ] Spec amendments — `specs/phase-9b-*.md` does not exist yet (finalized after
       9a merges); none to amend
 - [ ] docs/RESULTS.md, METRICS.md, AB_DESIGN.md — none (no generated block)
@@ -369,7 +387,7 @@ every resource in state — the two datasets, the bucket, the SA + WIF, the budg
 - Stack risk (first hour, STOP on any surprise, §8): (1) the google provider
   version `terraform init -backend=false` resolves — pin it in
   `required_providers`; (2) `terraform validate` passing without GCP auth on the
-  toggled-off tree; (3) `google_billing_project_billing_info` supplying the
+  toggled-off tree; (3) the `google_project` data source supplying the
   budget's billing account from `project_id` alone (no second required var); (4)
   the WIF provider attribute-condition syntax on the current provider.
 

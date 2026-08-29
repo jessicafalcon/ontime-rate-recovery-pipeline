@@ -67,7 +67,9 @@ annotated **Superseded by …** in place and never deleted.
 
 - **Local-first, DuckDB for CI, BigQuery by profile switch; Composer and Spanner
   behind Terraform toggles.** Cloud runs are manual and asked-for; nothing
-  billable is left up by default. ([Phase 0](#phase-0))
+  billable is left up by default. Realised in Phase 9a: `infra/` with `enable_*`
+  toggles defaulting false, `project_id` the only required var, ADC/WIF (never a
+  key), budget alerts $50/$150. ([Phase 0](#phase-0), [Phase 9a](#phase-9a))
 
 ## Process
 
@@ -109,6 +111,66 @@ annotated **Superseded by …** in place and never deleted.
   anyone opening the repo in Claude Code.
 
 ## Appendix — by phase
+
+### Phase 9a
+
+*GCP foundation — Terraform (`phase-9-gcp-foundation`).* Split from Phase 9;
+9b (BigQuery dialect + landing + pin parity) is a separate spec finalised after
+9a merges. Design changes approved 2026-08-26; rebased onto Phase-8-complete main
+2026-08-28.
+
+- **`infra/` is one tree, one module per concern, `enable_*` toggles default
+  false.** `main.tf` wires `modules/{bigquery,gcs,iam,budget}` unconditionally
+  (all free/near-free — ARCHITECTURE §6) and `modules/{composer,spanner}` behind
+  `count = var.enable_* ? 1 : 0`, so a default plan creates zero of them
+  (Composer is Phase 11, Spanner Phase 10; the Spanner trial clock only starts on
+  an apply, so the BACKLOG row re-defers). Rejected: a flat `main.tf` (a concern
+  can't be toggled or destroyed alone).
+- **`project_id` is the only required var; the budget's billing account is
+  derived.** Every other input defaults (`region` `us-central1`, the toggles, the
+  WIF repo slug, the dataset names); a `google_project` data source supplies the
+  billing account and project number, so no `billing_account` var is needed and a
+  fresh clone plans with just `project_id`. Rejected: a required `billing_account`
+  (breaks "project_id only"); `google_billing_project_billing_info` (used the
+  `google_project` data source, which carries both fields).
+- **One least-privilege service account + WIF; ADC/WIF only, no key at rest.**
+  `modules/iam` grants BQ `jobUser` (project) + dataset-scoped `dataEditor` on the
+  two datasets + bucket `objectAdmin`, never `roles/owner|editor`; CI
+  authenticates through a Workload Identity Federation pool/provider scoped to
+  `attribute.repository == <repo>`. No `google_service_account_key` resource, no
+  keyfile path anywhere (`tests/test_infra.py` greps for it). Rejected: a
+  downloaded SA key (a secret at rest — the thing the rule forbids); `roles/editor`
+  (broad). Stands up the WIF the "cross-warehouse dialect drift needs a CI
+  BigQuery job" BACKLOG row needs (closes at 9b exit).
+- **Budget alerts $50/$150; the kill-switch documented, not built.** `modules/
+  budget` sets threshold rules at $50 and $150 on a monthly amount (the total is
+  `max(thresholds)`). A budget only notifies; the real guardrail (Pub/Sub → Cloud
+  Function disabling billing) is documented in `docs/DEPLOYMENT.md` with a resource
+  sketch and left unbuilt — nothing billable runs by default, so there is no
+  runaway to catch. Closes BACKLOG "Budget alerts do not stop spend". Rejected:
+  building it now (premature; Phase 12 demo day is the trigger).
+- **State backend bootstrap-documented, local by default.** The GCS `backend`
+  block is present but commented; `docs/DEPLOYMENT.md` gives the one-time bootstrap
+  (create the versioned bucket, `terraform init -migrate-state`). A fresh clone
+  plans on the local backend with no setup, so `project_id` really is the only
+  input. Rejected: a GCS backend required from clone one (the bucket can't create
+  the backend that stores its own state).
+- **`infra/cli.py` validates `PROJECT` and gates the destructive targets; four
+  `make` targets.** Mirrors `loader/cli.py`: one process validates `PROJECT`
+  (`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`) before deriving `-var project_id=…`, and
+  refuses `tf-apply`/`tf-destroy` unless `CONFIRM=yes` has command-line origin;
+  `tf-validate` (offline: `init -backend=false` + `validate` + `fmt -check`) and
+  `tf-plan` are non-destructive and ungated. The Terraform HCL is configuration no
+  mutation operator addresses — pinned by `tests/test_infra.py` static checks +
+  `terraform validate` + the manual plan/apply/destroy Evidence (the Phase 7
+  treatment of SQL); the three `infra/cli.py` guards carry the mutation lines
+  (3/3 killed). Rejected: `terraform` invoked straight from the Makefile (an
+  unvalidated value reaches the provider; no `$(origin)` gate).
+- **The 8b-opened row "the DAG's build owns its landing" is a 9b fix, re-deferred
+  here.** `loader/cli.py::dbt_build` calls the DuckDB `load()` even for a
+  non-`duckdb` `TARGET`, which is wrong once the landing is `bq load` GCS→BigQuery.
+  9a touches no dbt/DAG code; 9b splits a build-only path from the landing and
+  threads `TARGET`, closing the row.
 
 ### Phase 8b
 

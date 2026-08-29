@@ -301,6 +301,12 @@ demo day, destroyed the same hour. Budget alerts do not stop spend — stated,
 with the optional billing-disable function as the real guardrail. Terraform
 state in GCS (bootstrapped manually); WIF for CI, never JSON keys.
 
+Implemented in Phase 9a (`infra/`, behind `enable_*` toggles that default false;
+`project_id` the only required var; one least-privilege service account + WIF).
+`docs/DEPLOYMENT.md` is the runbook — auth (ADC/WIF), the one-time state-backend
+bootstrap, the cost table, the optional billing kill-switch, and the teardown
+that leaves nothing billable.
+
 ## 7. Validation stance
 
 Synthetic data cannot prove retention lift. The pipeline reports (a) label
