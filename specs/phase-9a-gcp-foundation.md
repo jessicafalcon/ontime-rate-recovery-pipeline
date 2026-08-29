@@ -567,7 +567,8 @@ infra/cli.py::require_confirm       invert-guard
 infra/cli.py::require_confirm       delete-call
 infra/cli.py::tf                    constant-return:0
 infra/cli.py::manifest_diff         constant-return:[]
-infra/cli.py::pinned_files          constant-return:[]
+infra/cli.py::refuse_auto_tfvars    delete-call
+infra/cli.py::auto_tfvars           constant-return:[]
 ```
 
 Equivalent-mutant / refused exclusions, named up front and verified once at

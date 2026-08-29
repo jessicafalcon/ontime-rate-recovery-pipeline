@@ -204,8 +204,13 @@ def test_cloud_target_requires_confirm_from_the_command_line(
         cli.dbt_build("nosuchprofile", "duckdb")
     assert e.value.code == 2
 
-    # Amendment S: a confirmed bigquery build is still refused before 9b — before
-    # load() (no DuckDB file appears) and before any dbt call.
+
+def test_bigquery_target_is_refused_before_9b(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Amendment S: a confirmed bigquery build is still refused before 9b —
+    before load() (no DuckDB file appears) and before any dbt call."""
+
     def never(*a: object, **k: object) -> int:
         raise AssertionError("load() ran before the 9b refusal")
 

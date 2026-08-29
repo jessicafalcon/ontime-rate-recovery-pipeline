@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -262,6 +263,21 @@ def test_every_declared_resource_type_is_on_the_allowlist() -> None:
     assert declared <= ALLOWED_RESOURCE_TYPES, declared - ALLOWED_RESOURCE_TYPES
 
 
+def test_module_sources_are_local_paths_only() -> None:
+    """Round 8 #4: every `module` block's `source` is `./modules/<name>` — a
+    registry/git/symlinked source would land in `.terraform/modules/`, outside
+    the manifest, the allowlists and every scan."""
+    sources = re.findall(r"^\s*source\s*=\s*\"([^\"]*)\"", _stripped("main.tf"), re.M)
+    module_sources = [x for x in sources if x != "hashicorp/google"]
+    assert len(module_sources) == 6, sources
+    for src in module_sources:
+        assert re.fullmatch(r"\./modules/[a-z]+", src), src
+        assert (INFRA / src).is_dir() and not (INFRA / src).is_symlink(), src
+    for f, body in _stripped_files().items():
+        if f.name != "main.tf":
+            assert not re.search(r"^\s*source\s*=", body, re.M), f
+
+
 def test_required_providers_is_hashicorp_google_only() -> None:
     """Round 3 #6: the only provider is `hashicorp/google` at the pinned
     constraint — a second provider block or a loosened `>=` reddens."""
@@ -361,13 +377,18 @@ def _git_ls_files(pathspec: str) -> list[str]:
 
 
 @pytest.fixture(scope="module")
-def ignored(tmp_path_factory: pytest.TempPathFactory):
+def ignored(tmp_path_factory: pytest.TempPathFactory) -> Callable[[str], bool]:
     """`git check-ignore` in a scratch repo holding ONLY this repo's .gitignore:
-    neither `core.excludesFile` nor this clone's `.git/info/exclude` can stand
+    neither `core.excludesFile`, this clone's `.git/info/exclude`, nor a global
+    `init.templateDir` planting one (`--template=<empty>`, round 8 #6) can stand
     in for a rule in .gitignore (round 6 #6, round 7 #2 — the local exclude
     file carried the `.claude/scheduled_tasks.*` rules)."""
     repo = tmp_path_factory.mktemp("ignore-scratch")
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    empty_template = tmp_path_factory.mktemp("empty-template")
+    subprocess.run(
+        ["git", "init", "-q", f"--template={empty_template}", str(repo)], check=True
+    )
+    assert not (repo / ".git" / "info" / "exclude").exists()
     (repo / ".gitignore").write_bytes((ROOT / ".gitignore").read_bytes())
 
     def _ignored(relpath: str) -> bool:
@@ -393,7 +414,7 @@ PRIVATE_KEY_SUFFIXES = (".pem", ".p12", ".pfx", ".key", ".p8")
 BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".duckdb", ".pyc", ".ico"}
 
 
-def test_no_tracked_secret_state_or_tfvars(ignored) -> None:
+def test_no_tracked_secret_state_or_tfvars(ignored: Callable[[str], bool]) -> None:
     """No key / tfstate / real tfvars is tracked; the gitignore rule ignores a
     real terraform.tfvars but not the *.example. Private-key filetypes (.pem/.p12/
     …) are rejected by extension; any tracked JSON is content-scanned for a
@@ -448,6 +469,19 @@ def test_auth_is_adc_or_wif_never_keyfile() -> None:
     bq = _yaml_block((ROOT / "dbt" / "profiles.yml").read_text(), "bigquery")
     assert "method: oauth" in bq
     assert "keyfile" not in bq and "credentials" not in bq
+
+
+def test_bigquery_profile_project_has_no_default(
+    ignored: Callable[[str], bool],
+) -> None:
+    """Amendment S's profiles.yml half (round 8 #1): the bigquery target's
+    `project` is `env_var('OTR_GCP_PROJECT')` with NO default argument, so a
+    missing export is a dbt parse error — `env_var('OTR_GCP_PROJECT', '')`
+    (the pre-S text) is red."""
+    bq = _yaml_block((ROOT / "dbt" / "profiles.yml").read_text(), "bigquery")
+    m = re.search(r"project:\s*\"\{\{\s*env_var\((.*?)\)\s*\}\}\"", bq)
+    assert m, bq
+    assert m.group(1) == "'OTR_GCP_PROJECT'", m.group(1)
 
 
 def _yaml_block(text: str, key: str) -> str:
@@ -782,7 +816,9 @@ def test_stated_defaults_are_pinned() -> None:
     )
 
 
-def test_tracked_claude_config_is_prose_and_hook_scripts_only(ignored) -> None:
+def test_tracked_claude_config_is_prose_and_hook_scripts_only(
+    ignored: Callable[[str], bool],
+) -> None:
     """Amendment M (round 4 #9), re-implemented ONCE in round 6 as an allowlist:
     the only tracked paths under `.claude/` are agent/command prose and hook
     SCRIPTS (wired only by the gitignored settings.local.json); any tracked
@@ -807,17 +843,20 @@ def test_tf_tree_matches_manifest() -> None:
     red until `make tf-freeze CONFIRM=yes` rewrites it (the one allowlist that
     replaces property-by-property pinning as the mutation gate). Asserted on
     the diff LIST, and the pinned set is asserted against an independent walk,
-    so a neutered `manifest_diff`/`pinned_files` is red (round 7 #1)."""
+    so a neutered `manifest_diff`/`is_pinned` is red (round 7 #1; round 8 #3:
+    the pinned set is `compute_manifest`'s own keys — the freeze's — not a
+    test-only helper)."""
     assert cli.MANIFEST.is_file(), "infra/MANIFEST.sha256 missing"
     assert cli.manifest_diff() == []
-    pinned = cli.pinned_files()
-    assert pinned == sorted(_tf_files() + [INFRA / ".terraform.lock.hcl"])
+    pinned = sorted(cli.compute_manifest())
+    assert pinned == sorted(
+        p.relative_to(INFRA).as_posix()
+        for p in _tf_files() + [INFRA / ".terraform.lock.hcl"]
+    )
     assert len(pinned) >= 8
     from generator import manifest
 
-    assert set(manifest.parse(cli.MANIFEST.read_text())) == {
-        p.relative_to(INFRA).as_posix() for p in pinned
-    }
+    assert set(manifest.parse(cli.MANIFEST.read_text())) == set(pinned)
 
 
 def test_manifest_gate_reads_tf_json_and_vanished_files(
@@ -897,6 +936,17 @@ class _FakeRunner:
         return subprocess.CompletedProcess(argv, self.rc)
 
 
+@pytest.fixture
+def scratch_infra(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An empty `INFRA_DIR` for the runner tests: a developer's own gitignored
+    `infra/terraform.tfvars` must not decide the suite (Amendment T refuses it
+    live — round 8 #5 was reproduced by exactly such a file)."""
+    tree = tmp_path / "infra"
+    tree.mkdir()
+    monkeypatch.setattr(cli, "INFRA_DIR", tree)
+    return tree
+
+
 def test_cli_validates_project() -> None:
     for good in ("my-proj", "my-project-123", "abcdef"):
         assert cli.validate_project(good) == good
@@ -907,7 +957,7 @@ def test_cli_validates_project() -> None:
         assert e.value.code == 2, value
 
 
-def test_cli_requires_confirm_origin() -> None:
+def test_cli_requires_confirm_origin(scratch_infra: Path) -> None:
     """tf-apply/tf-destroy refuse unless CONFIRM=yes has command-line origin — the
     guard runs BEFORE the runner, so the fake is never called on a refusal. (The
     fake is what lets `require_confirm delete-call` be a safe mutation line.)"""
@@ -928,7 +978,7 @@ def test_cli_requires_confirm_origin() -> None:
     assert len(fake.calls) == 1 and "apply" in fake.calls[0]
 
 
-def test_cli_validates_before_running() -> None:
+def test_cli_validates_before_running(scratch_infra: Path) -> None:
     """Invariant 6's ordering half: a bad PROJECT dies before the runner runs."""
     for cmd in ("plan", "apply", "destroy"):
         fake = _FakeRunner()
@@ -938,7 +988,7 @@ def test_cli_validates_before_running() -> None:
         assert fake.calls == [], cmd
 
 
-def test_cli_builds_the_expected_argv() -> None:
+def test_cli_builds_the_expected_argv(scratch_infra: Path) -> None:
     """Round 2 #11: the argv reaching the runner carries the validated
     `-var project_id=…` and `-input=false` (no interactive prompt), and the
     mutating commands `-auto-approve` — dropping any reddens."""
@@ -958,7 +1008,7 @@ def test_cli_builds_the_expected_argv() -> None:
         )
 
 
-def test_cli_validate_argv_is_offline() -> None:
+def test_cli_validate_argv_is_offline(scratch_infra: Path) -> None:
     """Round 3 #5 (round 2 #9's live survivor): `tf-validate` runs init with
     `-backend=false` (no state backend touched, no auth) and `-lockfile=readonly`
     (Amendment R: init may never rewrite the pinned provider lock) then
@@ -973,7 +1023,55 @@ def test_cli_validate_argv_is_offline() -> None:
     ], steps
 
 
-def test_cli_missing_terraform_is_a_clean_fail(capsys: pytest.CaptureFixture) -> None:
+def test_cli_nonzero_step_is_a_fail(
+    scratch_infra: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Round 8 #2: a nonzero terraform exit on any tf-validate step (an init
+    refused by `-lockfile=readonly` on a platform the lock lacks, a validate
+    error, an unformatted file) or on plan/apply/destroy is exit 1 with a FAIL
+    line — `return 1 → return 0` is red."""
+    fake = _FakeRunner(rc=1)
+    assert cli.tf("validate", runner=fake) == 1
+    assert len(fake.calls) == 1, "later steps ran after a FAIL"
+    assert "tf-validate FAIL: init" in capsys.readouterr().out
+    fake = _FakeRunner(rc=1)
+    assert cli.tf("plan", "my-proj", runner=fake) == 1
+    assert "tf-plan FAIL: my-proj" in capsys.readouterr().out
+
+
+def test_cli_refuses_auto_loaded_tfvars(
+    scratch_infra: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Amendment T: `terraform.tfvars` / `*.auto.tfvars{,.json}` under infra/ —
+    gitignored, unpinned, auto-loaded — refuse plan/apply/destroy before the
+    runner; `tf-validate` (offline) is not gated; the example file and a plain
+    `x.tfvars` (not auto-loaded) do not trigger."""
+    tree = scratch_infra
+    (tree / "terraform.tfvars.example").write_text("# example\n")
+    (tree / "x.tfvars").write_text("enable_spanner = true\n")
+    assert cli.auto_tfvars() == []
+    assert cli.tf("plan", "my-proj", runner=_FakeRunner()) == 0
+    for name in ("terraform.tfvars", "toggles.auto.tfvars", "t.auto.tfvars.json"):
+        (tree / name).write_text("enable_spanner = true\n")
+        assert cli.auto_tfvars() == [name]
+        for cmd in ("plan", "apply", "destroy"):
+            fake = _FakeRunner()
+            with pytest.raises(SystemExit) as e:
+                cli.tf(cmd, "my-proj", "yes", "command line", runner=fake)
+            assert e.value.code == 2
+            assert fake.calls == [], (cmd, name)
+            assert (
+                f"tf-{cmd}: refused — infra/{name} auto-loads"
+                in capsys.readouterr().out
+            )
+        assert cli.tf("validate", runner=_FakeRunner()) == 0
+        (tree / name).unlink()
+    assert cli.tf("plan", "my-proj", runner=_FakeRunner()) == 0
+
+
+def test_cli_missing_terraform_is_a_clean_fail(
+    scratch_infra: Path, capsys: pytest.CaptureFixture
+) -> None:
     """No traceback when terraform is not on PATH; a real exit 127 still FAILs
     (None sentinel, not 127) (review round 1 #22 / round 2 #16)."""
 

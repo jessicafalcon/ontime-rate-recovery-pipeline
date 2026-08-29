@@ -8,9 +8,13 @@ tf-validate — offline: `init -backend=false -lockfile=readonly` + `validate` +
 tf-plan     — reads GCP APIs (ADC/WIF); shows the diff. Non-destructive.
 tf-apply    — creates cloud resources. CONFIRM=yes from the command line only.
 tf-destroy  — deletes them. CONFIRM=yes from the command line only.
-tf-freeze   — rewrites infra/MANIFEST.sha256 (the content pin over every .tf +
-              the provider lock — Amendment P). CONFIRM=yes from the command
-              line only: it is the ONLY writer of the manifest.
+tf-freeze   — rewrites infra/MANIFEST.sha256 (the content pin over every file
+              Terraform loads — `*.tf`, `*.tf.json` — plus the provider lock;
+              Amendments P/R). CONFIRM=yes from the command line only: it is
+              the ONLY writer of the manifest.
+plan/apply/destroy refuse while an auto-loaded `terraform.tfvars` /
+`*.auto.tfvars{,.json}` sits under infra/ (Amendment T): a toggle reaches
+Terraform only as a command-line `-var`, never from a gitignored file.
 
 Auth is ADC (local `gcloud auth application-default login`) or WIF (CI) — no
 keyfile, no secret. tf-apply/tf-destroy are cloud-cost/destructive: ask first.
@@ -80,10 +84,6 @@ def is_pinned(p: Path) -> bool:
     return p.name.endswith(PINNED_SUFFIXES) or p.name == ".terraform.lock.hcl"
 
 
-def pinned_files() -> list[Path]:
-    return sorted(p for p in INFRA_DIR.rglob("*") if p.is_file() and is_pinned(p))
-
-
 def compute_manifest() -> dict[str, str]:
     return _manifest.compute(INFRA_DIR, is_pinned)
 
@@ -115,6 +115,25 @@ def freeze(confirm: str, origin: str) -> int:
     MANIFEST.write_text(_manifest.render(m))
     print(f"tf-freeze OK: {len(m)} files pinned in {MANIFEST.name}")
     return 0
+
+
+AUTO_TFVARS = re.compile(r"\A(terraform\.tfvars|.*\.auto\.tfvars)(\.json)?\Z")
+
+
+def auto_tfvars() -> list[str]:
+    """Files Terraform loads without being asked (`terraform.tfvars`,
+    `*.auto.tfvars`, `*.auto.tfvars.json`) directly under the chdir — gitignored
+    and unpinned, so outside every other control (Amendment T)."""
+    return sorted(p.name for p in INFRA_DIR.iterdir() if AUTO_TFVARS.match(p.name))
+
+
+def refuse_auto_tfvars(cmd: str) -> None:
+    found = auto_tfvars()
+    if found:
+        die(
+            f"tf-{cmd}: refused — infra/{', infra/'.join(found)} auto-loads; "
+            "delete it and pass -var on the command line (Amendment T)"
+        )
 
 
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -155,6 +174,7 @@ def tf(
         print("tf-validate OK")
         return 0
     validate_project(project)
+    refuse_auto_tfvars(cmd)
     var = ["-var", f"project_id={project}"]
     argv = {
         "plan": _TF + ["plan", "-input=false", *var],
