@@ -8,6 +8,16 @@
 # the plan on every run. Thresholds > amount are valid ("over 100%") alerts.
 # With no notification channel, GCP sends the alerts to the billing-account
 # admins (docs/DEPLOYMENT.md).
+#
+# The currency is the BILLING ACCOUNT's (a budget in any other currency is a
+# 400 "invalid argument" — found on the first live apply, ARCHITECTURE §8), read
+# here at apply time (the module `depends_on` the API enablement, so a fresh
+# project still plans). The thresholds are therefore numbers in that currency;
+# the "$50/$150" in the records assumes a USD account.
+
+data "google_billing_account" "this" {
+  billing_account = var.billing_account
+}
 
 locals {
   budget_amount = min(var.alert_thresholds...)
@@ -23,7 +33,7 @@ resource "google_billing_budget" "this" {
 
   amount {
     specified_amount {
-      currency_code = "USD"
+      currency_code = data.google_billing_account.this.currency_code
       units         = tostring(local.budget_amount)
     }
   }

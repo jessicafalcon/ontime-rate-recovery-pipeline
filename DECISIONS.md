@@ -237,7 +237,13 @@ annotated **Superseded by …** in place and never deleted.
   scoped to `local.required_services` as an exact set. Records: this file's
   `max`→`min` and the superseded-by pointer above. **Gate item:** the
   apply→destroy Evidence predates the amendments; a fresh cycle re-proves it
-  before merge.
+  before merge. **Found on that first live apply** (two §8 gotchas, fixed in
+  the tree): user ADC has no quota project for `billingbudgets` → the provider
+  sets `user_project_override` + `billing_project = var.project_id`; a budget's
+  currency must be the billing account's → `data.google_billing_account.
+  currency_code`, read inside the module at apply time. Rejected: a per-machine
+  `set-quota-project` step; a `budget_currency_code` var (a second input on a
+  non-USD account, against invariant 1).
 
 ### Phase 8b
 

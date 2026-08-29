@@ -78,7 +78,7 @@ The default apply creates only the free/near-free layer:
 | BigQuery datasets `raw`, `ontime` | empty datasets free; storage ~$0.02/GB·mo (tiny ≈ $0); queries $5/TB (tiny ≈ $0) | idempotent — Terraform no-ops, no double spend |
 | GCS staging bucket `<project>-ontime` (NOT the tfstate bucket) | ~$0.02/GB·mo; tiny (≈ $0); noncurrent versions reaped by a lifecycle rule | idempotent |
 | Service account + IAM (+ WIF only when `enable_ci_wif=true`) | free | idempotent |
-| Budget ($50 / $150 alerts) | free (notifies only — see below) | idempotent |
+| Budget (50 / 150 alerts, in the billing account's currency — $ on a USD account) | free (notifies only — see below) | idempotent |
 | **Composer** (`enable_composer=false`) | **not created** — ~$300+/mo if enabled | — |
 | **Spanner** (`enable_spanner=false`) | **not created** — ~$65+/mo after the 90-day trial | — |
 

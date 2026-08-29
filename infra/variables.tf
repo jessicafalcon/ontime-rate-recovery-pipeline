@@ -62,7 +62,7 @@ variable "github_ref" {
 }
 
 variable "budget_alert_thresholds_usd" {
-  description = "Budget alert thresholds in USD (notify only — a budget does not stop spend)."
+  description = "Budget alert thresholds in the billing account's currency (USD on a USD account; notify only — a budget does not stop spend)."
   type        = list(number)
   default     = [50, 150]
 

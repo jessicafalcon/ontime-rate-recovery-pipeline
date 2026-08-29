@@ -492,6 +492,19 @@ def test_every_resource_is_destroyable() -> None:
     )
 
 
+def test_budget_currency_is_the_billing_accounts() -> None:
+    """§8 Gotchas: a literal currency (USD) is a 400 on a non-USD billing account;
+    the currency is read from `data.google_billing_account` inside the module
+    (apply-time via the module's depends_on), never a literal."""
+    budget = _stripped("modules", "budget", "main.tf")
+    assert _blocks(budget, r'data "google_billing_account" "this"')
+    assert re.search(
+        r"currency_code\s*=\s*data\.google_billing_account\.this\.currency_code",
+        budget,
+    )
+    assert not re.search(r'currency_code\s*=\s*"', budget), "literal currency"
+
+
 def test_bucket_is_hardened() -> None:
     """Round 2 #8: public-access prevention enforced, uniform access, versioning
     on, and a lifecycle rule so versioning doesn't accrete cost — each pinned, so
