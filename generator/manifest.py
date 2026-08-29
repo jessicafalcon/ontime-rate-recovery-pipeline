@@ -9,13 +9,15 @@ from pathlib import Path
 NAME = "MANIFEST.sha256"
 
 
+def compute_file(p: Path) -> str:
+    return hashlib.sha256(p.read_bytes()).hexdigest()
+
+
 def compute(root: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     for p in sorted(root.rglob("*")):
         if p.is_file() and p.name != NAME:
-            out[p.relative_to(root).as_posix()] = hashlib.sha256(
-                p.read_bytes()
-            ).hexdigest()
+            out[p.relative_to(root).as_posix()] = compute_file(p)
     return out
 
 

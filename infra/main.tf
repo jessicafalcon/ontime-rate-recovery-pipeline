@@ -99,14 +99,15 @@ module "gcs" {
 }
 
 module "iam" {
-  source            = "./modules/iam"
-  project_id        = var.project_id
-  raw_dataset       = module.bigquery.raw_dataset_id
-  models_dataset    = module.bigquery.models_dataset_id
-  bucket            = module.gcs.bucket_name
-  enable_ci_wif     = var.enable_ci_wif
-  github_repository = var.github_repository
-  github_ref        = var.github_ref
+  source             = "./modules/iam"
+  project_id         = var.project_id
+  raw_dataset        = module.bigquery.raw_dataset_id
+  models_dataset     = module.bigquery.models_dataset_id
+  bucket             = module.gcs.bucket_name
+  enable_ci_wif      = var.enable_ci_wif
+  github_repository  = var.github_repository
+  github_ref         = var.github_ref
+  operator_principal = var.operator_principal
 
   depends_on = [google_project_service.required]
 }

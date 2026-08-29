@@ -26,3 +26,8 @@ variable "github_repository" {
 variable "github_ref" {
   type = string
 }
+
+variable "operator_principal" {
+  type     = string
+  nullable = true
+}

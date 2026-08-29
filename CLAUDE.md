@@ -100,8 +100,9 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   $(origin)`) drives `make tf-validate|tf-plan|tf-apply|tf-destroy`.
   `terraform.tfvars.example` only (never a `*.tfvars`); `.terraform.lock.hcl`
   is tracked (the provider pin); ADC/WIF, never a key. A pipeline dir — guarded
-  by `test_truth_isolation.py`; the `.tf` tree is pinned by the static
-  `tests/test_infra.py`.
+  by `test_truth_isolation.py`; the `.tf` tree is pinned byte-for-byte by
+  `MANIFEST.sha256` (`make tf-freeze CONFIRM=yes` its only writer) plus the
+  static property checks in `tests/test_infra.py`.
 - `fixtures/tiny/` — golden `raw/events_<upload-date>.jsonl` + `dims/` +
   `truth/` + `expected/attribution.csv` (Phase 3) + `MANIFEST.sha256`. **READ-ONLY**: the
   review gate FAILs any change without a `Freeze:` line in the phase spec;
@@ -192,7 +193,9 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   per-interval build the DAG runs; unset loads all (the default build is
   unchanged). Any `TARGET` other than `duckdb` is a cloud-cost
   command: refused unless `CONFIRM=yes` has command-line origin. dbt telemetry
-  is off (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`)
+  is off (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`). `TARGET=bigquery`
+  is not runnable before Phase 9b lands `generate_schema_name` — the build would
+  create per-folder datasets outside Terraform (`docs/DEPLOYMENT.md`)
 - `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` and its
   `.wal` (nothing else); `CONFIRM=yes` must have command-line origin
 - `make gen-sources` — re-renders `loader/ddl.sql` and
@@ -284,7 +287,15 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   zero Composer/Spanner resources; `enable_ci_wif` defaults false, so it builds
   no WIF pool/provider/binding — CI auth is an explicit opt-in that also needs
   `github_repository` (no default repo is trusted); the provider name is then
-  the `workload_identity_provider` output
+  the `workload_identity_provider` output. `operator_principal` (default null)
+  adds one grant — `serviceAccountTokenCreator` ON the SA — so that principal
+  can impersonate it for manual BigQuery builds
+- `make tf-freeze CONFIRM=yes` *(Phase 9a)* — the ONLY writer of
+  `infra/MANIFEST.sha256`, the content pin over every `infra/**/*.tf` and
+  `.terraform.lock.hcl` (`tests/test_infra.py::test_tf_tree_matches_manifest`
+  is red on any `.tf` edit until this runs); prints `tf-freeze OK: N files
+  pinned`. Overwrites a committed pin, so `CONFIRM=yes` needs command-line
+  origin; the manifest hunk lands in the same commit as the `.tf` change
 - Later phases add:
   `test-int-bigquery` (9b — the DuckDB≡BigQuery pin-parity run behind `OTR_INT`;
   in CI it needs an explicit `enable_ci_wif = true` apply, never the default
@@ -668,12 +679,21 @@ build before 9b, then as the SA), O (9b must set the `bigquery` output's
 `location` and export `OTR_GCP_PROJECT` from the validated `PROJECT`); the
 settings pin widened to every auto-configuring key + `.mcp.json`; a read-only
 `tf-plan` on the post-J/K/L tree re-proved `18 to add` with a null WIF output;
-the rest records/wording. Next: round 6 confirms green → merge → 9b (its first
+the rest records/wording. **Review round 6 applied (24 findings, 19 record/wording): 2 amendments** — P
+(`infra/MANIFEST.sha256` + `make tf-freeze`: the `.tf` tree is one allowlist,
+so every hand-mutation is lethal — the cause of three rounds of "unpinned
+attribute" findings closed), Q (`operator_principal` → a count-gated
+`serviceAccountTokenCreator` grant ON the SA, so Amendment N's impersonation
+is a managed control); the Claude-config pin re-implemented as a path
+allowlist; three new property pins; the Phase 0 / PROJECT_BRIEF edits
+reverted (a merged phase's records are not this branch's). Next: round 7
+confirms green → merge → 9b (its first
 commit reconciles against main-with-9a: `generate_schema_name`, `location`,
 `OTR_GCP_PROJECT`, the "DAG's build owns its landing" row —
 `dbt_build(TARGET=bigquery)` must not call the DuckDB `load()` — and the
 `ontime-pipeline` SA id reserved until ~2026-09-28 by the 2026-08-29 destroy).
-Open BACKLOG rows: **14** (9a struck "Budget alerts do not stop spend"; Spanner
-re-deferred; the four 9b-triggered rows re-deferred in-row; one new 9b row).
+Open BACKLOG rows: **15** (9a struck "Budget alerts do not stop spend"; Spanner
+re-deferred; the five 9b-triggered rows — incl. "the DAG's build owns its
+landing" — re-deferred in-row; one new DUE 9b row; one dated SA-id row).
 
 (Update this section at the end of every working day.)

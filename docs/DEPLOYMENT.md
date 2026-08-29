@@ -39,6 +39,7 @@ first is inside Owner/Editor, the two billing ones are not:
 | `user_project_override` (every API call is quota'd on `project_id`) | `serviceusage.services.use` on the project | `roles/serviceusage.serviceUsageConsumer` (in Owner/Editor) |
 | `data.google_billing_account` (the budget's currency) | `billing.accounts.get` on the billing account | `roles/billing.viewer` on the billing account |
 | `google_billing_budget` create/delete | `billing.budgets.create` / `.delete` on the billing account | `roles/billing.costsManager` on the billing account |
+| Impersonating the SA for manual BigQuery builds (9b on) | `iam.serviceAccounts.getAccessToken` on `ontime-pipeline` | `roles/iam.serviceAccountTokenCreator` ON the SA — Terraform grants it to `operator_principal` when set (Amendment Q); nothing in Owner/Editor's project grants substitutes on its own |
 
 The billing-account read is deferred to apply (the budget module `depends_on`
 the API enablement so a brand-new project still plans), so a missing billing
@@ -92,6 +93,7 @@ Then uncomment the `backend "gcs"` block in `infra/main.tf` and
 make tf-validate                              # offline: init -backend=false + validate + fmt -check
 make tf-plan    PROJECT=<project_id>          # reads GCP APIs; shows the diff (free)
 make tf-apply   PROJECT=<project_id> CONFIRM=yes   # creates resources — ask first
+make tf-freeze  CONFIRM=yes                   # after ANY .tf edit: rewrites infra/MANIFEST.sha256 (the offline pin)
 ```
 
 `tf-apply` / `tf-destroy` require `CONFIRM=yes` from the command line
@@ -161,11 +163,14 @@ Phase 9a Done-when. That holds for 9b's tables too only because the dbt build
 lands inside `ontime` (`generate_schema_name`; the SA cannot create a dataset,
 so a per-folder `ontime_<folder>` layout would fail, not sprawl — Amendment I).
 That control covers the SA only: your own ADC is project Owner and CAN create
-datasets, so **do not run `make dbt-build TARGET=bigquery` before 9b lands**,
-and from 9b on run manual BigQuery builds as the SA
-(`gcloud auth application-default login
---impersonate-service-account=<pipeline_service_account output>`) so the human
-path is under the same IAM (Amendment N).
+datasets, so **do not run `make dbt-build TARGET=bigquery` before 9b lands**
+(the target is reachable with `CONFIRM=yes`; today it fails on the unset
+`OTR_GCP_PROJECT` — Amendment O — not on a guard). From 9b on, set
+`operator_principal = "user:<you>"` in your tfvars and run manual BigQuery
+builds as the SA (`gcloud auth application-default login
+--impersonate-service-account=<pipeline_service_account output>`): with the
+grant applied the impersonated path runs under the SA's IAM; a build on your
+raw Owner ADC remains possible and is outside the control (Amendments N, Q).
 
 **Gotcha — 30-day soft-delete on re-apply (ARCHITECTURE §8).** GCP soft-deletes
 a service account and a Workload Identity pool/provider and **reserves their ids

@@ -37,6 +37,17 @@ resource "google_storage_bucket_iam_member" "bucket_object_admin" {
   member = "serviceAccount:${google_service_account.pipeline.email}"
 }
 
+# Operator impersonation (Amendment Q): with `operator_principal` set, that one
+# principal may mint tokens FOR the SA (roles/iam.serviceAccountTokenCreator ON
+# the SA — resource-scoped, never project-level), so manual BigQuery builds run
+# under the SA's IAM instead of the operator's Owner ADC. Null → no resource.
+resource "google_service_account_iam_member" "operator_token_creator" {
+  count              = var.operator_principal == null ? 0 : 1
+  service_account_id = google_service_account.pipeline.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = var.operator_principal
+}
+
 # Workload Identity Federation — GitHub Actions OIDC, no key at rest. OPT-IN:
 # all three WIF resources are count-gated on enable_ci_wif (Amendment H), and
 # `github_repository` has no default (Amendment K), so no repo — this one

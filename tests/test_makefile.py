@@ -400,6 +400,16 @@ def test_tf_validate_takes_no_project() -> None:
     assert "--project" not in out
 
 
+def test_tf_freeze_confirm_from_command_line_only() -> None:
+    """Amendment P: tf-freeze (the manifest's only writer) passes $(origin
+    CONFIRM) verbatim and takes no PROJECT."""
+    out = _make_n("tf-freeze", {"CONFIRM": "yes"}, {})
+    assert "infra.cli freeze --confirm 'yes' --confirm-origin 'command line'" in out
+    assert "--project" not in out
+    out = _make_n("tf-freeze", {}, {"CONFIRM": "yes"})
+    assert "--confirm 'yes' --confirm-origin 'environment'" in out
+
+
 def test_tf_apply_and_destroy_confirm_from_command_line_only() -> None:
     """tf-apply/tf-destroy pass $(origin CONFIRM) verbatim; Python accepts only
     `command line` + `yes`. An exported CONFIRM=yes is refused, nothing created."""

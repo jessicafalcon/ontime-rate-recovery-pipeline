@@ -328,8 +328,11 @@ exports `OTR_GCP_PROJECT` from the validated `PROJECT` (Amendment O). `project_i
 required var (`region` defaults `us-central1`; the budget's billing account +
 project number are a `google_project` data source). `infra/cli.py` validates
 `PROJECT` and gates `tf-apply`/`tf-destroy` on `CONFIRM=yes $(origin)`; four
-targets `tf-validate` (offline) / `tf-plan` / `tf-apply` / `tf-destroy`. State
-backend bootstrap-documented (local by default). `make tf-validate` OK (google
+targets `tf-validate` (offline) / `tf-plan` / `tf-apply` / `tf-destroy`, plus
+`tf-freeze` — the only writer of `infra/MANIFEST.sha256`, which pins every `.tf`
+byte-for-byte (Amendment P). `operator_principal` (default null) count-gates a
+`serviceAccountTokenCreator` grant on the SA for manual builds (Amendment Q).
+State backend bootstrap-documented (local by default). `make tf-validate` OK (google
 provider 6.50.0); the plan-clean and destroy-empty Done-when clauses are proven
 by the manual cloud runs in the spec's Evidence (ask-first). 9b (the two Done-when
 warehouse clauses) lands next.

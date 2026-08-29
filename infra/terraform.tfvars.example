@@ -15,3 +15,8 @@ project_id = "your-gcp-project-id"
 # enable_composer         = false
 # enable_spanner          = false
 # budget_alert_thresholds = [50, 150]   # in the billing account's currency
+
+# Operator impersonation (Amendment Q): grant ONE principal
+# roles/iam.serviceAccountTokenCreator on the pipeline SA so manual BigQuery
+# builds (9b on) run as the SA, not your Owner ADC. Null: no grant.
+# operator_principal = "user:you@example.com"

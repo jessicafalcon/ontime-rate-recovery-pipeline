@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline test-int-airflow tf-validate tf-plan tf-apply tf-destroy
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline test-int-airflow tf-validate tf-plan tf-apply tf-destroy tf-freeze
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -189,3 +189,10 @@ tf-apply:
 
 tf-destroy:
 	uv run python -m infra.cli destroy --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
+
+# The ONLY writer of infra/MANIFEST.sha256 — the content pin over every .tf and
+# the provider lock (Amendment P): any .tf edit is red in `make test` until the
+# manifest is rewritten here, in the same commit. Overwrites a committed pin, so
+# CONFIRM=yes must have COMMAND-LINE origin ($(origin CONFIRM)), like freeze.
+tf-freeze:
+	uv run python -m infra.cli freeze --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'

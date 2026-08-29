@@ -286,8 +286,9 @@ annotated **Superseded by …** in place and never deleted.
   repo name (a fork carries the very name it must reject). **L** —
   `budget_alert_thresholds_usd` → `budget_alert_thresholds`; the records say
   "50/150 in the billing account's currency". **M** — `.claude/settings.json`
-  (an empty `{}`) untracked + gitignored; `test_no_tracked_claude_settings_with_
-  hooks` pins that no tracked `.claude/settings*.json` carries `hooks`
+  (an empty `{}`) untracked + gitignored; the Claude-settings pin (today
+  `test_tracked_claude_config_is_prose_and_hook_scripts_only`, round 6) pins
+  that no tracked `.claude/settings*.json` carries `hooks`
   (CLAUDE.md: a committed hook would auto-execute an inbound branch's hook).
   Landed here rather than on a `fix/` branch: a one-line security finding at
   the phase exit. Test fixes: the `tfstate` scan re-implemented ONCE against
@@ -324,6 +325,34 @@ annotated **Superseded by …** in place and never deleted.
   superseded-by pointers (J/K on the SA/WIF entry, K on round 3's rejected
   "empty default", M on Phase 0's `settings.json` pin), and currency /
   "THIS repo" / "four macros" wording sweeps.
+- **Review round 6 (24 findings, 19 record/wording): Amendments P–Q; the
+  round's cause named.** Six rounds kept producing findings from three
+  structural sources, not from defects: (1) the `.tf` tree was pinned one
+  property at a time — an unbounded denylist over ~150 attributes, 3–5 unpinned
+  ones per round; (2) every record-only amendment is restated in ~7 files, so
+  each narrowing spawned new drift; (3) Amendment M's key scan pinned a
+  surface Claude Code owns. **P** — `infra/MANIFEST.sha256` (the `fixtures/`
+  format) pins every `.tf` + the provider lock byte-for-byte
+  (`test_tf_tree_matches_manifest`); `make tf-freeze CONFIRM=yes`
+  (`$(origin)`-gated like `freeze`) is its only writer, the manifest hunk in
+  the same commit is the declaration (no per-re-freeze DECISIONS entry — the
+  `.tf` diff is the review). Rejected: `python-hcl2` (a package, still a
+  property list); a `terraform show -json` golden (not offline). **Q** —
+  `operator_principal` (root var, default `null`, member-shape validated)
+  count-gates one `google_service_account_iam_member` granting
+  `roles/iam.serviceAccountTokenCreator` ON the SA, so Amendment N's
+  impersonation is a Terraform-managed control, not an assumed permission;
+  default plan unchanged (`18 to add`). Rejected: documenting the permission
+  only (a convention). Test re-implementation (#1/#2/#6/#7/#21, once): the
+  Claude-config pin is a PATH allowlist (`.claude/{agents,commands}/*.md`,
+  `hooks/*.py` only) with `core.excludesFile` disabled in `check-ignore`;
+  `.mcp.json` + `scheduled_tasks.*` gitignored. New property pins (#3/#4/#5):
+  budget scope + denominator, every grant's `member`. Reverted (#13/#14): the
+  Phase 0 spec note and the PROJECT_BRIEF "five macros" edit — a merged phase's
+  records are not this branch's; PROJECT_BRIEF stays the origin record. The
+  rest wording: Done-when 5 / invariant 2 narrowed to the SA (#12), Evidence
+  rows 1/5 corrected (#11/#19), a dated BACKLOG row for the SA-id reservation
+  (#20), the DAG-landing row named among 9b's (#17).
 
 ### Phase 8b
 

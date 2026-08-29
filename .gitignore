@@ -37,7 +37,11 @@ __pycache__/
 # aborted run leaves no untracked key-shaped file — round 4 #5)
 *otr-canary*
 
-# Claude Code hook wiring is local-only: a tracked settings.json would auto-run
-# an inbound branch's hook for anyone opening it (CLAUDE.md § Project tooling;
-# Phase 9a Amendment M). settings.local.json is ignored by Claude Code itself.
+# Claude Code config is local-only: a tracked settings/.mcp.json would auto-run
+# an inbound branch's hooks or MCP servers for anyone opening it (CLAUDE.md
+# § Project tooling; Phase 9a Amendment M). settings.local.json is rule 5 above;
+# the lock/state files carry a session id and pid.
 .claude/settings.json
+.mcp.json
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks.json

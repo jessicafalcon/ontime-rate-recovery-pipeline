@@ -7,13 +7,16 @@ no cloud — pure file reads and Python.
 Review round 2 re-implemented these against ONE invariant (cap invoked): every
 property named in the Invariants table has a test that reddens when the property
 is removed from the `.tf` by a hand-mutation. Pins are exact-string / scoped /
-allowlist — never a substring or a resource-type denylist. `infra/cli.py`'s
+allowlist — never a substring or a resource-type denylist. Round 6 (Amendment
+P) made the whole tree ONE allowlist: `infra/MANIFEST.sha256` pins every `.tf`
+and the provider lock byte-for-byte, so any hand-mutation of any attribute is
+red until `make tf-freeze CONFIRM=yes` rewrites it — the property pins below
+are documentation of WHICH properties matter, not the safety net. `infra/cli.py`'s
 guards carry the mutation lines; `cli.tf` runs through a fake runner so no test
 spawns terraform, and the argv it builds is asserted."""
 
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 import sys
@@ -166,6 +169,7 @@ def test_input_shape_validations_exist() -> None:
         "github_repository": 'regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"',
         "github_ref": 'regex("^refs/(heads|tags)/',
         "budget_alert_thresholds": "alltrue(",
+        "operator_principal": 'regex("^(user|group|serviceAccount):',
     }
     for var, needle in expect.items():
         conds = _validation_conditions(_block(text, rf'variable "{var}"'))
@@ -297,11 +301,11 @@ def test_ci_wif_is_opt_in_and_count_gated() -> None:
 
 
 def test_wif_output_is_null_guarded() -> None:
-    """Amendment J (round 4 #2/#5): the provider name is a ROOT output, and both
-    the module and root outputs are `enable_ci_wif ? …[0].name : null` — an
-    unguarded `[0]` index is "Invalid index … empty tuple" on every default plan
-    (the tester's surviving hand-mutation; `terraform validate` does not catch
-    it)."""
+    """Amendment J (round 4 #2/#5, corrected round 5): the provider name is a
+    ROOT output; the MODULE output is `enable_ci_wif ? …[0].name : null` and the
+    root output is a bare passthrough of it — an unguarded `[0]` index is
+    "Invalid index … empty tuple" on every default plan (the tester's surviving
+    hand-mutation; `terraform validate` does not catch it)."""
     module_out = _block(
         _stripped("modules", "iam", "outputs.tf"),
         r'output "workload_identity_provider"',
@@ -318,10 +322,21 @@ def test_wif_output_is_null_guarded() -> None:
 # ---------------------------------------------------------------- invariant 3
 
 
-# Keys of a Claude Code settings file that configure behaviour for whoever opens
-# the checkout (hooks run commands; permissions/env/MCP pre-authorise them).
-_AUTO_CONFIGURING_KEYS = frozenset(
-    {"hooks", "permissions", "env", "mcpServers", "enableAllProjectMcpServers"}
+# The only paths that may be tracked under `.claude/` — an ALLOWLIST (round 6
+# #1: the round-5 key denylist could never be complete; Claude Code adds keys).
+# Agents/commands/hooks are prose and a hook SCRIPT (wired only by the
+# gitignored settings.local.json); everything else — any settings*.json,
+# .mcp.json, lock/state files — would auto-configure whoever opens the checkout.
+_TRACKED_CLAUDE_PATH_RE = re.compile(
+    r"^\.claude/(agents|commands)/[^/]+\.md$|^\.claude/hooks/[^/]+\.py$"
+)
+# Local-only Claude Code files the repo's OWN .gitignore must cover (#2, #6, #21).
+_LOCAL_ONLY_CLAUDE_FILES = (
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".mcp.json",
+    ".claude/scheduled_tasks.lock",
+    ".claude/scheduled_tasks.json",
 )
 
 
@@ -337,8 +352,15 @@ def _git_ls_files(pathspec: str) -> list[str]:
 
 
 def _ignored(relpath: str) -> bool:
+    """Ignored by the REPO's rules only: a machine-global excludes file
+    (`core.excludesFile`) is disabled so a rule the clone happens to carry
+    cannot stand in for one in .gitignore (round 6 #6)."""
     return (
-        subprocess.run(["git", "check-ignore", "-q", relpath], cwd=ROOT).returncode == 0
+        subprocess.run(
+            ["git", "-c", "core.excludesFile=/dev/null", "check-ignore", "-q", relpath],
+            cwd=ROOT,
+        ).returncode
+        == 0
     )
 
 
@@ -351,9 +373,7 @@ def test_no_tracked_secret_state_or_tfvars() -> None:
     real terraform.tfvars but not the *.example. Private-key filetypes (.pem/.p12/
     …) are rejected by extension; any tracked JSON is content-scanned for a
     SA-key body."""
-    tracked = subprocess.run(
-        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
-    ).stdout.splitlines()
+    tracked = _git_ls_files(".")
     bad = [
         p
         for p in tracked
@@ -522,22 +542,69 @@ DATASET_CREATING_ROLES = {
     "roles/editor",
 }
 
+# Roles granted TO the SA (what it can do) …
 LEAST_PRIVILEGE_ROLES = {
     "roles/bigquery.jobUser",
     "roles/bigquery.dataEditor",
     "roles/storage.objectAdmin",
-    "roles/iam.workloadIdentityUser",
 }
+# … and ON the SA (who may act as it): CI's WIF binding, the operator's
+# impersonation (Amendment Q). Both are `google_service_account_iam_member`.
+ON_SA_ROLES = {
+    "roles/iam.workloadIdentityUser",
+    "roles/iam.serviceAccountTokenCreator",
+}
+SA_MEMBER = "serviceAccount:${google_service_account.pipeline.email}"
+
+
+def _grant_blocks() -> list[str]:
+    """Every IAM grant block, header included — RAW text (the comment stripper
+    would truncate `principalSet://…` at its `//`); the member/role/count
+    regexes are line-anchored so a comment cannot stand in for the argument."""
+    out: list[str] = []
+    for f in _tf_files():
+        out += _blocks_with_headers(
+            f.read_text(), r'resource "google_[a-z_]+_iam_member"\s+"[^"]+"'
+        )
+    return out
 
 
 def test_sa_roles_are_least_privilege() -> None:
-    """Every role grant in ANY `.tf` ⊆ the allowlist; never owner/editor."""
+    """Every role grant in ANY `.tf` ⊆ the allowlist; never owner/editor. The
+    roles ON the SA appear only in `google_service_account_iam_member` blocks."""
     roles: set[str] = set()
     for f in _tf_files():
         roles |= set(re.findall(r'role\s*=\s*"(roles/[^"]+)"', f.read_text()))
     assert roles, "no IAM roles found"
-    assert roles <= LEAST_PRIVILEGE_ROLES, roles - LEAST_PRIVILEGE_ROLES
+    assert roles <= LEAST_PRIVILEGE_ROLES | ON_SA_ROLES, roles - LEAST_PRIVILEGE_ROLES
     assert "roles/owner" not in roles and "roles/editor" not in roles
+    for b in _grant_blocks():
+        role = re.search(r'^\s*role\s*=\s*"(roles/[^"]+)"', b, re.M).group(1)
+        on_sa = b.startswith('resource "google_service_account_iam_member"')
+        assert (role in ON_SA_ROLES) == on_sa, b.splitlines()[0]
+
+
+def test_every_grant_member_is_pinned() -> None:
+    """Round 6 #5: invariant 4 is about WHO gets what. Every grant TO the SA has
+    `member = serviceAccount:<the SA>` — never allUsers / allAuthenticatedUsers /
+    a literal email; the grants ON the SA bind the exact WIF principalSet or the
+    validated `operator_principal` var, and the latter is count-gated on it."""
+    seen = 0
+    for b in _grant_blocks():
+        member = re.search(r'^\s*member\s*=\s*"?([^"\n]+?)"?\s*$', b, re.M).group(1)
+        if b.startswith(
+            'resource "google_service_account_iam_member" "operator_token_creator"'
+        ):
+            assert member == "var.operator_principal", member
+            assert re.search(
+                r"^\s*count\s*=\s*var\.operator_principal == null \? 0 : 1", b, re.M
+            )
+        elif b.startswith('resource "google_service_account_iam_member"'):
+            assert member.startswith("principalSet://iam.googleapis.com/"), member
+        else:
+            assert member == SA_MEMBER, member
+        seen += 1
+    assert seen == 6, seen
 
 
 def test_no_role_can_create_a_dataset() -> None:
@@ -602,6 +669,22 @@ def test_budget_currency_is_the_billing_accounts() -> None:
         budget,
     )
     assert not re.search(r'currency_code\s*=\s*"', budget), "literal currency"
+
+
+def test_budget_scope_and_threshold_denominator_are_pinned() -> None:
+    """Round 6 #3/#4: the budget filters on THIS project (never billing-account-
+    wide) and every threshold_percent divides by the budget amount (`/ 100`
+    would alert at 25/75)."""
+    budget = _stripped("modules", "budget", "main.tf")
+    res = _block(budget, r'resource "google_billing_budget"[^{]*')
+    assert re.search(
+        r'projects\s*=\s*\["projects/\$\{var\.project_number\}"\]',
+        _block(res, r"budget_filter"),
+    )
+    assert re.search(
+        r"threshold_percent\s*=\s*threshold_rules\.value / local\.budget_amount",
+        _block(res, r'dynamic "threshold_rules"'),
+    )
 
 
 def test_budget_amount_is_the_smallest_threshold() -> None:
@@ -672,22 +755,57 @@ def test_stated_defaults_are_pinned() -> None:
     )
 
 
-def test_no_tracked_auto_configuring_claude_settings() -> None:
-    """Amendment M (round 4 #9): hook wiring lives only in the gitignored
-    `.claude/settings.local.json` — a committed settings file would auto-execute
-    an inbound branch's hook for anyone opening it (CLAUDE.md § Project tooling).
-    `.claude/settings.json` is untracked and ignored; any tracked settings file
-    carries no auto-configuring key — hooks, permissions, env, MCP servers
-    (round 5 #12 widened this from `hooks` alone) — and no `.mcp.json` is
-    tracked."""
-    tracked = _git_ls_files(".claude")
-    settings = [p for p in tracked if re.search(r"^\.claude/settings[^/]*\.json$", p)]
-    for p in settings:
-        keys = set(json.loads((ROOT / p).read_text()))
-        assert not keys & _AUTO_CONFIGURING_KEYS, (p, keys)
+def test_tracked_claude_config_is_prose_and_hook_scripts_only() -> None:
+    """Amendment M (round 4 #9), re-implemented ONCE in round 6 as an allowlist:
+    the only tracked paths under `.claude/` are agent/command prose and hook
+    SCRIPTS (wired only by the gitignored settings.local.json); any tracked
+    settings*.json / .mcp.json / lock file — whatever its content — is red, and
+    each local-only file is ignored by the repo's own .gitignore (not a global
+    excludes rule)."""
+    off_list = [
+        p for p in _git_ls_files(".claude") if not _TRACKED_CLAUDE_PATH_RE.match(p)
+    ]
+    assert not off_list, off_list
     assert not _git_ls_files(".mcp.json")
-    assert _ignored(".claude/settings.json")
-    assert _ignored(".claude/settings.local.json")
+    for relpath in _LOCAL_ONLY_CLAUDE_FILES:
+        assert _ignored(relpath), relpath
+
+
+# ---------------------------------------------------------------- Amendment P
+
+
+def test_tf_tree_matches_manifest() -> None:
+    """Amendment P: every `.tf` + the provider lock hash to the committed
+    `infra/MANIFEST.sha256` — ANY hand-mutation of any attribute is red until
+    `make tf-freeze CONFIRM=yes` rewrites it (the one allowlist that replaces
+    property-by-property pinning as the mutation gate)."""
+    assert cli.MANIFEST.is_file(), "infra/MANIFEST.sha256 missing"
+    assert cli.manifest_diff() == []
+    assert cli.pinned_files() == sorted(_tf_files() + [INFRA / ".terraform.lock.hcl"])
+
+
+def test_tf_freeze_requires_confirm_origin_and_writes_the_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`freeze` is CONFIRM-gated like apply/destroy (an env CONFIRM=yes is refused
+    with nothing written); on the command line it renders the manifest in the
+    fixtures format (`<hex>  <path>`, sorted)."""
+    target = tmp_path / "MANIFEST.sha256"
+    monkeypatch.setattr(cli, "MANIFEST", target)
+    for confirm, origin in (
+        ("yes", "environment"),
+        ("", "command line"),
+        ("no", "command line"),
+    ):
+        with pytest.raises(SystemExit) as e:
+            cli.freeze(confirm, origin)
+        assert e.value.code == 2
+        assert not target.exists()
+    assert cli.freeze("yes", "command line") == 0
+    from generator import manifest
+
+    assert manifest.parse(target.read_text()) == cli.compute_manifest()
+    assert target.read_text() == manifest.render(cli.compute_manifest())
 
 
 # ---------------------------------------------------------------- invariant 6 (cli)
