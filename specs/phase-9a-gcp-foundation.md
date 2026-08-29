@@ -270,6 +270,25 @@ are fixes and record corrections landing without amendments.
   9a's Scope, landed here as a security finding at the phase exit (one-line
   diff) rather than on a `fix/` branch.
 
+## Amendments (review round 5, approved 2026-08-29 — confirmation round)
+
+- **N — Amendment I's IAM claim narrowed to the pipeline identity (#6).**
+  Restores **Done-when 5** ("none created out of band") as a control over every
+  path, not a convention. "Impossible by IAM" holds for the SA only: no role in
+  the tree grants `bigquery.datasets.create`
+  (`tests/test_infra.py::test_no_role_can_create_a_dataset`). An operator
+  running `make dbt-build TARGET=bigquery CONFIRM=yes` on their own ADC is
+  project Owner and CAN create `ontime_<folder>` datasets out of band until 9b
+  lands `generate_schema_name`. 9a therefore (a) rewrites the claim in this
+  spec, DECISIONS, the DUE BACKLOG row, `docs/DEPLOYMENT.md` and
+  `docs/PHASES.md` as "the SA cannot; the operator can"; (b) DEPLOYMENT tells
+  the operator not to run a BigQuery build before 9b, and that 9b's manual
+  builds impersonate the SA (`gcloud auth application-default login
+  --impersonate-service-account=<sa>`), so the IAM control covers the human
+  path too. No `.tf` change, no new resource. Rejected: removing the operator's
+  `datasets.create` (Owner is the bootstrap role; DEPLOYMENT's permissions
+  table already names it).
+
 ## Teaching notes (first appearance in this project)
 
 - **Terraform state, modules, and backends.** Terraform records what it created
