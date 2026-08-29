@@ -337,8 +337,8 @@ implementation on a scratch copy (the Phase 6/7 pattern):
       re-deferred (module written, `enable_spanner=false`, no apply); count 14 → 13
 - [ ] `docs/DEPLOYMENT.md` — new (bootstrap, cost table, teardown, optional
       kill-switch; Spanner/Composer teardown dates)
-- [ ] Spec amendments — `specs/phase-9b-*.md` does not exist yet (finalized after
-      9a merges); none to amend
+- [ ] Spec amendments — none (the phase-9b spec does not exist yet; it is
+      finalized after 9a merges, per the predecessor-merged rule)
 - [ ] docs/RESULTS.md, METRICS.md, AB_DESIGN.md — none (no generated block)
 - [ ] README — none (no README in the repo)
 
