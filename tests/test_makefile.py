@@ -394,6 +394,41 @@ def test_tf_targets_pass_project_as_one_literal(value: str) -> None:
             assert "pwned" not in out.replace(value, "")
 
 
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_bq_targets_pass_project_as_one_literal(value: str) -> None:
+    """Phase 9b threat model: PROJECT (and PROFILE) reach loader.cli as one
+    single-quoted token from either origin on bq-load, dbt-build and
+    test-int-bigquery; Python validates the GCP project-id shape and never
+    derives a path from it."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for target in ("bq-load", "dbt-build", "test-int-bigquery"):
+        for origin in ("cmdline", "env"):
+            kv = {"PROJECT": value, "PROFILE": value}
+            out = _make_n(
+                target, kv if origin == "cmdline" else {}, kv if origin == "env" else {}
+            )
+            prof = "'tiny'" if target == "test-int-bigquery" and not value else quoted
+            assert f"loader.cli {target} {prof}" in out, (target, origin, out)
+            assert f"--project {quoted}" in out, (target, origin, out)
+            assert "pwned" not in out.replace(value, "")
+    out = _make_n("test-int-bigquery", {"PROJECT": "p"}, {})
+    assert "loader.cli test-int-bigquery 'tiny' --project 'p'" in out  # PROFILE default
+
+
+def test_bq_targets_confirm_from_command_line_only() -> None:
+    """Phase 9b: the two new cloud targets carry $(origin CONFIRM) — an
+    environment CONFIRM=yes reaches Python as 'environment' and is refused."""
+    for target in ("bq-load", "test-int-bigquery"):
+        out = _make_n(target, {"PROJECT": "p"}, {"CONFIRM": "yes"})
+        assert "--confirm 'yes' --confirm-origin 'environment'" in out, target
+        out = _make_n(target, {"PROJECT": "p", "CONFIRM": "yes"}, {})
+        assert "--confirm 'yes' --confirm-origin 'command line'" in out, target
+        out = _make_n(target, {"PROJECT": "p"}, {})
+        assert "--confirm '' --confirm-origin 'file'" in out, target
+
+
 def test_tf_validate_takes_no_project() -> None:
     out = _make_n("tf-validate", {}, {})
     assert "infra.cli validate" in out

@@ -155,9 +155,11 @@ project is about. Every event-level model is incremental with a **reprocessing
 lookback window** of `LOOKBACK_DAYS` (spec-pinned, 3–7; 5 in Phase 7) partitioned
 by the local event date: `prompt_date` (the local send date) for `stg_prompts`
 and `attribution`, and `event_date` (the local `client_event_time` date) for
-`stg_events`, whose `app_opened` rows carry no `prompt_id`. BigQuery
-`insert_overwrite`, DuckDB delete-and-insert per partition, both behind one
-macro. The horizon is data-derived (`max(server_upload_time)`), never the clock;
+`stg_events`, whose `app_opened` rows carry no `prompt_id`. DuckDB
+delete-and-insert per partition behind the `partition_overwrite` dispatch
+macro; on BigQuery the adapter's native `insert_overwrite` strategy, selected
+in the models' `config()` on `target.type` — dbt-bigquery admits no custom
+strategy, so that dispatch body raises by design (Phase 9b, Amendment U; §8). The horizon is data-derived (`max(server_upload_time)`), never the clock;
 `final` once a partition is ≥ `LOOKBACK_DAYS` behind it, and
 `LOOKBACK_DAYS · 24 > late_arrival_max_hours` keeps a late event off a closed
 partition. Running the lookback twice over the same raw converges (idempotent).
@@ -247,7 +249,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | component | reads | writes | may NOT |
 |---|---|---|---|
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
-| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
+| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load); on BigQuery also the staging objects `gs://<project>-ontime/landing/<p>/{raw,dims}/` incl. a zero-byte `_empty.jsonl` (Phase 9b) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
 | eval | dbt outputs, truth, the profile JSON (the generator's input) | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), the marker-confined blocks of `docs/RESULTS.md` and `docs/AB_DESIGN.md` *(Phase 6; `WRITE=yes` only)* | write any table the pipeline reads; write under `fixtures/`; create or append to a doc |
 | write-back | `scores_send_time`, `dim_user_current` (the open `dim_user` row's tz — Phase 8a) | `send_schedule` | read truth; read raw; re-derive a score |
@@ -259,16 +261,26 @@ One dbt project, two `profiles.yml` targets (`duckdb`, `bigquery`). Dialect
 divergences behind exactly five dispatch macros: JSON extraction,
 `timestamp_diff`, `safe_divide`, `to_local_time` (UTC → local wall time; added
 in Phase 2, DECISIONS), partition overwrite. Each has a DuckDB body and a
-BigQuery body that raises until Phase 9 — no `default__` an unknown adapter
-could fall into. CI runs `dbt build` on DuckDB per PR; BigQuery runs are manual
-(`make dbt-build PROFILE=<p> TARGET=bigquery`). `PROFILE` names the data
-profile, `TARGET` the warehouse.
+BigQuery body (Phase 9b — they raised until then) — no `default__` an unknown
+adapter could fall into. The partition-overwrite seam's BigQuery half is the
+adapter's native `insert_overwrite` strategy, selected in the incremental
+models' config on `target.type` (dbt-bigquery admits no custom strategy —
+§8), so its dispatch body raises by design. Where a model lands is a `generate_schema_name` hook
+(not a sixth macro): on `target.type == 'bigquery'` every model resolves to the
+`ontime` dataset Terraform created (two datasets is 9a's pin); every other
+target keeps dbt's per-folder default (`main_<folder>` on DuckDB). CI runs
+`dbt build` on DuckDB per PR; BigQuery runs are manual and as the pipeline SA
+(`make dbt-build PROFILE=<p> TARGET=bigquery PROJECT=<id> CONFIRM=yes`), and
+the DuckDB≡BigQuery pin parity is `make test-int-bigquery` (the three goldens
+byte-for-byte off the BigQuery tables, behind `OTR_INT`). `PROFILE` names the
+data profile, `TARGET` the warehouse.
 
 ### 3.3 What is stubbed (and the production swap)
 
 | stub | replaces | swap |
 |---|---|---|
 | generator → `fixtures/<profile>/raw/events_<upload-date>.jsonl` (one file per UTC `server_upload_time` date — the landing unit Phase 7 replays) | Amplitude → BigQuery export | dbt `source` config |
+| `make bq-load` — the fixture files → the GCS staging bucket (`landing/<profile>/`) → `raw.events` / `raw.dim_user`, explicit schema generated from the contract, one `WRITE_TRUNCATE` load job per table — an empty selection lands a zero-byte object through it (Phase 9b, X) | Amplitude's own export job writing the `raw` dataset | the landing step is dropped; the source config is unchanged |
 | `dim_user` seed file (`dims/dim_user.csv`, loaded as the `raw.dim_user` source by `make load` — not a dbt seed, whose path could not follow `PROFILE`) | Spanner change streams / federation | `EXTERNAL_QUERY` source (demo), Dataflow template (prod) — a source-config swap, no model changes |
 | DuckDB `send_schedule` table | Spanner serving table | write-back target flag |
 
@@ -422,6 +434,59 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   the fix is a deliberate `terraform providers lock -platform=…` plus `make
   tf-freeze CONFIRM=yes` in one commit (`docs/DEPLOYMENT.md`). Provable only
   from a second platform — static-pinned in the suite.
+- **`partition_by` is a model config BOTH adapters interpret** (Phase 9b, found
+  reading main for the reconciliation). Phase 7's custom strategy read the
+  overwrite column from `config.require('partition_by')` as a plain string.
+  dbt-bigquery parses that key as its native partitioning **dict**
+  (`{field, data_type, granularity}` — a string is a compile error), and
+  dbt-duckdb's `duckdb__get_partitioned_by` reads it too (a string is warned
+  and ignored for non-DuckLake tables; a **dict raises** in
+  `normalize_string_or_list`). No single value satisfies both. The models now
+  name the column under `meta.overwrite_partition_col` (a custom key under `meta`, as dbt ≥ 1.10 asks; one neither adapter reads)
+  and set the native dict only under `target.type == 'bigquery'` inside
+  `config()`; pinned by `tests/test_dbt_conventions.py::
+  test_incremental_models_partition_config_is_dialect_safe`.
+- **dbt-bigquery admits no custom incremental strategy** (Phase 9b, the first
+  live build — Amendment U). Its own `incremental` materialization validates
+  `incremental_strategy` against `merge | insert_overwrite | microbatch`
+  (`dbt/include/bigquery/macros/materializations/incremental.sql`) and never
+  looks up a `get_incremental_<name>_sql` macro, so Phase 7's custom
+  `partition_overwrite` strategy — and the fifth seam's BigQuery body — is
+  unreachable there. The incremental models select the adapter's native
+  `insert_overwrite` on `target.type == 'bigquery'` (dynamic mode: delete the
+  batch's partitions, insert — the DuckDB body's semantics), and
+  `bigquery__partition_overwrite` raises by design. `dbt parse` does not catch
+  it (the check runs at materialization) — only a build does.
+- **Unit-test `format: sql` fixtures are Jinja-rendered, but project macros
+  are out of scope there** (Phase 9b). `{{ json_literal(...) }}` in a fixture
+  → `'json_literal' is undefined`, while `{% if target.type == 'bigquery' %}`
+  renders fine — so a dialect-dependent literal (`json '…'` vs `'…'::json`)
+  is an inline `target.type` conditional, and fixture arithmetic
+  (`date_diff('second', …)`, DuckDB-only) is written as the literal it
+  evaluates to. The models' dialect denylist never covered `schema.yml`; the
+  BigQuery build is what caught both.
+- **BigQuery rejects a load job over zero URIs, but loads a zero-byte NDJSON
+  object as 0 rows** (Phase 9b, review rounds 2–4 — the cap's seam). An
+  empty selection (`THROUGH` before the first upload) must still recreate
+  `raw.events` empty (the DuckDB landing exits 0 with an empty table). A
+  second mechanism for it (create/truncate) drew three rounds of findings;
+  Amendment X lands a zero-byte `landing/<profile>/raw/_empty.jsonl` through
+  the same `WRITE_TRUNCATE` load job — one mechanism, schema always the
+  contract, no SQL string on the path. Proven live 2026-08-30.
+- **`generate_schema_name_for_env` is not dbt's default** (Phase 9b, first
+  DuckDB build after the override). The obvious "else keep the default" call
+  collapses EVERY non-`prod` target to `target.schema` — the first build landed
+  `main.stg_events` instead of `main_staging.stg_events` and every DuckDB
+  reader broke. The override restates dbt's default verbatim
+  (`<target.schema>_<custom | trim>`) in its else branch; the in-process
+  DuckDB build's relation names are the pin.
+- **A JSON column is neither groupable nor castable to STRING on BigQuery**
+  (Phase 9b, writing the conflicting-duplicate dbt test). DuckDB happily does
+  `count(distinct cast(event_properties as varchar))`; BigQuery refuses both
+  the `DISTINCT` and the cast (`TO_JSON_STRING` is the dialect form — which
+  DuckDB lacks). The portable predicate compares the payload key by key through
+  the `json_extract` macro over the six keys `generator/models.py::
+  PROPERTY_KEYS` allows — the payload IS those keys by contract.
 - **Terraform auto-loads `terraform.tfvars` and `*.auto.tfvars{,.json}`**
   (Phase 9a, review round 8, reproduced by a local file). They are gitignored
   and outside the manifest, so a toggle could reach an apply with nothing in

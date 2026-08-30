@@ -14,8 +14,9 @@
 
 {{ config(
     materialized='incremental',
-    incremental_strategy='partition_overwrite',
-    partition_by='event_date',
+    incremental_strategy=('insert_overwrite' if target.type == 'bigquery' else 'partition_overwrite'),
+    meta={'overwrite_partition_col': 'event_date'},
+    partition_by=({'field': 'event_date', 'data_type': 'date'} if target.type == 'bigquery' else none),
     unique_key='insert_id',
 ) }}
 

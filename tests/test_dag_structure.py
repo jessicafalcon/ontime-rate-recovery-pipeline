@@ -107,8 +107,10 @@ def test_dag_tasks_are_the_pipeline_writing_steps_in_order() -> None:
     assert [task_id for task_id, _ in tasks.TASKS] == PIPELINE_WRITING_STEPS
     commands = {task_id: cmd for task_id, cmd in tasks.TASKS}
     assert commands["dbt_build"] == (
-        f"make dbt-build PROFILE={tasks.PROFILE} THROUGH='{tasks.THROUGH_TEMPLATE}'"
+        f"make dbt-build PROFILE={tasks.PROFILE} TARGET={tasks.TARGET} "
+        f"THROUGH='{tasks.THROUGH_TEMPLATE}'"
     )
+    assert tasks.TARGET == "duckdb"  # the Docker-local DAG; Composer is Phase 11
     assert commands["writeback"] == f"make writeback PROFILE={tasks.PROFILE}"
     assert "eval" not in commands
 

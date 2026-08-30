@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline test-int-airflow tf-validate tf-plan tf-apply tf-destroy tf-freeze
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline test-int-airflow bq-load test-int-bigquery tf-validate tf-plan tf-apply tf-destroy tf-freeze
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -76,23 +76,34 @@ freeze:
 load:
 	uv run python -m loader.cli load $(call _Q,$(value PROFILE)) --through $(call _Q,$(value THROUGH))
 
-# load, then `dbt build` (sources tests → staging → attribution → their tests)
-# against data/<PROFILE>.duckdb. The event-level models are incremental with a
-# LOOKBACK_DAYS reprocessing window (Phase 7). TARGET selects the dbt target
-# (default duckdb); any other is a cloud-cost command needing CONFIRM=yes from
-# the COMMAND LINE ($(origin CONFIRM)). FULL=yes from the COMMAND LINE
-# ($(origin FULL)) passes --full-refresh (rebuild-from-scratch). THROUGH lands
+# The TARGET's landing, then `dbt build` (sources tests → staging → attribution
+# → their tests). TARGET selects the dbt target (default duckdb: `load` into
+# data/<PROFILE>.duckdb); bigquery (Phase 9b) lands through `bq-load` instead,
+# needs PROJECT (validated as a GCP project-id, exported to dbt as
+# OTR_GCP_PROJECT from inside Python) and is a cloud-cost command needing
+# CONFIRM=yes from the COMMAND LINE ($(origin CONFIRM)). The event-level models
+# are incremental with a LOOKBACK_DAYS reprocessing window (Phase 7). FULL=yes
+# from the COMMAND LINE ($(origin FULL)) passes --full-refresh. THROUGH lands
 # only files uploaded on or before it — a per-interval build (Phase 8b); unset
 # loads all. Names validated in Python before any path.
 dbt-build:
-	uv run python -m loader.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --full $(call _Q,$(value FULL)) --full-origin '$(origin FULL)' --through $(call _Q,$(value THROUGH))
+	uv run python -m loader.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --full $(call _Q,$(value FULL)) --full-origin '$(origin FULL)' --through $(call _Q,$(value THROUGH)) --project $(call _Q,$(value PROJECT))
+
+# The BigQuery landing alone (loader/cli.py bq-load, Phase 9b): the same files
+# `load` selects → gs://<PROJECT>-ontime/landing/<PROFILE>/ → raw.events /
+# raw.dim_user with the schema generated from generator/models.py, recreated
+# (WRITE_TRUNCATE — idempotent). Cloud-cost (cents): CONFIRM=yes must have
+# COMMAND-LINE origin; PROJECT validated before any client; ADC, never a key.
+bq-load:
+	uv run python -m loader.cli bq-load $(call _Q,$(value PROFILE)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --through $(call _Q,$(value THROUGH))
 
 # Deletes data/<PROFILE>.duckdb and its .wal (gitignored; `make load` recreates it). The only
 # deleter this phase adds: CONFIRM=yes must have COMMAND-LINE origin.
 drop-db:
 	uv run python -m loader.cli drop-db $(call _Q,$(value PROFILE)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
-# Re-render loader/ddl.sql + dbt/models/staging/sources.yml from generator/models.py
+# Re-render loader/ddl.sql, loader/bq_schema.json (Phase 9b) and
+# dbt/models/staging/sources.yml from generator/models.py
 # (scripts/gen_dbt_sources.py). tests/test_dbt_sources.py fails on a hand edit.
 gen-sources:
 	uv run python scripts/gen_dbt_sources.py
@@ -170,6 +181,16 @@ pipeline:
 # (writes only the container's data/ and `docker compose down -v`). Needs Docker.
 test-int-airflow:
 	OTR_INT=1 uv run pytest tests/integration/test_int_airflow.py
+
+# Phase 9b integration: the DuckDB≡BigQuery pin-parity run. Validates PROFILE
+# (default tiny) + PROJECT and gates CONFIRM in Python FIRST, then runs the
+# pytest (tests/integration/test_int_bigquery.py) with OTR_INT=1 and the
+# validated project in its env: lands tiny, builds on bigquery, diffs the three
+# goldens against fixtures/tiny/expected/ and asserts the pins. Cloud-cost
+# (ask first); CI never runs it (the CI leg needs the opt-in WIF apply —
+# docs/DEPLOYMENT.md).
+test-int-bigquery:
+	uv run python -m loader.cli test-int-bigquery $(call _Q,$(if $(value PROFILE),$(value PROFILE),tiny)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
 # ------------------------------------------------------------------ Phase 9a
 # Terraform foundation (infra/cli.py): validates PROJECT (a GCP project-id shape)

@@ -198,3 +198,52 @@ def test_tokyo_day_one_lands_on_the_previous_utc_day(built: Path) -> None:
     )
     assert rows and rows[0][2] == "Asia/Tokyo"
     assert rows[0][1] == datetime(2026, 1, 5, 8, 0)
+
+
+def test_conflicting_duplicate_fails_the_dbt_test(tmp_path: Path) -> None:
+    """Phase 9b invariant 6 (closes the BACKLOG row): the loader's Python
+    conflicting-duplicate predicate is restated as a singular dbt test over the
+    source, so a landing the DuckDB loader never sees (BigQuery's) fails the
+    build. Here: land tiny, plant one insert_id with two payloads on one clock
+    triple after load() (bypassing the Python refusal) → the test is red; the
+    clean landing is green."""
+    from dbt.cli.main import dbtRunner
+
+    db = tmp_path / "planted.duckdb"
+    loader.load("tiny", db)
+    args = ["test", "--select", "assert_no_conflicting_duplicates"]
+    args += ["--project-dir", str(DBT), "--profiles-dir", str(DBT)]
+    args += ["--target", "duckdb", "--quiet", "--target-path", str(tmp_path / "t")]
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("OTR_DUCKDB_PATH", str(db))
+        assert dbtRunner().invoke(args).success
+        con = duckdb.connect(str(db))
+        con.execute(
+            "insert into raw.events select insert_id, event_type, user_id, device_id, "
+            "client_event_time, server_received_time, server_upload_time, "
+            '\'{"prompt_id": "p-planted"}\'::json from raw.events '
+            "where event_type = 'prompt_delivered' limit 1"
+        )
+        con.close()
+        assert not dbtRunner().invoke(args).success
+    # round 1 #3: "" vs null on ONE key must differ too (DuckDB's concat skips
+    # a null, so an unmarked null would read as "" — the null marker is the
+    # load-bearing part on this engine)
+    db2 = tmp_path / "planted2.duckdb"
+    loader.load("tiny", db2)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("OTR_DUCKDB_PATH", str(db2))
+        con = duckdb.connect(str(db2))
+        con.execute("delete from raw.events")
+        for payload in (
+            '{"prompt_id": "p-x", "attempt": 1, "error_code": ""}',
+            '{"prompt_id": "p-x", "attempt": 1, "error_code": null}',
+        ):
+            con.execute(
+                "insert into raw.events values ('e-x', 'upload_started', 'u-1', "
+                "'d-1', timestamp '2026-01-05 08:00:00', timestamp "
+                "'2026-01-05 08:00:01', timestamp '2026-01-05 08:01:00', ?::json)",
+                [payload],
+            )
+        con.close()
+        assert not dbtRunner().invoke(args).success

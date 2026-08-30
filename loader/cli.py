@@ -1,22 +1,31 @@
-"""`make load | dbt-build | drop-db PROFILE=<p> [TARGET=duckdb] [CONFIRM=yes]`.
+"""`make load | bq-load | dbt-build | drop-db | test-int-bigquery` (loader/).
 
-One entry point validates every name (`[a-z0-9_]+`) before any path is derived:
+One entry point validates every name (`[a-z0-9_]+`; PROJECT by the GCP
+project-id shape `infra.cli.PROJECT_RE`) before any path, env var or client
+is derived:
 load      — fixtures/<p>/{raw,dims} → data/<p>.duckdb schema `raw`.
-dbt-build — load (THROUGH lands only files uploaded on or before it — a
-            per-interval landing, Phase 8b), then `dbt build` against that file
-            (`OTR_DUCKDB_PATH` is the env var dbt/profiles.yml's duckdb target
-            reads; the bigquery target's `OTR_GCP_PROJECT` is 9b's — until then
-            TARGET=bigquery is refused, Amendment S); exit 1 on any failure.
-drop-db   — delete data/<p>.duckdb; only with CONFIRM=yes from the command line."""
+bq-load   — the same files → GCS staging → BigQuery `raw` (Phase 9b; cloud:
+            CONFIRM=yes from the command line).
+dbt-build — the TARGET's landing (duckdb → load(); bigquery → bq_load(), never
+            the other — THROUGH lands only files uploaded on or before it, a
+            per-interval landing, Phase 8b), then `dbt build --target` (the
+            duckdb target reads `OTR_DUCKDB_PATH`; the bigquery target reads
+            `OTR_GCP_PROJECT`, set HERE from the validated PROJECT, never from
+            the caller's environment); exit 1 on any failure.
+drop-db   — delete data/<p>.duckdb; only with CONFIRM=yes from the command line.
+test-int-bigquery — validate + gate, then the pin-parity pytest behind OTR_INT."""
 
 from __future__ import annotations
 
 import argparse
 import os
 import re
+import subprocess
 import sys
 from typing import NoReturn
 
+from infra.cli import validate_project
+from loader import bq
 from loader import load as loader
 
 NAME_RE = re.compile(r"^[a-z0-9_]+$")
@@ -75,6 +84,66 @@ def load(profile: str, through: str = "") -> int:
 
 
 LOCAL_TARGET = "duckdb"
+CLOUD_TARGET = "bigquery"
+
+
+def require_confirm(what: str, confirm: str, origin: str) -> None:
+    if origin != "command line" or confirm != "yes":
+        die(
+            f"{what}: refused — a cloud-cost command; pass CONFIRM=yes on the "
+            "command line (CLAUDE.md: ask first, every time)"
+        )
+
+
+def bq_load(
+    profile: str,
+    project: str,
+    confirm: str = "",
+    origin: str = "",
+    through: str = "",
+    clients: bq.ClientFactory | None = None,
+) -> int:
+    """The BigQuery landing (Phase 9b): PROFILE/PROJECT/THROUGH validated and
+    CONFIRM gated before any client exists; recreates raw.events/raw.dim_user."""
+    validate_name("PROFILE", profile)
+    validate_project(project)
+    cut = validate_through(through) if through else None
+    require_confirm("bq-load", confirm, origin)
+    try:
+        source = loader.fixture_dir(profile)
+        drift = loader.manifest_drift(source)
+        if drift:
+            print(
+                f"bq-load DRIFT: {len(drift)} files differ from {source.name}/manifest"
+            )
+            return 1
+        files, events, dims = bq.bq_load(profile, project, cut, clients)
+    except FileNotFoundError as e:
+        die(f"bq-load: refused — {e}")
+    tag = "" if source.parent.name == "fixtures" else " (unfrozen)"
+    landing = f", landing ≤ {cut}" if cut else ""
+    print(f"bq-load: source={source.relative_to(loader.ROOT)}{tag} → {project}.raw")
+    print(
+        f"bq-load OK: {profile} — {files} files{landing}, "
+        f"{events} event rows, {dims} dim rows"
+    )
+    return 0
+
+
+def land(
+    profile: str,
+    target: str,
+    project: str,
+    through: str,
+    confirm: str,
+    origin: str,
+    clients: bq.ClientFactory | None = None,
+) -> int:
+    """The TARGET's landing and only that one (Phase 9b, closes the 8b BACKLOG
+    row): the DuckDB file for duckdb, GCS → BigQuery for bigquery."""
+    if target == LOCAL_TARGET:
+        return load(profile, through)
+    return bq_load(profile, project, confirm, origin, through, clients)
 
 
 def full_refresh_args(full: str, origin: str) -> list[str]:
@@ -95,6 +164,8 @@ def dbt_build(
     full: str = "",
     full_origin: str = "",
     through: str = "",
+    project: str = "",
+    clients: bq.ClientFactory | None = None,
 ) -> int:
     validate_name("PROFILE", profile)
     if full and full != "yes":
@@ -106,15 +177,16 @@ def dbt_build(
             f"dbt-build: refused — TARGET={target} is a cloud target; "
             "pass CONFIRM=yes on the command line (CLAUDE.md: ask first, every time)"
         )
-    if target == "bigquery":
-        # Amendment S (9a round 7 #7): the BigQuery build lands in Phase 9b with
-        # `generate_schema_name`; before that a build would create per-folder
-        # datasets outside Terraform. 9b lifts this in the same commit.
-        die("dbt-build: TARGET=bigquery lands in Phase 9b (generate_schema_name)")
+    if target not in (LOCAL_TARGET, CLOUD_TARGET):
+        die(f"dbt-build: refused — no such target {target!r} (duckdb | bigquery)")
+    if target == CLOUD_TARGET:
+        # Phase 9b: the bigquery profile reads OTR_GCP_PROJECT with no default;
+        # it is set here, from the validated PROJECT, and from nowhere else.
+        os.environ["OTR_GCP_PROJECT"] = validate_project(project)
     # THROUGH lands only files uploaded on or before it, so a per-interval build
-    # sees just that landing (Phase 8b); load() validates the date and never lets
-    # it become a path. Unset ⇒ loads all (the default build is unchanged).
-    if load(profile, through):
+    # sees just that landing (Phase 8b); the landing validates the date and never
+    # lets it become a path. Unset ⇒ loads all (the default build is unchanged).
+    if land(profile, target, project, through, confirm, origin, clients):
         return 1
     os.environ.setdefault("DO_NOT_TRACK", "1")  # belt to dbt_project.yml's braces
     from dbt.cli.main import dbtRunner
@@ -156,12 +228,46 @@ def drop_db(profile: str, confirm: str, origin: str) -> int:
     return 0
 
 
+def int_bigquery(profile: str, project: str, confirm: str, origin: str) -> int:
+    """`make test-int-bigquery`: validate + gate in THIS process, then the
+    parity pytest with OTR_INT=1 and the validated project in its env."""
+    validate_name("PROFILE", profile)
+    validate_project(project)
+    require_confirm("test-int-bigquery", confirm, origin)
+    # Amendment V: the gate that ran HERE is carried to the fixture, never
+    # re-derived there (a bare pytest with OTR_INT=1 must not forge it).
+    env = {
+        **os.environ,
+        "OTR_INT": "1",
+        "OTR_GCP_PROJECT": project,
+        "OTR_PROFILE": profile,
+        "OTR_CONFIRM": confirm,
+        "OTR_CONFIRM_ORIGIN": origin,
+    }
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/integration/test_int_bigquery.py"],
+        cwd=str(loader.ROOT),
+        env=env,
+    ).returncode
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     ld = sub.add_parser("load")
     ld.add_argument("profile")
     ld.add_argument("--through", default="")
+    bl = sub.add_parser("bq-load")
+    bl.add_argument("profile")
+    bl.add_argument("--project", default="")
+    bl.add_argument("--confirm", default="")
+    bl.add_argument("--confirm-origin", default="")
+    bl.add_argument("--through", default="")
+    ib = sub.add_parser("test-int-bigquery")
+    ib.add_argument("profile")
+    ib.add_argument("--project", default="")
+    ib.add_argument("--confirm", default="")
+    ib.add_argument("--confirm-origin", default="")
     b = sub.add_parser("dbt-build")
     b.add_argument("profile")
     b.add_argument("--target", default="")
@@ -170,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--full", default="")
     b.add_argument("--full-origin", default="")
     b.add_argument("--through", default="")
+    b.add_argument("--project", default="")
     d = sub.add_parser("drop-db")
     d.add_argument("profile")
     d.add_argument("--confirm", default="")
@@ -177,6 +284,10 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     if a.cmd == "load":
         return load(a.profile, a.through)
+    if a.cmd == "bq-load":
+        return bq_load(a.profile, a.project, a.confirm, a.confirm_origin, a.through)
+    if a.cmd == "test-int-bigquery":
+        return int_bigquery(a.profile, a.project, a.confirm, a.confirm_origin)
     if a.cmd == "dbt-build":
         return dbt_build(
             a.profile,
@@ -186,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
             a.full,
             a.full_origin,
             a.through,
+            a.project,
         )
     return drop_db(a.profile, a.confirm, a.confirm_origin)
 

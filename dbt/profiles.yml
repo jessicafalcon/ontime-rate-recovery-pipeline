@@ -1,6 +1,7 @@
 # Two targets, one project (ARCHITECTURE §3.2). No credential lives here:
 # duckdb is a local file whose path loader/cli.py sets after validating
-# PROFILE; bigquery (Phase 9) authenticates by ADC/WIF only.
+# PROFILE; bigquery authenticates by ADC/WIF only (impersonate the SA), and
+# loader/cli.py sets OTR_GCP_PROJECT from the validated PROJECT (Phase 9b).
 ontime:
   target: duckdb
   outputs:
@@ -15,4 +16,5 @@ ontime:
       method: oauth
       project: "{{ env_var('OTR_GCP_PROJECT') }}"
       dataset: ontime
+      location: us-central1  # the datasets' (infra/variables.tf region); the default is the US multi-region
       threads: 1

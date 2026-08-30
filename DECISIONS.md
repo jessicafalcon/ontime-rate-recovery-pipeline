@@ -69,8 +69,12 @@ annotated **Superseded by …** in place and never deleted.
   behind Terraform toggles.** Cloud runs are manual and asked-for; nothing
   billable is left up by default. Realised in Phase 9a: `infra/` with `enable_*`
   toggles defaulting false, `project_id` the only required var, ADC/WIF (never a
-  key), budget alerts 50/150 in the account's currency. ([Phase 0](#phase-0),
-  [Phase 9a](#phase-9a))
+  key), budget alerts 50/150 in the account's currency. The profile switch is
+  realised in Phase 9b: five dispatch macros with two bodies each, every model
+  landing in the `ontime` dataset on BigQuery (`generate_schema_name` on
+  `target.type`), the landing GCS → BigQuery on one impersonated-ADC credential,
+  and pin parity proven by diffing the goldens, never re-freezing.
+  ([Phase 0](#phase-0), [Phase 9a](#phase-9a), [Phase 9b](#phase-9b))
 
 ## Process
 
@@ -117,6 +121,179 @@ annotated **Superseded by …** in place and never deleted.
   `.mcp.json`.
 
 ## Appendix — by phase
+
+### Phase 9b
+
+*BigQuery dialect, landing, pin parity (`phase-9b-bigquery-dialect`).* The
+second half of Phase 9; spec finalised after 9a merged (PR #12, 2026-08-29);
+reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
+
+- **`generate_schema_name` collapses on `target.type == 'bigquery'` only;
+  DuckDB keeps `main_<folder>`.** 9a's pin is two datasets and the SA cannot
+  create a third, so dbt's per-folder default (`ontime_staging …`) had to go on
+  BigQuery. DuckDB does not follow: every local reader (`serving/`, `eval/`,
+  ~30 test lines) hard-codes `main_<folder>` and no invariant needs one flat
+  schema there; collapsing would have touched every DuckDB gate for a target
+  that was not changing. Keyed on `target.type` (the dialect), never
+  `target.name`. A hook override, not a dispatch macro — still five. Gotcha:
+  `generate_schema_name_for_env` is NOT dbt's default (it collapses every
+  non-prod target); the else branch restates the default verbatim (§8).
+  Rejected: `+schema` removed for both; a `target.name` switch.
+- **The five BigQuery bodies are type-explicit named forms, no `default__`.**
+  `json_value(col, '$.key')`; `timestamp_diff(cast(end as timestamp),
+  cast(start as timestamp), unit)` — end first, both cast because callers pass
+  DATE/DATETIME (`prompt_date`, the retention midnights) and BigQuery's
+  function is TIMESTAMP-only; `safe_divide(cast(num as float64), den)` —
+  integer/integer would truncate where DuckDB's `/` is a float divide;
+  `datetime(ts, tz)` — DATETIME is BigQuery's naive type, the shape DuckDB's
+  `timestamp` has; the overwrite seam's BigQuery half is the adapter's native
+  `insert_overwrite` (below, U). Rejected: a `default__` (the rule).
+- **Amendment U (first live build, approved 2026-08-30) — dbt-bigquery admits
+  no custom incremental strategy.** The adapter's own materialization
+  validates `incremental_strategy` against `merge | insert_overwrite |
+  microbatch` and never looks up `get_incremental_<name>_sql`, so the Phase 7
+  custom strategy — and a two-statement BigQuery body for the fifth seam — was
+  unreachable. The incremental models select
+  `('insert_overwrite' if target.type == 'bigquery' else 'partition_overwrite')`;
+  with the guarded `partition_by` dict and no `partitions` list the native
+  strategy is dynamic — delete the batch's partitions, insert — the DuckDB
+  body's semantics, and the goldens prove it. `bigquery__partition_overwrite`
+  raises by design (an unreachable path fails loudly). Rejected: vendoring the
+  adapter materialization (~150 copied lines, version-fragile); `merge` on
+  `insert_id` (never deletes a row that left a reprocessed partition —
+  backfill ≢ union). Test-only beside it: unit fixtures made portable (an
+  inline `target.type` json literal — project macros are out of scope in
+  fixture rendering; `date_diff` constants → literal seconds).
+- **`meta.overwrite_partition_col` names the overwrite column; the native
+  `partition_by` dict is dialect-guarded.** Found reading main: `partition_by`
+  is parsed by dbt-bigquery as its partitioning dict (a string errors) AND read
+  by dbt-duckdb (a dict raises) — no single value satisfies both (§8). The
+  strategy macro reads the neutral key; `config()` sets `partition_by=({field,
+  data_type: date} if target.type == 'bigquery' else none)`, so BigQuery tables
+  are date-partitioned on the column the overwrite deletes by and DuckDB is
+  untouched. Rejected: either single value.
+- **The landing is `loader/bq.py` on dbt-bigquery's transitive google clients,
+  GCS staging, generated schema, `WRITE_TRUNCATE`.** `bq`/`gsutil` use gcloud's
+  own credential (a second impersonation setting) while dbt uses ADC; the
+  python clients share dbt's ADC, so ONE `--impersonate-service-account`
+  covers landing, build and the parity read, with no keyfile anywhere. The
+  BigQuery schema is a third `make gen-sources` output from `generator/
+  models.py` (varchar→STRING, timestamp→TIMESTAMP, date→DATE, json→JSON) — the
+  schema contract, second dialect. Recreate, never append (the `make load`
+  contract). Every cloud call goes through an injectable `Clients` factory; the
+  offline suite injects fakes and a sentinel default. Rejected: `bq load` via
+  subprocess (two auth paths, argv-only fakes); `load_table_from_file` from the
+  laptop (no GCS landing — §3 names the bucket).
+- **`dbt_build` lands by target; the DAG stays two tasks.** `land()` runs the
+  DuckDB `load()` on `duckdb` and `bq_load()` on `bigquery`, never the other
+  (closes the 8b BACKLOG row); `OTR_GCP_PROJECT` is set in-process from the
+  validated `PROJECT` (the `bigquery` output has no default — Amendment S's
+  profiles half stays; its `loader/cli.py` refusal is lifted in the same commit
+  as `generate_schema_name`); `orchestration/tasks.py` carries `TARGET` as a
+  literal (the Docker-local DAG's run is unchanged). Rejected: a third `load`
+  task now (buys nothing before Composer, reshapes the container attachment
+  pin); `dbt-build` refusing `TARGET≠duckdb` (PHASES names the target).
+- **Pin parity = the three goldens through the same `Golden` specs and ONE
+  renderer, behind `OTR_INT`.** `eval/golden.py` gains `rows_from` +
+  `normalize_cell` (a tz-aware BigQuery TIMESTAMP renders as DuckDB's naive UTC
+  timestamp); `tests/pins.py` and `fixtures/` are untouched — a differing row
+  is a dialect bug, never a new golden. The conflicting-duplicate guard is a
+  singular dbt test comparing the payload key by key through `json_extract`
+  (BigQuery cannot group or cast a JSON column — §8). Rejected: a
+  BigQuery-specific CSV writer; re-freezing.
+- **The CI parity job is deferred (reconciliation item 4, choice (b)).** The
+  laptop `make test-int-bigquery` is the Done-when; the CI leg needs the opt-in
+  `enable_ci_wif = true` + `github_repository` apply (a DEPLOYMENT runbook
+  step) and the SA-id reservation (until ~2026-09-28) makes any 9b apply a
+  detour (undelete + `terraform import`); an unrun job is a claim. The BACKLOG
+  row carries a dated trigger. Rejected: a `workflow_dispatch` job landed
+  unproven.
+- **Review round 1 (20 findings; 2 amendments V, W; approved 2026-08-30).**
+  V — the parity fixture carries `OTR_CONFIRM`/`OTR_CONFIRM_ORIGIN` from the
+  gated `int_bigquery` entry instead of forging them (a bare `pytest` with
+  `OTR_INT=1` ran a billable build); W (superseded by X, round 3) — an empty selection recreates empty
+  raw tables (parity with the DuckDB landing; BigQuery rejects a load over
+  zero URIs). Fixes: the default client factory resolves at call time so the
+  offline sentinel is a control, not a claim (#1); the duplicate test marks
+  nulls and a planted `""`-vs-`null` pins it, the contract residual a BACKLOG
+  row (#3/#4); MAE/coverage asserted off BigQuery rows (#5); dataset/bucket
+  names pinned to Terraform's defaults (#8). **Dependencies (#10/#11):**
+  `google-cloud-bigquery` / `google-cloud-storage` are declared direct
+  dependencies (they were transitive — an adapter release dropping one would
+  have broken the landing with no lock signal); dbt-bigquery pulls ~45
+  transitive packages (pandas, pyarrow, google-cloud-aiplatform, …) into the
+  venv — none on a pipeline path, the no-pandas rule and truth isolation
+  unaffected; accepted as the adapter's cost. **The one sanctioned edit to
+  merged specs (#15):** Phase 2's and Phase 7's Evidence ids that 9b renamed
+  are updated in place, marked "(renamed in Phase 9b)" — a stale id makes
+  `review-gate SPEC=` un-runnable on that spec, which is worse than a
+  one-word edit; the round-6 rule (no content changes to a merged spec)
+  stands. **`TF_VAR_*` from the environment bypasses Amendment T (#9)** — a
+  9a residual, its own fix PR after 9b merges (BACKLOG); 9b's runbook uses
+  the inline form. The operator address is redacted to `user:<operator>` in
+  tracked records (#13). Wording: #6, #12, #14, #16–#20.
+- **Review round 2 (19 findings, scoped to round-1..HEAD; W′; approved
+  2026-08-30).** W′ (superseded by X, round 3) — `recreate` is create-if-not-exists + `truncate`, never
+  drop-then-create (the table object and its metadata survive; a failure in
+  between leaves a table). Test pins closing round-1 fixes: the default
+  factory IS `GoogleClients` (+ a mutation line), the guard's key list equals
+  `PROPERTY_KEYS`, the carried gate refuses offline when absent, a planted
+  conflict fails on BigQuery too, a second landing is the same call sequence,
+  `profiles.yml`'s `dataset` is Terraform's. Accepted: V's env channel (an
+  in-process `pytest.main` would put `pytest` on a pipeline module — the
+  `test-int-airflow` posture stands); the project id / SA email in records
+  (BACKLOG, informational). **Cap watch:** round 2's correctness rows were
+  in round 1's fixes — one such round; a round 3 of the same shape invokes
+  the cap.
+  Round 2 also edited the two merged specs again (Phase 2 :202 wording,
+  Phase 7 :262 note placement) under the same sanctioned-edit rule.
+- **Review round 3 — the cap invoked (12 findings; Amendment X; approved
+  2026-08-30).** Round 2's correctness rows were in round 1's fixes and
+  round 3's in round 2's (W′'s `recreate`: an unpinned two-call shape, a
+  schema-preserving `exists_ok`, the one interpolated SQL string on the
+  cloud path) — two consecutive rounds. Invariant 3 restated: ONE landing
+  mechanism, the load job with the contract schema and `WRITE_TRUNCATE`;
+  nothing on the path reads table state or interpolates an identifier.
+  Re-implemented once: `recreate` deleted; an empty selection uploads a
+  zero-byte `_empty.jsonl` and loads it through the same job. The vacuous
+  "second landing" test was deleted (the property is the disposition plus a
+  read-less protocol, pinned statically). Round 4 is the one scoped
+  re-review. Records: the mangled Phase 2 line repaired; invariants 3/6/7
+  name every round-2 test.
+- **Review round 4 — the cap's one scoped re-review (17 findings; approved
+  2026-08-30; no round 5).** Test pins the fake could not express: its rows
+  now follow the URIs (a zero-byte object → 0), the CLI's empty landing is
+  driven to success offline, the one-mechanism grep covers `loader/cli.py`,
+  the planted insert is built by column name. Records: invariant 3 restated
+  in its own table; W/W′ marked superseded; §8 gains the zero-URI / zero-byte
+  fact; CLAUDE/PHASES numbers. Accepted: a two-landing test on the fake
+  proves only the fake (the disposition + read-less protocol are the pin);
+  the per-landing temp dir stays (one syscall; lazy creation re-opens the
+  seam). Later residue → BACKLOG with a trigger.
+- **Coherence-auditor exit pass (10 findings, records only; 2026-08-30).**
+  §2.7's "both behind one macro" corrected to U; the agent files' allowlist
+  and five-macro clause; CLAUDE status numbers; `gen-sources` described with
+  its three outputs (the Phase 2 spec's `2 files` pin updated in place —
+  the third sanctioned edit); §3.1's loader row writes the GCS landing; the
+  generated source description names both landings; PHASES' Goal wording;
+  the RESULTS/AB_DESIGN prover is `make test` (pre-existing). Forward risk
+  → BACKLOG: the write-back reads DuckDB relation names on a DuckDB
+  connection only — Phase 10's read seam.
+- **Architect's exit questions, answered for the record (2026-08-30).**
+  (1) "Five seams" stands as a count; four are two-body macros, the fifth is
+  a *materialization* seam the adapter owns on BigQuery — the records no
+  longer say "each has a BigQuery body". (2) `loader/` carries the build
+  dispatcher and the integration launcher beside two landings — a BACKLOG
+  row (rename `landing/`, move the plumbing to `pipeline/`). (3) The
+  injectable `Clients` + offline fake would be chosen again: the four
+  rounds were a second mechanism on the empty path, which the fake could
+  describe but not verify; the rule learned — a fake must model what the
+  invariant is about, and when a fix needs a NEW fake method, the mechanism
+  is wrong. (4) 9b supports Phase 10 on the model side and exposes the
+  write-back's DuckDB-only read seam (BACKLOG).
+- Not chosen and noted: BigQuery clustering (tiny; `user_id` is the candidate
+  when a profile is large enough to measure); `medium` on BigQuery (109 MB, a
+  deliberate later run).
 
 ### Phase 9a
 

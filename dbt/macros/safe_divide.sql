@@ -7,6 +7,7 @@
     (case when {{ denominator }} is null or {{ denominator }} = 0 then null else {{ numerator }} / {{ denominator }} end)
 {% endmacro %}
 
+{#- Native safe_divide is NULL on a zero or null denominator; the cast keeps integer/integer from truncating (DuckDB's `/` is a float divide) (Phase 9b). -#}
 {% macro bigquery__safe_divide(numerator, denominator) %}
-    {{ exceptions.raise_compiler_error("safe_divide: the BigQuery body lands in Phase 9") }}
+    safe_divide(cast({{ numerator }} as float64), {{ denominator }})
 {% endmacro %}

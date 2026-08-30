@@ -54,12 +54,17 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   local-hour histogram per user), `models/scores` (Phase 5:
   `scores_send_time` — the send-time model, cohort band + circular
   shrinkage; `docs/METRICS.md` § scores_send_time); `macros/` (the five dispatch
-  macros), `tests/` (singular data tests), `profiles.yml` (`duckdb`,
-  `bigquery` targets).
+  macros, each with a DuckDB and a BigQuery body since Phase 9b, plus
+  `generate_schema_name.sql` — a dbt hook override, not a dispatch macro),
+  `tests/` (singular data tests), `profiles.yml` (`duckdb`, `bigquery` targets).
   `models/staging/sources.yml` is GENERATED (`make gen-sources`), never edited.
-- `loader/` *(Phase 2)* — raw landing: `load.py` (fixtures → DuckDB `raw`
-  schema, types from the generated `ddl.sql`), `cli.py` (`load`, `dbt-build`,
-  `drop-db`). Pipeline code — guarded by `test_truth_isolation.py`.
+- `loader/` *(Phase 2; 9b)* — raw landing: `load.py` (fixtures → DuckDB `raw`
+  schema, types from the generated `ddl.sql`), `bq.py` (Phase 9b: the same
+  files → GCS staging → BigQuery `raw`, schema from the generated
+  `bq_schema.json`, `WRITE_TRUNCATE`; every cloud call through an injectable
+  `Clients` factory — the offline suite injects fakes), `cli.py` (`load`,
+  `bq-load`, `dbt-build` — lands by target — `drop-db`, `test-int-bigquery`).
+  Pipeline code — guarded by `test_truth_isolation.py`.
 - `eval/` *(Phase 3+)* — the ONLY code that reads truth: `score.py` (label
   accuracy vs `truth/prompts.jsonl`; Phase 5: reachable-centre MAE and
   coverage vs `truth/users.jsonl`, off the model's own columns — never a
@@ -114,7 +119,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   (`make check-docs`), `round_tag.py` (review-round boundary tags;
   `make round-reset` clears them at phase start), `review_common.py` (shared
   SPEC validator / section parser / reduced env), `gen_dbt_sources.py`
-  (`make gen-sources`: raw DDL + `sources.yml` from `generator/models.py`).
+  (`make gen-sources`: raw DDL + BigQuery load schema + `sources.yml` from
+  `generator/models.py`).
 - `docs/` — ARCHITECTURE.md (spec), PHASES.md (plan), METRICS.md (Phase 4:
   the single definition of every served metric — grain, numerator,
   denominator, null policy, pinning test), RESULTS.md (Phase 6: the
@@ -191,16 +197,31 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   (rebuild from scratch). `THROUGH=<upload-date>` (Phase 8b) threads into the
   internal `load` so the build lands only files uploaded on or before it — a
   per-interval build the DAG runs; unset loads all (the default build is
-  unchanged). Any `TARGET` other than `duckdb` is a cloud-cost
-  command: refused unless `CONFIRM=yes` has command-line origin. dbt telemetry
-  is off (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`). `TARGET=bigquery`
-  is REFUSED before Phase 9b lands `generate_schema_name` (`dbt-build:
-  TARGET=bigquery lands in Phase 9b …`, exit 2, before `load()` — Amendment S);
-  a build would create per-folder datasets outside Terraform (`docs/DEPLOYMENT.md`)
+  unchanged). The landing is the TARGET's own (Phase 9b): `duckdb` → `load`,
+  `bigquery` → `bq-load` (GCS → BigQuery `raw`), never the other. Any `TARGET`
+  other than `duckdb` is a cloud-cost command: refused unless `CONFIRM=yes` has
+  command-line origin, and `TARGET=bigquery` also needs `PROJECT=<id>` (validated
+  as a GCP project-id, exported to dbt as `OTR_GCP_PROJECT` from inside the
+  process — the `bigquery` output has no default; `location: us-central1`);
+  every model lands in the `ontime` dataset (`generate_schema_name` collapses on
+  `target.type == 'bigquery'` only — DuckDB keeps `main_<folder>`). Run it as
+  the SA (`docs/DEPLOYMENT.md`), ask first. dbt telemetry is off
+  (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`)
+- `make bq-load PROFILE=<p> PROJECT=<id> CONFIRM=yes [THROUGH=<upload-date>]`
+  *(Phase 9b)* — the BigQuery landing alone (`loader/cli.py bq-load`): the same
+  files `load` selects → `gs://<id>-ontime/landing/<p>/{raw,dims}/` → `raw.events`
+  / `raw.dim_user` with the schema GENERATED from `generator/models.py`
+  (`loader/bq_schema.json`), one `WRITE_TRUNCATE` load job per table — the
+  only landing mechanism; an empty selection lands a zero-byte
+  `_empty.jsonl` through it (BigQuery rejects a job over zero URIs; §8) —
+  idempotent; prints `bq-load OK: <p> — N files[, landing ≤ <THROUGH>], E
+  event rows, D dim rows`. Cloud-cost (cents):
+  `CONFIRM=yes` command-line origin; `PROJECT` validated before any client;
+  ADC (impersonated SA), never a key. Verifies `MANIFEST.sha256` like `load`
 - `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` and its
   `.wal` (nothing else); `CONFIRM=yes` must have command-line origin
-- `make gen-sources` — re-renders `loader/ddl.sql` and
-  `dbt/models/staging/sources.yml` from `generator/models.py`;
+- `make gen-sources` — re-renders `loader/ddl.sql`, `loader/bq_schema.json`
+  (Phase 9b) and `dbt/models/staging/sources.yml` from `generator/models.py`;
   `tests/test_dbt_sources.py` fails on a hand edit
 - `make attribution-golden PROFILE=<p> [WRITE=yes]` — the built `attribution`
   table (`prompt_id,user_id,cohort_id,label`, sorted by `(prompt_id, user_id)`) vs
@@ -308,10 +329,16 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   committed pin, so `CONFIRM=yes` needs command-line origin, and refuses when a
   pinned file has vanished from disk (delete it from the manifest by hand); the
   manifest hunk lands in the same commit as the `.tf` change
-- Later phases add:
-  `test-int-bigquery` (9b — the DuckDB≡BigQuery pin-parity run behind `OTR_INT`;
-  in CI it needs an explicit `enable_ci_wif = true` apply, never the default
-  one). Each lands with its phase and is listed here in the same PR.
+- `make test-int-bigquery PROJECT=<id> CONFIRM=yes [PROFILE=tiny]` *(Phase 9b)*
+  — the DuckDB≡BigQuery pin-parity run behind `OTR_INT` (CI never runs it; the
+  CI leg needs an explicit `enable_ci_wif = true` apply — BACKLOG, dated):
+  `loader/cli.py test-int-bigquery` validates `PROJECT`/`PROFILE` and gates
+  `CONFIRM` FIRST, then runs `tests/integration/test_int_bigquery.py` with
+  `OTR_INT=1` + the validated project: lands tiny, builds on `bigquery`, reads
+  the three golden tables back through the same `Golden` specs and diffs them
+  against `fixtures/tiny/expected/` byte-for-byte, re-asserts the pins, and
+  asserts exactly two datasets exist. Cloud-cost, ask first, as the SA
+- Later phases add their targets, each listed here in the same PR.
 
 ## Event model facts (from ARCHITECTURE.md §2; update if reality differs)
 
@@ -333,7 +360,11 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   (`prompt_cohort_id`). `provisional` until `LOOKBACK_DAYS` closes, then
   `final` forever (Phase 7: `status` column on `attribution`, out of the golden;
   incremental partition `prompt_date` = local send date, computed on
-  `attribution`). Vars `skew_max_min` (5 = `generator/models.py`),
+  `attribution`). The three incremental models name their overwrite column
+  under `meta.overwrite_partition_col` — `partition_by` is a key BOTH adapters
+  interpret (dbt-bigquery: its native dict; dbt-duckdb: rejects a dict), so
+  the native BigQuery `partition_by` dict is set under `target.type ==
+  'bigquery'` only (Phase 9b, §8). Vars `skew_max_min` (5 = `generator/models.py`),
   `delivery_grace_min` (10), `unattributed_max` (0.10), `retention_days` (28),
   the send-time model's `feature_window_days` (30), `max_user_shift_min`
   (120), `shrinkage_pseudo_count` (5), `model_version` (`v1`), and the
@@ -392,13 +423,16 @@ DECISIONS.md or fix it.
   logic never does.
 - Model scoring and simulation are seeded; the generated blocks of
   `docs/RESULTS.md` and `docs/AB_DESIGN.md` regenerate byte-identically
-  (`make simulate` / `make power` check mode is the CI proof). The
+  (`tests/test_simulate.py` / `tests/test_power.py` under `make test` are the
+  CI proof; `make simulate` / `make power` check mode is the local one). The
   simulation uses common random numbers (four uniforms per prompt, one
   seeded stream, `prompt_id` order), so the lift is a function of the
   schedules alone.
 - Non-deterministic by nature and carved out: dbt run ids and timings,
   Airflow run ids, Terraform apply output, BigQuery job ids. Nothing asserted
-  reads them.
+  reads them. The BigQuery build reproduces every DuckDB golden and pin
+  byte-for-byte (`make test-int-bigquery`, Phase 9b) — parity is proven by
+  diffing, never by re-freezing.
 
 ## Engineering contracts
 
@@ -420,8 +454,14 @@ DECISIONS.md or fix it.
 - Dialect contract: exactly five dispatch macros (JSON extract,
   `timestamp_diff`, `safe_divide`, `to_local_time`, partition overwrite; the
   fifth was added in Phase 2 with a DECISIONS entry). Each has a DuckDB body
-  and a BigQuery body that raises until Phase 9 — never a `default__`. A
-  sixth needs a DECISIONS entry.
+  and a BigQuery body (Phase 9b: `json_value`, end-first `timestamp_diff` with
+  both sides cast to `timestamp`, `safe_divide` on a `float64` numerator,
+  `datetime(ts, tz)`; the partition-overwrite seam's BigQuery half is the
+  adapter's native `insert_overwrite`, selected in the models' config on
+  `target.type` — dbt-bigquery admits no custom strategy, so that dispatch
+  body raises by design, Amendment U) — never a `default__`.
+  A sixth needs a DECISIONS entry. `generate_schema_name` is a hook override
+  keyed on `target.type`, not a dispatch macro.
 - Airflow contains no logic: a task is a `make` target or a dbt command.
 - Minimal but scalable: simplest standard solution now; the scaling path is a
   DECISIONS note, not speculative code. Do not claim scale we don't run.
@@ -444,7 +484,10 @@ DECISIONS.md or fix it.
 - Python 3.12 (`.python-version`). Type hints everywhere. No pandas on a
   pipeline path — SQL does the work; Python glues.
 - Dependencies: ask before adding ANY package. Pre-approved allowlist by phase:
-  pydantic (Phase 1); duckdb, dbt-core, dbt-duckdb (Phase 2); dbt-bigquery (Phase 9);
+  pydantic (Phase 1); duckdb, dbt-core, dbt-duckdb (Phase 2); dbt-bigquery +
+  its clients google-cloud-bigquery / google-cloud-storage, declared (Phase 9b;
+  the adapter's ~45 transitive packages incl. pandas/pyarrow sit in the venv on
+  no pipeline path — DECISIONS);
   apache-airflow via Docker only (Phase 8); google-cloud-spanner (Phase 10);
   dev: pytest, ruff, pre-commit. Anything else is a STOP-and-ask.
 - SQL keywords lowercase, one column per line in select lists, every model
@@ -626,101 +669,57 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 9a implemented, in review (`phase-9-gcp-foundation`).** Phases 0–8 merged
-(PRs #1–#11): Phase 8 split 8a (write-back `serving/` + `make pipeline`, PR #10)
-and 8b (Airflow DAG `orchestration/` + `test-int-airflow` + backfill≡union, PR
-#11), closing the Phase 8 ⭐ checkpoint. Phase 9 is the first cloud phase, split
-9a/9b: **9a** (this) is the Terraform foundation; **9b** (spec finalized after 9a
-merges) is the BigQuery dialect (the five `bigquery__` macro bodies), the `bq
-load` landing, and the DuckDB≡BigQuery pin-parity run. 9a landed `infra/`: one
-module per concern — `bigquery` (datasets `raw` + `ontime`), `gcs`, `iam`,
-`budget` unconditional (free/near-free, §6); `composer`/`spanner` count-gated
-behind `enable_*` toggles that **default false**, so a default plan/apply makes
-zero of them. One **least-privilege** service account (BQ `jobUser` +
-dataset-scoped `dataEditor`, bucket `objectAdmin`; never `roles/owner|editor`) +
-a **WIF** pool/provider for CI, opt-in behind `enable_ci_wif` (default false) —
-**ADC/WIF only, no key at rest**. Budget alerts
-**50/150 in the billing account's currency** ($50/$150 on USD; notify only);
-the billing kill-switch is documented optional in
-`docs/DEPLOYMENT.md`, not built. **`project_id` is the only required var**
-(`region` defaults `us-central1`; the budget's billing account + project number
-are a `google_project` data source). `infra/cli.py` validates `PROJECT` before
-deriving the `-var` and gates `tf-apply`/`tf-destroy`/`tf-freeze` on `CONFIRM=yes
-$(origin)`; `tf-validate` (offline) / `tf-plan` are ungated. `make tf-validate` OK
-(google provider 6.50.0), offline suite green (`tests/test_infra.py` static `.tf`
-checks + the tf-* makefile tests), `make mutate` 7/7. The plan-clean and
-destroy-leaves-nothing-billable Done-when items are proven by the manual cloud
-runs in Evidence (ask-first). `fixtures/tiny/` untouched; every earlier gate
-byte-identical. **Review round 1 applied (23 findings): 4 amendments** — the
-managed bucket is a staging bucket distinct from the bootstrap tfstate bucket
-(datasets `delete_contents_on_destroy`); WIF trust scoped to repo AND ref;
-`tf()` runner-injectable so no offline test spawns a live apply (`require_confirm
-delete-call` now in the sweep, 4/4 killed); `google_project_service` so a fresh
-project applies — **plus 15 test/wording fixes** (whole-tree content-based
-`test_infra.py`, `infra` dropped from truth-isolation EXEMPT, `\Z` anchor, budget
-percents). **Review round 2 applied (24 findings): cap invoked** — `test_infra.py`
-re-implemented once against the pinning invariant (resource allowlist, exact WIF
-`&&`, IAM scope, bucket-hardening/argv/region pins); 3 design changes (managed
-bucket derived not a var; WIF binds on combined `repo@ref` + CEL-injection
-validations; `serviceusage`+`cloudresourcemanager` bootstrap APIs); fixes
-(`None` sentinel, `-input=false`, positive-threshold validation); #18 accepted
-(sanctioned `$(origin)` pattern). **Review round 3 applied (18 findings, cap's
-scoped re-review): 1 amendment** — H, CI WIF opt-in (`enable_ci_wif` count-gates
-pool/provider/binding; a fork's default apply no longer trusts this repo's
-`main`); 4 genuine fixes (`project_id` HCL `validation` = `PROJECT_RE`; `issuer_uri`
-pinned; `*.tfvars.json` ignored + scanned; the `tfstate` check scoped to managed
-blocks — a round-2 regression); 7 test-cluster completions; 5 record fixes. **Gate
-item discharged:** a fresh plan→apply→destroy cycle on `ontime-rate-recovery`
-re-proved Done-when 1/2/5 on the post-H tree (18 added, 18 destroyed, no WIF
-resource, nothing billable left) and surfaced two live gotchas fixed in-tree
-(§8: ADC quota project → provider `user_project_override`; budget currency →
-derived from the billing account). **Review round 4 applied (27 findings,
-phase-exit union): 5 amendments** — I (two datasets stays the pin; 9b's
-reconciliation must add `generate_schema_name` so the BigQuery build lands in
-`ontime`, and `test-int-bigquery` needs an explicit `enable_ci_wif = true`
-apply — a DUE BACKLOG row), J (root `workload_identity_provider` output, null
-guard pinned), K (no default `github_repository`; the pool's precondition
-refuses the toggle without one), L (`budget_alert_thresholds`, the account's
-currency), M (`.claude/settings.json` untracked + pinned); 4 test fixes
-(`tfstate` scan covers header labels — re-implemented once; data-source
-allowlist; whole-tree key scan; `min` pin); the rest records. **Review round
-5 applied (20 findings, no correctness finding in round 4's fixes — cap not
-triggered): 2 record-only amendments** — N (Amendment I's "impossible by IAM"
-narrowed to the SA; an operator's Owner ADC can create datasets, so no BigQuery
-build before 9b, then as the SA), O (9b must set the `bigquery` output's
-`location` and export `OTR_GCP_PROJECT` from the validated `PROJECT`); the
-settings pin widened to every auto-configuring key + `.mcp.json`; a read-only
-`tf-plan` on the post-J/K/L tree re-proved `18 to add` with a null WIF output;
-the rest records/wording. **Review round 6 applied (24 findings, 19 record/wording): 2 amendments** — P
-(`infra/MANIFEST.sha256` + `make tf-freeze`: the `.tf` tree is one allowlist,
-so every hand-mutation is lethal — the cause of three rounds of "unpinned
-attribute" findings closed), Q (`operator_principal` → a count-gated
-`serviceAccountTokenCreator` grant ON the SA, so Amendment N's impersonation
-is a managed control); the Claude-config pin re-implemented as a path
-allowlist; three new property pins; the Phase 0 / PROJECT_BRIEF edits
-reverted (a merged phase's records are not this branch's). **Review round 7
-applied (25 findings, 18 record/wording): 2 amendments** — R (the manifest is
-the allowlist's closure: `*.tf.json` pinned, `generator.manifest.diff` reused,
-`-lockfile=readonly`, `tf-freeze` refuses a vanished file, two mutation lines
-— 6/6 killed), S (`TARGET=bigquery` refused outright before 9b; `profiles.yml`
-reads `OTR_GCP_PROJECT` with no default); the Claude-config ignore check runs
-in a scratch repo (no local exclude file can stand in); `group:` dropped from
-`operator_principal`. **Review round 8 applied (23 findings, 18 record/wording):
-1 amendment** — T (`tf-plan`/`tf-apply`/`tf-destroy` refuse an auto-loaded
-`terraform.tfvars` / `*.auto.tfvars{,.json}` under `infra/`, the one input
-outside the argv and the manifest — reproduced live by a local file); 5
-test-only pins (profiles.yml no-default, nonzero-step FAIL, module sources
-local, `git init --template=<empty>`, the test-only pinned-files helper deleted — `compute_manifest`
-is the one predicate); mutate 7/7; the coherence-auditor's whole-repo pass has
-run twice (rounds 4 and 8) — round 9 is SCOPED to `review-round-8..HEAD`, and a
-record finding on unchanged text goes to BACKLOG with a 9b trigger, not to a
-round 10. Next: round 9 (scoped) → merge → 9b (its first
-commit reconciles against main-with-9a: `generate_schema_name`, `location`,
-`OTR_GCP_PROJECT`, the "DAG's build owns its landing" row —
-`dbt_build(TARGET=bigquery)` must not call the DuckDB `load()` — and the
-`ontime-pipeline` SA id reserved until ~2026-09-28 by the 2026-08-29 destroy).
-Open BACKLOG rows: **15** (9a struck "Budget alerts do not stop spend"; Spanner
-re-deferred; the five 9b-triggered rows — incl. "the DAG's build owns its
-landing" — re-deferred in-row; one new DUE 9b row; one dated SA-id row).
+**Phase 9b implemented and live-proven, in review (`phase-9b-bigquery-dialect`).**
+Phases 0–8 merged (PRs #1–#11); **9a merged as PR #12** (2026-08-29, amendments
+A–T, 8 review rounds) — the Terraform foundation, meter off by default, plan-clean
+and destroy-empty proven live. **9b** owns Phase 9's two warehouse clauses: `make
+dbt-build TARGET=bigquery PROFILE=tiny` green with the same pins, and `make
+test-int-bigquery`. Landed on the branch (spec `specs/phase-9b-bigquery-dialect.md`,
+reconciliation items 1–9 approved 2026-08-29; item 4 = (b), the CI WIF job
+deferred with a dated trigger): the five `bigquery__` macro bodies (no
+`default__`, still five); `generate_schema_name` collapsing to `ontime` on
+`target.type == 'bigquery'` only — **DuckDB keeps `main_<folder>`**, no reader
+changed; the incremental models' overwrite column under
+`overwrite_partition_col` with a dialect-guarded native `partition_by` dict
+(the key collision — §8); the GCS→BigQuery landing `loader/bq.py` on
+dbt-bigquery's transitive google clients (one impersonated-ADC path, generated
+`bq_schema.json`, `WRITE_TRUNCATE`, injectable fake clients); `dbt_build` lands
+by target (Amendment S lifted; `OTR_GCP_PROJECT` from the validated `PROJECT`;
+`location: us-central1`); `make bq-load` / `make test-int-bigquery`; `TARGET`
+threaded through `orchestration/tasks.py`; the conflicting-duplicate guard as a
+singular dbt test both dialects run; `eval/golden.py`'s one renderer for both
+engines. **Live (2026-08-30, `ontime-rate-recovery`, as the SA):** the SA-id
+detour (undelete + `terraform import`), `Apply complete! 18 added` with
+`operator_principal = user:<operator>`, then `dbt-build OK:
+tiny/bigquery` (PASS=126 — the DuckDB count) and `make test-int-bigquery` →
+`3 passed`: the three goldens byte-identical off BigQuery, pins hold, exactly
+two datasets. Re-proven at round-2 HEAD (`d204513`): `PASS=126`, `4 passed` (a
+planted conflict fails on BigQuery too); re-proven again at round-3 HEAD
+(`5878cf5`) after the cap's Amendment X: an empty-selection landing through
+the ONE mechanism (a zero-byte `_empty.jsonl` load job → `0 event rows`),
+`PASS=126`, `4 passed`. Two live surprises, both §8: dbt-bigquery admits no custom
+incremental strategy → **Amendment U** (native `insert_overwrite` selected on
+`target.type`; the dispatch body raises by design), and unit fixtures had
+DuckDB-only forms (`::json`, `date_diff`) → portable fixtures. Offline suite
+green (432), lint clean, mutate 8/8; review rounds 1–4 applied (amendments
+V, W/W′ → X; round 4 was the cap's one scoped re-review, re-proven live:
+`test-int-bigquery` `4 passed` at `374ab4e`). **Phase 9's Done-when is
+met.** Round 3 invoked the **cap** (two rounds of findings inside the
+previous round's fixes — the landing's empty-selection path): Amendment X
+re-implemented it once as ONE mechanism (the load job; a zero-byte object for
+an empty selection; `recreate` gone). The coherence-auditor's whole-repo exit
+pass ran (10 findings: records, one BACKLOG row for Phase 10's write-back
+seam). Next: PR → merge; then `fix/tf-vars-argv` (BACKLOG) and, when asked,
+`tf-destroy` — the applied stack stays up (cents) until then.
+Open BACKLOG rows: **15** (9b struck: the two-datasets row, the DAG-landing
+row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
+(first 9b apply 2026-08-30); opened: the guard's contract residual (JSON
+null vs missing key, `|` in a value) and the env-`TF_VAR_*` bypass of
+Amendment T (a 9a residual → `fix/tf-vars-argv` after 9b merges), the
+project-id/SA-email-in-records note (round 2), the write-back's DuckDB-only
+relation/connection seam for Phase 10 (exit audit), the `loader/` package
+shape (exit questions); the
+CI-drift row re-deferred with the trigger "the first `enable_ci_wif = true`
+apply"; THROUGH-calendar, Spanner, argmax-bins re-deferred with 9b notes).
 
 (Update this section at the end of every working day.)

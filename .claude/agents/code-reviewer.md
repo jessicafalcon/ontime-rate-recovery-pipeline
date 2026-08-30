@@ -53,7 +53,8 @@ When invoked:
 - **Airflow contains no logic.** A PythonOperator with transformation code
   is a finding; tasks call `make` targets or dbt commands.
 - **Dependency allowlist.** Imports outside pydantic, duckdb, dbt-core,
-  dbt-duckdb, dbt-bigquery, google-cloud-spanner, pytest, ruff, pre-commit
+  dbt-duckdb, dbt-bigquery, google-cloud-bigquery, google-cloud-storage
+  (Phase 9b — the landing's clients), google-cloud-spanner, pytest, ruff, pre-commit
   (and stdlib) are findings — new packages need explicit approval. Keep in
   lockstep with CLAUDE.md → Conventions.
 - **Fixtures are read-only.** After Phase 1, any diff touching

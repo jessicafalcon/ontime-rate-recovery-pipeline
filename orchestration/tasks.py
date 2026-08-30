@@ -20,6 +20,11 @@ pipeline`'s."""
 from __future__ import annotations
 
 PROFILE = "tiny"
+# The warehouse the build lands in and builds against (Phase 9b): the build's
+# landing is the target's own (duckdb → the DuckDB file; bigquery → GCS →
+# BigQuery), so the DAG names it. The Docker-local DAG is duckdb; Composer
+# (Phase 11) sets bigquery here and adds PROJECT.
+TARGET = "duckdb"
 
 # Rendered to YYYY-MM-DD by Airflow, never by us. A per-interval build lands only
 # the files uploaded on or before this date (Phase 8b); the DAG's @daily schedule
@@ -31,6 +36,10 @@ THROUGH_TEMPLATE = "{{ data_interval_end | ds }}"
 # THROUGH is single-quoted so the rendered date is one shell token regardless of
 # what Airflow substitutes (belt-and-suspenders; the date has no metacharacters).
 TASKS: list[tuple[str, str]] = [
-    ("dbt_build", f"make dbt-build PROFILE={PROFILE} THROUGH='{THROUGH_TEMPLATE}'"),
+    (
+        "dbt_build",
+        f"make dbt-build PROFILE={PROFILE} TARGET={TARGET} "
+        f"THROUGH='{THROUGH_TEMPLATE}'",
+    ),
     ("writeback", f"make writeback PROFILE={PROFILE}"),
 ]

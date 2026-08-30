@@ -106,7 +106,10 @@ Toggles are command-line `-var`s only. Terraform would auto-load an
 the manifest, so a plan could differ from the pinned tree with nothing showing
 it — so `tf-plan`/`tf-apply`/`tf-destroy` refuse while one exists (`tf-plan:
 refused — infra/terraform.tfvars auto-loads …`, Amendment T): delete it and
-pass `-var` (or `TF_VAR_*`) in the command you run. Read the `tf-plan` output
+pass `TF_VAR_x=…` inline on the command you run — the shell line you typed
+shows it, though it is an env assignment, not terraform's argv, so the
+difference from an EXPORTED `TF_VAR_*` is presentational until the BACKLOG
+fix PR (`fix/tf-vars-argv`) turns toggles into argv `-var`s. Read the `tf-plan` output
 before every `tf-apply`; the plan is the review.
 
 `tf-validate`'s init is `-lockfile=readonly`: `infra/.terraform.lock.hcl` pins
@@ -178,15 +181,45 @@ Phase 9a Done-when. That holds for 9b's tables too only because the dbt build
 lands inside `ontime` (`generate_schema_name`; the SA cannot create a dataset,
 so a per-folder `ontime_<folder>` layout would fail, not sprawl — Amendment I).
 That control covers the SA only: your own ADC is project Owner and CAN create
-datasets, so `make dbt-build TARGET=bigquery` is **refused before 9b lands** (`loader/cli.py`
-exits 2 with `lands in Phase 9b (generate_schema_name)` before any load or dbt
-call — Amendment S; `profiles.yml` also reads `OTR_GCP_PROJECT` with no default,
-so 9b must export it — Amendment O). From 9b on, set
-`operator_principal = "user:<you>"` in your tfvars and run manual BigQuery
-builds as the SA (`gcloud auth application-default login
---impersonate-service-account=<pipeline_service_account output>`): with the
-grant applied the impersonated path runs under the SA's IAM; a build on your
-raw Owner ADC remains possible and is outside the control (Amendments N, Q).
+datasets — so every BigQuery build runs **as the SA** (below), and
+`generate_schema_name` (9b) makes even an Owner build land in `ontime`.
+
+## Building on BigQuery (Phase 9b) — as the SA, ask-first
+
+1. Apply with `operator_principal` set inline on the SAME command line (never
+   a tfvars — T; `infra/cli.py` has no `-var` passthrough; the inline form is
+   an env assignment the typed line shows, not argv — BACKLOG,
+   `fix/tf-vars-argv`):
+   `TF_VAR_operator_principal="user:<you>" make tf-apply PROJECT=<id> CONFIRM=yes`
+   — Terraform grants you `serviceAccountTokenCreator` ON `ontime-pipeline`
+   (Amendment Q).
+2. Impersonate it for ADC — the ONE credential the landing's clients, dbt and
+   the parity test all use (no `bq`/`gsutil` on the data path, no second
+   impersonation setting, no keyfile):
+   `gcloud auth application-default login --impersonate-service-account=<pipeline_service_account output>`
+3. Land + build: `make dbt-build TARGET=bigquery PROFILE=tiny PROJECT=<id> CONFIRM=yes`
+   — `loader/cli.py` validates `PROJECT`, exports it to dbt as `OTR_GCP_PROJECT`
+   (the `bigquery` output has no default; `location: us-central1`), lands
+   `fixtures/tiny` through `gs://<id>-ontime/landing/tiny/` into `raw`
+   (`make bq-load` runs it alone), then `dbt build --target bigquery` into
+   `ontime`; prints `dbt-build OK: tiny/bigquery`.
+4. Parity: `make test-int-bigquery PROJECT=<id> CONFIRM=yes` — the three goldens
+   off the BigQuery tables byte-for-byte against `fixtures/tiny/expected/`, the
+   pins, and `bq ls` = exactly `raw`, `ontime`.
+
+Cost of a tiny run: ~1 MB of storage in `raw` + `ontime`, load jobs free,
+~10 MB queried (inside the 1 TB/month free tier) — cents at most; every step
+is idempotent (`WRITE_TRUNCATE`, `dbt build` rebuilds), so a second run does
+not double anything. `tf-destroy` still removes it all
+(`delete_contents_on_destroy`, `force_destroy`).
+
+**CI leg (deferred — BACKLOG "Cross-warehouse dialect drift…", dated trigger).**
+A CI `test-int-bigquery` needs the opt-in WIF apply, never the default one:
+`TF_VAR_enable_ci_wif=true TF_VAR_github_repository=<owner>/<repo> make tf-apply
+PROJECT=<id> CONFIRM=yes` (inline, same line), then the `workload_identity_provider`
+output and the SA email into a `workflow_dispatch`-only job via
+`google-github-actions/auth`. Not built in 9b: the laptop run above is the
+Done-when, and an unrun job would be a claim.
 
 **Gotcha — 30-day soft-delete on re-apply (ARCHITECTURE §8).** GCP soft-deletes
 a service account and a Workload Identity pool/provider and **reserves their ids
@@ -198,9 +231,16 @@ fails re-creating them ("already exists, in a deleted state"). Recover with
 second apply. Harmless for a single demo-day apply/destroy. **Live:** the
 Evidence-row-5 destroy on `ontime-rate-recovery` ran **2026-08-29**, so
 `ontime-pipeline@ontime-rate-recovery` is reserved until **~2026-09-28**; a 9b
-apply on that project before then runs
-`gcloud iam service-accounts undelete` first (the pool was never created — no
-reservation).
+apply on that project before then runs the **undelete + import detour**
+first (the pool was never created — no reservation): `gcloud iam
+service-accounts undelete <unique_id> --project=ontime-rate-recovery` (the
+numeric `unique_id` is in the local, gitignored `infra/terraform.tfstate.backup`
+from the destroy), then — because the state is empty after a destroy and a
+bare apply would try to CREATE it again — `terraform -chdir=infra import
+module.iam.google_service_account.pipeline
+projects/ontime-rate-recovery/serviceAccounts/ontime-pipeline@ontime-rate-recovery.iam.gserviceaccount.com`,
+then `make tf-plan` (expect `17 to add`, the SA `0 to change`) → `make tf-apply`.
+Or wait for the window to close.
 
 ## Spanner trial (Phase 10) and Composer (Phase 11) — teardown dates
 

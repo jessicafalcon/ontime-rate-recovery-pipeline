@@ -7,6 +7,7 @@
     (timezone({{ tz }}, timezone('UTC', {{ ts_utc }}))::timestamp)
 {% endmacro %}
 
+{#- A TIMESTAMP is an absolute instant; datetime(ts, tz) is its naive wall time in the zone — BigQuery's DATETIME is the naive type DuckDB's timestamp is (Phase 9b). -#}
 {% macro bigquery__to_local_time(ts_utc, tz) %}
-    {{ exceptions.raise_compiler_error("to_local_time: the BigQuery body lands in Phase 9") }}
+    datetime({{ ts_utc }}, {{ tz }})
 {% endmacro %}

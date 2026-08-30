@@ -4,6 +4,7 @@ no service, no network; every db lives in tmp_path."""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import duckdb
@@ -205,20 +206,98 @@ def test_cloud_target_requires_confirm_from_the_command_line(
     assert e.value.code == 2
 
 
-def test_bigquery_target_is_refused_before_9b(
+class _FakeClients:
+    """The two cloud calls, recorded (loader/bq.py Clients)."""
+
+    calls: list[tuple] = []
+
+    def __init__(self, project: str) -> None:
+        _FakeClients.calls.append(("init", project))
+
+    def upload(self, bucket: str, name: str, path: Path) -> None:
+        _FakeClients.calls.append(("upload", bucket, name, path.name))
+
+    def load(self, table_id: str, uris: list[str], config: dict) -> int:
+        _FakeClients.calls.append(("load", table_id, tuple(uris), config))
+        return 7
+
+
+def test_bigquery_target_needs_a_validated_project(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """Amendment S: a confirmed bigquery build is still refused before 9b —
-    before load() (no DuckDB file appears) and before any dbt call."""
+    """Phase 9b (the 9b form of Amendment S's test): a confirmed bigquery build
+    with an empty / path-shaped / malformed PROJECT exits 2 before any landing
+    and any dbt call, and OTR_GCP_PROJECT is never set."""
 
     def never(*a: object, **k: object) -> int:
-        raise AssertionError("load() ran before the 9b refusal")
+        raise AssertionError("a landing ran before PROJECT was validated")
 
-    monkeypatch.setattr(cli, "load", never)
-    with pytest.raises(SystemExit) as e:
-        cli.dbt_build("tiny", "bigquery", "yes", "command line")
+    monkeypatch.setattr(cli, "land", never)
+    monkeypatch.setitem(os.environ, "OTR_GCP_PROJECT", "sentinel")  # restored
+    os.environ.pop("OTR_GCP_PROJECT")
+    for bad in ("", "../x", "Bad Id", "my-proj\n", "x"):
+        with pytest.raises(SystemExit) as e:
+            cli.dbt_build("tiny", "bigquery", "yes", "command line", project=bad)
+        assert e.value.code == 2, bad
+        assert "PROJECT" in capsys.readouterr().out
+        assert "OTR_GCP_PROJECT" not in os.environ
+    with pytest.raises(SystemExit) as e:  # no third target
+        cli.dbt_build("tiny", "spanner", "yes", "command line", project="my-project")
     assert e.value.code == 2
-    assert "lands in Phase 9b" in capsys.readouterr().out
+
+
+def test_bigquery_build_lands_through_bq_not_duckdb(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Phase 9b invariant 4 (closes the 8b BACKLOG row): the bigquery build's
+    landing is the BigQuery one — the DuckDB load() never runs — with the
+    validated PROJECT exported to dbt from inside the process; the duckdb
+    build's landing is load() and the fake clients are never built."""
+    monkeypatch.setitem(os.environ, "OTR_GCP_PROJECT", "sentinel")  # restored
+    os.environ.pop("OTR_GCP_PROJECT")
+
+    def duckdb_never(*a: object, **k: object) -> int:
+        raise AssertionError("the DuckDB load() ran for TARGET=bigquery")
+
+    seen: dict[str, object] = {}
+
+    class Runner:
+        def invoke(self, args: list[str]) -> object:
+            seen["args"] = args
+            seen["env"] = os.environ.get("OTR_GCP_PROJECT")
+            return type("R", (), {"success": True})()
+
+    import dbt.cli.main as dbt_main
+
+    monkeypatch.setattr(dbt_main, "dbtRunner", Runner)
+    monkeypatch.setattr(cli, "load", duckdb_never)
+    _FakeClients.calls = []
+    rc = cli.dbt_build(
+        "tiny",
+        "bigquery",
+        "yes",
+        "command line",
+        through="2026-01-07",
+        project="my-project",
+        clients=_FakeClients,
+    )
+    assert rc == 0
+    assert seen["env"] == "my-project" and "--target" in seen["args"]
+    assert seen["args"][seen["args"].index("--target") + 1] == "bigquery"
+    kinds = [c[0] for c in _FakeClients.calls]
+    assert kinds[0] == "init" and "upload" in kinds and kinds.count("load") == 2
+    uploads = [c for c in _FakeClients.calls if c[0] == "upload"]
+    assert all(c[1] == "my-project-ontime" for c in uploads)
+    # THROUGH selected the same subset the DuckDB loader would (4 files ≤ 01-07)
+    assert len([u for u in uploads if u[3].startswith("events_")]) == len(
+        loader.event_files(loader.fixture_dir("tiny"), "2026-01-07")
+    )
+    assert "bq-load OK: tiny — 4 files, landing ≤ 2026-01-07" in capsys.readouterr().out
+    # the duckdb build: load() runs, no client is built
+    monkeypatch.setattr(cli, "load", lambda p, t="": 0)
+    _FakeClients.calls = []
+    assert cli.dbt_build("tiny", "duckdb", clients=_FakeClients) == 0
+    assert _FakeClients.calls == []
 
 
 def test_load_reports_its_source_and_refuses_manifest_drift(

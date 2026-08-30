@@ -25,14 +25,37 @@ def test_committed_sources_equal_regeneration() -> None:
 def test_hand_edit_is_detected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ddl = tmp_path / "ddl.sql"
     src = tmp_path / "sources.yml"
+    bq = tmp_path / "bq_schema.json"
     monkeypatch.setattr(gen, "DDL_PATH", ddl)
     monkeypatch.setattr(gen, "SOURCES_PATH", src)
+    monkeypatch.setattr(gen, "BQ_SCHEMA_PATH", bq)
     assert gen.main([]) == 0
     assert gen.main(["--check"]) == 0
     src.write_text(src.read_text().replace("- not_null\n", "", 1))
     assert gen.main(["--check"]) == 1
     ddl.write_text(ddl.read_text().replace(" not null", "", 1))
     assert gen.main(["--check"]) == 1
+    gen.main([])
+    bq.write_text(bq.read_text().replace('"REQUIRED"', '"NULLABLE"', 1))
+    assert gen.main(["--check"]) == 1
+
+
+def test_bq_schema_is_generated_from_the_contract() -> None:
+    """Phase 9b invariant 3: the BigQuery load schema is the contract, typed by
+    the same column walk as the DuckDB DDL (varchar→STRING, timestamp→TIMESTAMP,
+    date→DATE, json→JSON; REQUIRED unless Optional), never hand-typed."""
+    import json
+
+    schema = json.loads(gen.BQ_SCHEMA_PATH.read_text())
+    assert gen.HEADER in schema["_comment"]
+    for table, model in gen.TABLES:
+        cols = gen.columns(model)
+        assert [f["name"] for f in schema[table]] == [c[0] for c in cols]
+        for f, (name, typ, nullable, _) in zip(schema[table], cols, strict=True):
+            assert f["type"] == gen.BQ_TYPES[typ], name
+            assert f["mode"] == ("NULLABLE" if nullable else "REQUIRED"), name
+    assert {f["type"] for f in schema["events"]} == {"STRING", "TIMESTAMP", "JSON"}
+    assert [f["mode"] for f in schema["dim_user"]][-1] == "NULLABLE"  # valid_to
 
 
 def test_no_unique_test_on_raw_insert_id() -> None:
