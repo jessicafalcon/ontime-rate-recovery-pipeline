@@ -9,7 +9,10 @@ writeback — upsert scores_send_time + the open dim_user tz into send_schedule,
             (the stand-in, §2.9). TARGET=spanner (Phase 10): read the same two
             relations off BigQuery `ontime`, write the Spanner table — a
             cloud-cost command, CONFIRM=yes from the command line, gated
-            BEFORE any client exists.
+            BEFORE any client exists. PROFILE names no input there (the read
+            is the warehouse's `ontime`, whatever build landed it), so it is
+            optional, validated when given, and the OK line names the
+            warehouse read instead: `writeback OK: <project>.ontime → spanner`.
 pipeline  — the local chain with no scheduler: dbt build → eval → write-back,
             producing scores_send_time and send_schedule. Phase 8b's Airflow DAG
             orders the WRITING steps (dbt build → write-back) as make targets;
@@ -51,19 +54,23 @@ def writeback(
     confirm: str = "",
     origin: str = "",
 ) -> int:
-    validate_name("PROFILE", profile)
     target = target or LOCAL_TARGET
     validate_name("TARGET", target)
     if target not in (LOCAL_TARGET, CLOUD_TARGET):
         die(f"writeback: refused — no such target {target!r} (duckdb | spanner)")
     if target == CLOUD_TARGET:
+        if profile:  # not an input on this target; still never an unvalidated value
+            validate_name("PROFILE", profile)
         require_confirm("writeback TARGET=spanner", confirm, origin)
         validate_project(project)
         candidates, written = spanner_wb.write_back(project)
+        source = f"{project}.{spanner_wb.MODELS_DATASET} → spanner"
     else:
+        validate_name("PROFILE", profile)
         _require_db(profile)
         candidates, written = wb.write_back(profile)
-    print(f"writeback OK: {profile}, {candidates} users, {written} written")
+        source = profile
+    print(f"writeback OK: {source}, {candidates} users, {written} written")
     return 0
 
 

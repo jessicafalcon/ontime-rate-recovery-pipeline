@@ -180,6 +180,8 @@ def test_input_shape_validations_exist() -> None:
         "github_ref": 'regex("^refs/(heads|tags)/',
         "budget_alert_thresholds": "alltrue(",
         "operator_principal": 'regex("^(user|serviceAccount):',
+        # Phase 10 round 1 #9: interpolated into the spanner view's SQL literal
+        "region": 'regex("^[a-z]+-[a-z]+[0-9]$"',
     }
     for var, needle in expect.items():
         conds = _validation_conditions(_block(text, rf'variable "{var}"'))
@@ -208,21 +210,46 @@ ALLOWED_RESOURCE_TYPES = {
 }
 
 
+# The count-gated modules are NOT exempt (Phase 10 round 1 #11): each has its
+# own exact allowlist, so a `null_resource` + local-exec (runs on the
+# operator's machine during the ask-first apply) or a second billable type
+# dropped into a module is caught the same way. composer is still a stub.
+GATED_ALLOWED_RESOURCE_TYPES = {
+    INFRA / "modules" / "composer": set(),
+    INFRA / "modules" / "spanner": {
+        "google_project_service",
+        "google_spanner_instance",
+        "google_spanner_database",
+        "google_bigquery_connection",
+        "google_spanner_database_iam_member",
+        "google_bigquery_connection_iam_member",
+        "google_bigquery_table",
+    },
+}
+assert set(GATED_ALLOWED_RESOURCE_TYPES) == GATED_MODULE_DIRS
+
+
 # Every `data` source type the tree may read (round 4 #7): a data source is a
-# live API call at plan/apply, so a new one is a conscious addition too.
+# live API call at plan/apply, so a new one is a conscious addition too. The
+# gated modules read none — the root passes them what they need (#11).
 ALLOWED_DATA_SOURCE_TYPES = {"google_project", "google_billing_account"}
+
+
+def _declared_types(f: Path, kind: str) -> set[str]:
+    return set(
+        re.findall(
+            rf'\b{kind}\s+"([a-z0-9_]+)"\s+"', _strip_hcl_comments(f.read_text())
+        )
+    )
 
 
 def test_every_data_source_type_is_on_the_allowlist() -> None:
     declared: set[str] = set()
     for f in _tf_files():
         if f.parent in GATED_MODULE_DIRS:
+            assert _declared_types(f, "data") == set(), f
             continue
-        declared |= set(
-            re.findall(
-                r'\bdata\s+"([a-z0-9_]+)"\s+"', _strip_hcl_comments(f.read_text())
-            )
-        )
+        declared |= _declared_types(f, "data")
     assert declared == ALLOWED_DATA_SOURCE_TYPES, declared ^ ALLOWED_DATA_SOURCE_TYPES
 
 
@@ -269,21 +296,111 @@ def test_spanner_module_is_count_gated_and_default_off() -> None:
     assert re.search(r"^\s*disable_on_destroy\s*=\s*false", api, re.M)
 
 
+SPANNER_INSTANCE_NAME_RE = r'^\s*name\s*=\s*"([a-z0-9-]+)"'
+
+
+def test_spanner_names_pin_the_python_constants() -> None:
+    """Round 1 #14: the instance/database names and the models dataset the
+    Python clients open are literals in loader/spanner.py + serving/spanner.py;
+    they are pinned to the `.tf` here so an infra rename reddens offline."""
+    from loader import spanner as dims
+    from serving import spanner as wb_sp
+
+    text = _stripped("modules", "spanner", "main.tf")
+    inst = _block(text, r'resource "google_spanner_instance" "this"')
+    db = _block(text, r'resource "google_spanner_database" "this"')
+    assert re.search(SPANNER_INSTANCE_NAME_RE, inst, re.M).group(1) == dims.INSTANCE
+    assert re.search(SPANNER_INSTANCE_NAME_RE, db, re.M).group(1) == dims.DATABASE
+    assert (wb_sp.INSTANCE, wb_sp.DATABASE) == (dims.INSTANCE, dims.DATABASE)
+    models = _block(_read("variables.tf"), r'variable "models_dataset"')
+    assert (
+        re.search(r'default\s*=\s*"([a-z_]+)"', models).group(1) == wb_sp.MODELS_DATASET
+    )
+    assert (
+        re.search(r'connection_id\s*=\s*"([a-z_]+)"', text).group(1) == "spanner_dims"
+    )
+    view = _block(text, r'resource "google_bigquery_table" "dim_user_spanner"')
+    assert re.search(r'table_id\s*=\s*"dim_user_spanner"', view)
+
+
+# Phase 10 round 1 #10: the member AND the scope of each grant — the resource
+# type (database- / connection-level, never instance or project) and the
+# argument that names the ONE database / connection.
+SPANNER_GRANT_SCOPES = {
+    '"connection_reader"': (
+        "google_spanner_database_iam_member",
+        r"^\s*database\s*=\s*google_spanner_database\.this\.name",
+    ),
+    '"pipeline_user"': (
+        "google_spanner_database_iam_member",
+        r"^\s*database\s*=\s*google_spanner_database\.this\.name",
+    ),
+    '"pipeline_connection_user"': (
+        "google_bigquery_connection_iam_member",
+        r"^\s*connection_id\s*=\s*google_bigquery_connection\.spanner_dims\.connection_id",
+    ),
+}
+
+
+def test_spanner_grants_are_scoped_to_the_one_database_and_connection() -> None:
+    """Switching `pipeline_user` to an instance-wide
+    `google_spanner_instance_iam_member` (or any grant to a project-level one)
+    reddens: the type and the scoping argument are pinned per grant, and the
+    module declares no other grant type."""
+    text = _stripped("modules", "spanner", "main.tf")
+    grants = _blocks_with_headers(
+        text, r'resource "google_[a-z_]+_iam_member"\s+"[^"]+"'
+    )
+    assert len(grants) == 3, [g.splitlines()[0] for g in grants]
+    for g in grants:
+        header = g.splitlines()[0]
+        key = next(k for k in SPANNER_GRANT_SCOPES if k in header)
+        rtype, scope = SPANNER_GRANT_SCOPES[key]
+        assert header.startswith(f'resource "{rtype}"'), header
+        assert re.search(scope, g, re.M), header
+        assert re.search(
+            r"^\s*instance\s*=\s*google_spanner_instance\.this\.name", g, re.M
+        ) or (rtype == "google_bigquery_connection_iam_member"), header
+    assert not re.search(r'resource\s+"google_spanner_instance_iam', text)
+    assert not re.search(r'resource\s+"google_project_iam', text)
+    assert not re.search(
+        r'resource\s+"google_bigquery_connection_iam_(policy|binding)', text
+    )
+    assert not re.search(
+        r'resource\s+"google_spanner_database_iam_(policy|binding)', text
+    )
+
+    # #13: the service-agent grant is ordered after the connection that
+    # provisions the agent; the connection after its API enablement.
+    def depends_on(block: str) -> str:
+        return re.search(r"depends_on\s*=\s*\[([^\]]*)\]", block).group(1)
+
+    reader = _block(
+        text, r'resource "google_spanner_database_iam_member" "connection_reader"'
+    )
+    assert "google_bigquery_connection.spanner_dims" in depends_on(reader)
+    conn = _block(text, r'resource "google_bigquery_connection" "spanner_dims"')
+    assert "google_project_service.spanner" in depends_on(conn)
+
+
 def test_every_declared_resource_type_is_on_the_allowlist() -> None:
     """Invariant 2's teeth as an allowlist: no resource type outside the
     count-gated modules but the expected set — a `google_spanner_instance` /
     `google_cloud_run_v2_service` / `google_dataflow_job` at root is caught."""
     declared: set[str] = set()
+    gated: dict[Path, set[str]] = {d: set() for d in GATED_MODULE_DIRS}
     for f in _tf_files():
-        if f.parent in GATED_MODULE_DIRS:
-            continue
         # ANY provider's resource type (round 3 #6): a `null_resource` running a
         # local-exec, or a `random_*`, is off-allowlist too.
-        declared |= set(
-            re.findall(r'resource\s+"([a-z0-9_]+)"', _strip_hcl_comments(f.read_text()))
-        )
+        types = _declared_types(f, "resource")
+        if f.parent in GATED_MODULE_DIRS:
+            gated[f.parent] |= types
+        else:
+            declared |= types
     assert declared, "no resources declared"
     assert declared <= ALLOWED_RESOURCE_TYPES, declared - ALLOWED_RESOURCE_TYPES
+    for d, types in gated.items():  # exact per module (#11): nothing extra
+        assert types == GATED_ALLOWED_RESOURCE_TYPES[d], (d.name, types)
 
 
 def test_module_sources_are_local_paths_only() -> None:
@@ -717,6 +834,7 @@ def test_every_grant_member_is_pinned() -> None:
         elif any(key in b.splitlines()[0] for key in SPANNER_MEMBERS):
             key = next(k for k in SPANNER_MEMBERS if k in b.splitlines()[0])
             assert member == SPANNER_MEMBERS[key], member
+            assert b.startswith(f'resource "{SPANNER_GRANT_SCOPES[key][0]}"'), key
         else:
             assert member == SA_MEMBER, member
         seen += 1

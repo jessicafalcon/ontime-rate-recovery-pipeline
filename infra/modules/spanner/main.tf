@@ -43,8 +43,10 @@ resource "google_spanner_instance" "this" {
 }
 
 locals {
-  # GENERATED shape — tests/test_dbt_sources.py renders this DDL from
-  # generator/models.py (spanner_dim_user_ddl) and fails on a hand edit here.
+  # PINNED to the contract render: tests/test_dbt_sources.py renders this DDL
+  # from generator/models.py (scripts/gen_dbt_sources.py::spanner_dim_user_ddl)
+  # and fails when the two differ. `make gen-sources` does NOT write here —
+  # the repair is to paste the render, then `make tf-freeze CONFIRM=yes`.
   dim_user_ddl = <<EOT
 create table dim_user (
     user_id string(max) not null,
@@ -72,15 +74,17 @@ create table send_schedule (
 ) primary key (user_id)
 EOT
 
-  # GENERATED shape — tests/test_dbt_sources.py (federation_view_sql).
+  # PINNED to the contract render (federation_view_sql), the same way. Each
+  # column is cast to the generated BigQuery landing schema's type, so the
+  # view's shape is raw.dim_user's by construction — not Spanner's type map.
   dim_user_view_sql = <<EOT
 select
-    user_id,
-    tz,
-    cohort_id,
-    signup_date,
-    valid_from,
-    valid_to
+    cast(user_id as string) as user_id,
+    cast(tz as string) as tz,
+    cast(cohort_id as string) as cohort_id,
+    cast(signup_date as date) as signup_date,
+    cast(valid_from as timestamp) as valid_from,
+    cast(valid_to as timestamp) as valid_to
 from external_query(
     'projects/${var.project_id}/locations/${var.region}/connections/spanner_dims',
     'select user_id, tz, cohort_id, signup_date, valid_from, valid_to from dim_user'
@@ -95,7 +99,11 @@ resource "google_spanner_database" "this" {
   ddl      = [trimspace(local.dim_user_ddl), trimspace(local.send_schedule_ddl)]
   # The toggle-flip re-apply IS the sanctioned destroy path and it is
   # CONFIRM-gated ($(origin) — infra/cli.py); provider-side protection here
-  # would turn that one path into a two-apply dance.
+  # would turn that one path into a two-apply dance. The flip side: while
+  # Spanner is up, EVERY `tf-apply` must carry VARS='enable_spanner=true' —
+  # the toggle defaults false, so an apply that omits it IS the teardown
+  # (-auto-approve, no protection). docs/DEPLOYMENT.md's runbook says so;
+  # `tf-plan` first shows the `destroy` lines.
   deletion_protection = false
 }
 
@@ -108,16 +116,26 @@ resource "google_bigquery_connection" "spanner_dims" {
   cloud_spanner {
     database = "projects/${var.project_id}/instances/${google_spanner_instance.this.name}/databases/${google_spanner_database.this.name}"
   }
+
+  # The connection API is enabled in this module; without the edge a fresh
+  # apply races the not-yet-enabled API (the root modules' pattern).
+  depends_on = [google_project_service.spanner]
 }
 
 # The BigQuery Connection service agent executes the federated query against
-# Spanner: databaseReader on the ONE database, nothing project-wide.
+# Spanner: databaseReader on the ONE database, nothing project-wide. The
+# agent (service-<number>@gcp-sa-bigqueryconnection) is provisioned by the
+# connection API on first use, so the grant is ordered AFTER the connection —
+# on a first apply the member would otherwise not exist yet (a named live
+# risk in the Phase 10 spec, now coded).
 resource "google_spanner_database_iam_member" "connection_reader" {
   project  = var.project_id
   instance = google_spanner_instance.this.name
   database = google_spanner_database.this.name
   role     = "roles/spanner.databaseReader"
   member   = "serviceAccount:service-${var.project_number}@gcp-sa-bigqueryconnection.iam.gserviceaccount.com"
+
+  depends_on = [google_bigquery_connection.spanner_dims]
 }
 
 # The pipeline SA writes send_schedule (the write-back) and lands dim_user:

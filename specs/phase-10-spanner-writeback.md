@@ -192,12 +192,19 @@ make test && make lint && make review-gate SPEC=specs/phase-10-spanner-writeback
 
 | Done-when | Proof (test file / `make` target / command output) |
 |---|---|
-| 1 | `tests/test_writeback.py::test_spanner_writeback_second_run_writes_zero` (fakes); live: `make test-int-spanner …` output `writeback OK: tiny, 20 users, 0 written` on run 2 + equal row hash |
-| 2 | `tests/test_writeback.py::test_version_orders_numerically_v10_beats_v2`, `tests/test_writeback.py::test_malformed_version_refuses`; mutation lines 1–2 |
-| 3 | `tests/test_writeback.py::test_reader_relations_per_target`, `tests/test_pipeline.py` (existing `SEND_SCHEDULE_SHA256_TINY` pin unchanged), `tests/test_truth_isolation.py` |
-| 4 | `tests/integration/test_int_spanner.py::test_goldens_match_with_federated_dims`, `…::test_federated_view_rows_equal_seed` (live, behind `OTR_INT`); offline: `tests/test_dbt_sources.py` (identifier var + view SQL generated, hand edit fails) |
-| 5 | `tests/test_infra.py::test_spanner_module_is_count_gated_and_default_off` (static), live `tf-plan` outputs (default: no spanner resource; toggled: only the module's), the dated `docs/DEPLOYMENT.md` lines, teardown apply output |
-| 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_spanner_targets_pass_variables_as_one_literal`; the audited table in Threat model |
+| 1 | `tests/test_writeback.py::test_spanner_writeback_second_run_writes_zero`, `…::test_spanner_guard_and_write_are_one_retried_transaction` (fakes that EXECUTE the SQL on in-process DuckDB; Amendment A); live: `make test-int-spanner …` output `writeback OK: <project>.ontime → spanner, 20 users, 0 written` on run 2 + equal row hash |
+| 2 | `tests/test_writeback.py::test_version_orders_numerically_v10_beats_v2`, `…::test_malformed_version_refuses`, `…::test_malformed_version_refuses_on_the_insert_path_too` (Amendment B); mutation lines 1–2 |
+| 3 | `tests/test_writeback.py::test_reader_relations_per_target`, `…::test_writeback_reads_only_scores_and_dim_current` (the two read statements), `…::test_fakes_execute_the_read_contract`, `…::test_columns_are_the_golden_nine_and_row_of_maps_by_name` (ONE column tuple, values by name), `tests/test_pipeline.py` (existing `SEND_SCHEDULE_SHA256_TINY` pin unchanged), `tests/test_truth_isolation.py` |
+| 4 | `tests/integration/test_int_spanner.py::test_goldens_match_with_federated_dims`, `…::test_federated_view_rows_equal_seed`, `…::test_build_read_dims_through_the_federation_view` (dbt's manifest resolved the source to the view — the falsifier, Amendment C; live, behind `OTR_INT`); offline: `tests/test_dbt_sources.py` (identifier var + view SQL rendered with casts, hand edit fails), `tests/test_spanner_landing.py::test_dbt_build_admits_exactly_one_var_override` |
+| 5 | `tests/test_infra.py::test_spanner_module_is_count_gated_and_default_off`, `…::test_every_declared_resource_type_is_on_the_allowlist` (the gated modules' own exact allowlists), `…::test_spanner_grants_are_scoped_to_the_one_database_and_connection`, `…::test_spanner_names_pin_the_python_constants`, `…::test_input_shape_validations_exist` (`region`) (static), live `tf-plan` outputs (default: no spanner resource; toggled: only the module's), the dated `docs/DEPLOYMENT.md` lines, teardown apply output |
+| 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_spanner_targets_pass_variables_as_one_literal`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter`; the audited table in Threat model |
+
+**Live status at this HEAD (review round 1, finding 18):** the live halves of
+Done-when 1, 4 and 5 — `test-int-spanner`, the toggled `tf-plan`/apply
+outputs, the dated DEPLOYMENT lines, the teardown output — are UNPROVEN.
+They wait on the ask-first `enable_spanner=true` apply (undelete + import
+detour while the SA id is reserved) and are recorded here on that day; the
+offline halves are green.
 
 ## Invariants (REQUIRED)
 
@@ -215,6 +222,7 @@ serving/writeback.py::should_replace        invert-guard
 serving/writeback.py::version_key           constant-return:(0,)
 serving/spanner.py::apply_writeback         delete-call
 loader/spanner.py::load_dims                constant-return:0
+loader/cli.py::dbt_vars_args                constant-return:[]
 ```
 
 (The federation view and Spanner DDL are SQL rendered by
@@ -231,19 +239,25 @@ per the TEMPLATE's SQL rule.)
   satisfies invariant 2. A lexical fallback was rejected: it silently
   re-introduces the `v10 < v2` bug the clause exists to kill.
 - **The Spanner write is Python-computed winners + `insert_or_update`
-  mutations through an injectable client** — satisfies invariants 1, 6.
-  `read_existing` → shared `should_replace` → batch upsert of winners only;
-  `written_at = computed_as_of`. Server-side conditional DML was rejected:
-  it would fork the guard's logic into a second dialect the offline suite
-  can't run; the fake models the store (a dict) and the mutation ledger.
+  mutations through an injectable client, inside ONE read-write
+  transaction (Amendment A)** — satisfies invariants 1, 2, 6.
+  `run_in_transaction(fn)`: `fn` reads the stored pairs → shared
+  `should_replace` → batch upsert of winners only; `written_at =
+  computed_as_of`. Server-side conditional DML was rejected: it would fork
+  the guard's logic into a second dialect the offline suite can't run; the
+  fake models the store (in-process DuckDB executing the same SQL) and
+  retries `fn` once like Spanner does.
 - **All Spanner resources live in the count-gated module, DDL inlined in the
   module's `.tf` (heredoc), instance at the smallest size (100 processing
   units)** — satisfies invariant 5. A separate `.sql` file was rejected:
   `tf-freeze`'s manifest pins `*.tf`/`*.tf.json` only, and a file it doesn't
   pin can drift under the frozen tree. The module also owns the BigQuery
-  connection + `raw.dim_user_spanner` view + the two scoped grants (the
-  connection's service agent → `databaseReader`; the pipeline SA →
-  `databaseUser` on the one database).
+  connection + `raw.dim_user_spanner` view + THREE scoped grants (the
+  connection's service agent → `databaseReader` on the one database; the
+  pipeline SA → `databaseUser` on the one database and
+  `bigquery.connectionUser` on the one connection — querying a view over
+  `EXTERNAL_QUERY` needs use rights on its connection; round 1 finding 19
+  corrected the count from two).
 - **The federation swap is a generated source-identifier var, default
   unchanged (item 6)** — satisfies invariant 4 and §3.3's "source-config
   swap, no model changes". Making the view the default `bigquery` source was
@@ -271,8 +285,10 @@ per the TEMPLATE's SQL rule.)
   new generated Spanner DDL/view pins; `dbt_project.yml`
   (`dim_user_identifier` default).
 - `tests/test_writeback.py`, `tests/test_makefile.py`, `tests/test_infra.py`,
-  `tests/test_dbt_sources.py`, `tests/integration/test_int_spanner.py` (new),
-  `tests/pins.py` (Spanner row-hash pin if frozen-able; else live-only).
+  `tests/test_dbt_sources.py`, `tests/test_spanner_landing.py` (new — the
+  dims landing against fakes, the CLI gates, the one-var build seam),
+  `tests/integration/test_int_spanner.py` (new), `tests/pins.py` (Spanner
+  row-hash pin if frozen-able; else live-only).
 - Records: see Record updates.
 
 ## Record updates (REQUIRED)
@@ -308,7 +324,7 @@ any path/client):
 | `make writeback TARGET=spanner PROJECT=<id> CONFIRM=yes` | empty TARGET → `duckdb` (today's behaviour); empty PROJECT with TARGET=spanner → refusal before any client | PROFILE/TARGET validated `[a-z0-9_]+`, PROJECT by GCP shape — `../x` refused, no path derived from user input | reaches Python as one literal, fails validation | TARGET/PROJECT from env reach Python (stated residual, validated the same); CONFIRM counts only command-line | required for TARGET≠duckdb, `$(origin CONFIRM)` | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `tests/test_writeback.py::test_cloud_writeback_refuses_before_any_client` |
 | `make spanner-load PROFILE=<p> PROJECT=<id> CONFIRM=yes` | empty PROFILE/PROJECT → refusal | refused by shape validation | one literal, fails validation | same residual; CONFIRM command-line only | `$(origin CONFIRM)` | `tests/test_makefile.py::test_spanner_targets_pass_variables_as_one_literal` |
 | `make test-int-spanner PROJECT=<id> CONFIRM=yes [PROFILE=tiny]` | empty → refusal before `OTR_INT` export | refused | one literal | same residual; CONFIRM command-line only | `$(origin CONFIRM)` | same test; gating mirrors `test-int-bigquery` (CONFIRM first, then env) |
-| `make tf-apply … VARS='enable_spanner=…'` | existing target, unchanged | n/a (VARS items validated `name=value`) | refused by VARS item validation | env-origin VARS refused (`$(origin VARS)`); `TF_VAR_*` refuses every `tf-*` | `$(origin CONFIRM)` | existing `tests/test_makefile.py::test_tf_targets_pass_vars_as_one_literal`, `tests/test_infra.py` |
+| `make tf-apply … VARS='enable_spanner=…'` | existing target, unchanged — but while Spanner is UP, an apply that omits `VARS` IS the teardown (the toggle defaults false; `deletion_protection = false`, `-auto-approve`): the runbook says plan first (round 1 finding 12) | n/a (VARS items validated `name=value`) | refused by VARS item validation | env-origin VARS refused (`$(origin VARS)`); `TF_VAR_*` refuses every `tf-*` | `$(origin CONFIRM)` | existing `tests/test_makefile.py::test_tf_targets_pass_vars_as_one_literal`, `tests/test_infra.py` |
 
 Cloud cost twice / destroys: `writeback TARGET=spanner` twice is the
 idempotence proof (writes 0; cents of reads); `spanner-load` twice
@@ -370,6 +386,61 @@ user who controls the environment (the threat model's standing carve-out).
   (eventual consistency on first apply); whether the 100-PU instance is
   inside the trial's bounds; `google-cloud-spanner`'s client surface for
   batch `insert_or_update` (the fake models exactly the calls used).
+
+## Amendments (review round 1, 2026-08-30)
+
+- **A — the stored-pair read and the winners' upsert are ONE Spanner
+  read-write transaction (finding 7; a write-path change).** Restores
+  **invariant 2** (replace iff strictly greater) ACROSS concurrent
+  write-backs, not only within one run: a snapshot read followed by a
+  separate batch commit let two overlapping runs each compare against a
+  stale pair and one lose its update. Mechanism:
+  `serving/spanner.py::GoogleSpannerClient.transact(fn)` =
+  `database.run_in_transaction(fn)`; `fn` reads `EXISTING_SQL` on the
+  transaction, computes the winners with the shared guard, and
+  `insert_or_update`s them; Spanner aborts and re-runs `fn` when a read pair
+  moved, so `fn` is re-runnable by construction (it recomputes from what it
+  reads). The `SpannerClient` protocol is `transact` + a snapshot `read` for
+  readers (the integration read-back). Pinned by
+  `tests/test_writeback.py::test_spanner_guard_and_write_are_one_retried_transaction`
+  (the fake aborts attempt 1 with a real rollback, re-runs, and asserts no
+  read outside the transaction). Rejected: a `lifecycle`/lock-file
+  serialization at the DAG level — `max_active_runs=1` already orders the
+  Airflow runs, but the guard's own contract must not depend on who calls it.
+- **B — the candidate's version parses BEFORE the absent-row shortcut
+  (finding 1, BLOCKER).** Restores **invariant 2**'s "refuses before any
+  write" on the INSERT path: `should_replace` returned `True` for an absent
+  row without parsing, so a malformed `model_version` (a `--vars` override)
+  would be stored and every later run would raise on the stored value.
+  Mechanism: `version_key(candidate.model_version)` is computed first on
+  every path. Pinned by
+  `…::test_malformed_version_refuses_on_the_insert_path_too` (unit, and
+  end-to-end over an empty fake store: nothing written).
+- **C — the build's var seam admits exactly one var, validated (finding 5).**
+  Restores **invariant 6** (validation before any client) for the internal
+  seam: `loader/cli.py::dbt_build(dim_user_identifier=…)` replaces the
+  free-text `dbt_vars`; the value is a `[a-z0-9_]+` relation name rendered
+  by `dbt_vars_args` into `--vars {dim_user_identifier: <name>}` — no other
+  var has a path in. Done-when 4 becomes falsifiable live:
+  `tests/integration/test_int_spanner.py::test_build_read_dims_through_the_federation_view`
+  reads dbt's own `manifest.json` for the swapped build and asserts the
+  `dim_user` source resolved to `raw.dim_user_spanner` (the goldens alone
+  could not tell the view from the landed table).
+- Also applied in the same round, no design change: `COLUMNS`/`row_of` by
+  field NAME shared by both writers (finding 2); fakes that execute the SQL
+  on in-process DuckDB, naive warehouse timestamps vs aware store ones
+  (findings 3, 4); the two Spanner clients set
+  `disable_builtin_metrics=True` (finding 8); `region` gains a Terraform
+  `validation {}` (finding 9); grant scope + the gated modules' own resource
+  allowlists + the `.tf` names pinned to the Python literals (findings 10,
+  11, 14); the service-agent grant ordered after the connection (finding
+  13); the view casts each column to the landing schema's type as this spec
+  said (finding 15); the DDL/view are labelled PINNED, not generated
+  (finding 16); the transitive set recorded (finding 17); three grants
+  (finding 19); `writeback OK: <project>.ontime → spanner` with PROFILE
+  optional there (finding 20); `test-int-spanner` refuses a non-tiny PROFILE
+  at the CLI (finding 23); the `open_rows` count off `tests/pins.py`
+  (finding 22); docstrings (finding 24).
 
 ## Out of scope (deferred, recorded)
 

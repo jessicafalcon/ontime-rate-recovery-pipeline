@@ -22,8 +22,11 @@ from loader import bq
 from loader import load as loader
 
 TABLE = "dim_user"
-INSTANCE = "ontime"  # infra/modules/spanner/main.tf
-DATABASE = "ontime"
+# The ONE place the Spanner instance/database names live in Python
+# (serving/spanner.py imports them); tests/test_infra.py pins both to the
+# module's `name = "…"` so an infra rename cannot drift silently.
+INSTANCE = "ontime"  # infra/modules/spanner/main.tf google_spanner_instance.this
+DATABASE = "ontime"  # infra/modules/spanner/main.tf google_spanner_database.this
 
 
 class DimClient(Protocol):
@@ -36,12 +39,15 @@ class DimClient(Protocol):
 
 
 class GoogleDimClient:
-    """google-cloud-spanner on ADC (the Phase 10 allowlist package)."""
+    """google-cloud-spanner on ADC (the Phase 10 allowlist package);
+    `disable_builtin_metrics=True` — no Cloud Monitoring exporter thread
+    (serving/spanner.py::GoogleSpannerClient says why)."""
 
     def __init__(self, project: str) -> None:
         from google.cloud import spanner
 
-        self._db = spanner.Client(project=project).instance(INSTANCE).database(DATABASE)
+        client = spanner.Client(project=project, disable_builtin_metrics=True)
+        self._db = client.instance(INSTANCE).database(DATABASE)
 
     def upsert(self, table: str, columns: tuple[str, ...], rows: list[tuple]) -> None:
         with self._db.batch() as batch:

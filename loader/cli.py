@@ -35,6 +35,7 @@ from loader import load as loader
 NAME_RE = re.compile(r"^[a-z0-9_]+$")
 THROUGH_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # an upload date; a subset of [0-9-]+
 DBT_DIR = loader.ROOT / "dbt"
+INT_PROFILE = "tiny"  # the integration runs' pins are tiny's by definition
 
 
 def die(msg: str, code: int = 2) -> NoReturn:
@@ -196,6 +197,16 @@ def full_refresh_args(full: str, origin: str) -> list[str]:
     return []
 
 
+def dbt_vars_args(dim_user_identifier: str) -> list[str]:
+    """['--vars', '{dim_user_identifier: <relation>}'] for a validated
+    `[a-z0-9_]+` relation name; [] when unset (the default build is
+    unchanged). Anything else refuses — the seam admits exactly this one var."""
+    if not dim_user_identifier:
+        return []
+    validate_name("dim_user_identifier", dim_user_identifier)
+    return ["--vars", f"{{dim_user_identifier: {dim_user_identifier}}}"]
+
+
 def dbt_build(
     profile: str,
     target: str,
@@ -206,13 +217,15 @@ def dbt_build(
     through: str = "",
     project: str = "",
     clients: bq.ClientFactory | None = None,
-    dbt_vars: str = "",
+    dim_user_identifier: str = "",
 ) -> int:
-    """`dbt_vars` is an internal seam (no make variable): the Spanner
-    integration run passes `dim_user_identifier: dim_user_spanner` to build
-    against the federation view (§3.3's source swap) — the three goldens must
-    not move."""
+    """`dim_user_identifier` is an internal seam (no make variable): the ONE
+    dbt var a build may override from here — the Spanner integration run
+    passes `dim_user_spanner` to build against the federation view (§3.3's
+    source swap; the three goldens must not move). Validated like a name and
+    rendered by `dbt_vars_args`; any other var override has no path in."""
     validate_name("PROFILE", profile)
+    vars_args = dbt_vars_args(dim_user_identifier)
     if full and full != "yes":
         die(f"dbt-build: refused — FULL takes only the literal 'yes', got {full!r}")
     target = target or LOCAL_TARGET
@@ -248,7 +261,7 @@ def dbt_build(
             target,
         ]
         + full_refresh_args(full, full_origin)
-        + (["--vars", dbt_vars] if dbt_vars else [])
+        + vars_args
     )
     if not res.success:
         print(f"dbt-build FAIL: {profile}/{target}")
@@ -301,8 +314,15 @@ def int_spanner(profile: str, project: str, confirm: str, origin: str) -> int:
     """`make test-int-spanner` (Phase 10): validate + gate in THIS process, then
     the Spanner/federation pytest with OTR_INT=1 and the validated project in
     its env (the Amendment V shape: the gate that ran here is carried to the
-    fixture, never re-derived there)."""
+    fixture, never re-derived there). PROFILE is `tiny` by definition — the
+    goldens and the row hash it asserts are tiny's — so another value is a
+    CLI refusal, not a fixture assertion after the gate."""
     validate_name("PROFILE", profile)
+    if profile != INT_PROFILE:
+        die(
+            "test-int-spanner: refused — PROFILE is "
+            f"{INT_PROFILE!r} only, got {profile!r}"
+        )
     validate_project(project)
     require_confirm("test-int-spanner", confirm, origin)
     env = {

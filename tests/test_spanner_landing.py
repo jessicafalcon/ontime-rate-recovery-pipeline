@@ -4,13 +4,20 @@ CLI gates before any client. No service, no network."""
 
 from __future__ import annotations
 
+import os
+import re
+import shutil
 from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
 
-from loader import spanner
+from loader import cli, spanner
+from loader import load as loader
 from tests import pins
+
+ROOT = Path(__file__).parent.parent
+TINY = ROOT / "fixtures" / "tiny"
 
 
 class FakeDim:
@@ -41,7 +48,8 @@ def test_load_dims_lands_the_seed_with_contract_types() -> None:
             isinstance(row[5], datetime) and row[5].tzinfo is UTC
         )  # valid_to: NULL = the open SCD2 row
     open_rows = [r for r in store.table.values() if r[5] is None]
-    assert len(open_rows) == 20  # one open row per user (two users changed tz)
+    # one open row per user (the two tz-change users each closed one row)
+    assert len(open_rows) == pins.DIM_USER_ROWS - pins.DIM_USER_CLOSED_ROWS
 
 
 def test_load_dims_is_idempotent() -> None:
@@ -90,7 +98,6 @@ def test_spanner_load_cli_gates_before_any_client(
 ) -> None:
     """spanner-load refuses (exit 2) on a missing/env CONFIRM, a bad PROJECT or
     PROFILE — before the client factory is resolved."""
-    from loader import cli
 
     def boom() -> None:
         raise AssertionError("client factory resolved before the gate")
@@ -106,3 +113,105 @@ def test_spanner_load_cli_gates_before_any_client(
         with pytest.raises(SystemExit) as e:
             cli.spanner_load(*args)
         assert e.value.code == 2, args
+
+
+@pytest.mark.parametrize("target", ["spanner-load", "bq-load"])
+def test_cloud_landings_refuse_manifest_drift(
+    target: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Round 1 #6: one edited byte in a frozen fixture → `<target> DRIFT`, exit
+    1, and the client is never called — the same pin `load` has
+    (tests/test_loader.py), for both cloud landings (bq-load shared the gap)."""
+    root = tmp_path / "repo"
+    shutil.copytree(TINY, root / "fixtures" / "tiny")
+    monkeypatch.setattr(loader, "ROOT", root)
+    monkeypatch.setattr(loader, "DATA", root / "data")
+    f = root / "fixtures" / "tiny" / "dims" / "dim_user.csv"
+    f.write_text(f.read_text().replace("u-000008", "u-000009", 1))
+    calls: list[str] = []
+
+    class Never:
+        def __init__(self, project: str) -> None:
+            calls.append(project)
+
+        def __getattr__(self, name: str) -> object:
+            raise AssertionError(f"{name} called on a drifted fixture")
+
+    args = ("tiny", "ontime-rate-recovery", "yes", "command line")
+    if target == "spanner-load":
+        rc = cli.spanner_load(*args, clients=Never)
+    else:
+        rc = cli.bq_load(*args, clients=Never)
+    assert rc == 1
+    assert f"{target} DRIFT: 1 files" in capsys.readouterr().out
+    assert calls == []
+
+
+def test_dbt_build_admits_exactly_one_var_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round 1 #5: the internal `dim_user_identifier` seam is the ONLY var a
+    build can override, it is validated like a name, and it reaches dbt as
+    `--vars {dim_user_identifier: <relation>}` — deleting the append or
+    widening the seam reddens here."""
+    assert cli.dbt_vars_args("") == []
+    assert cli.dbt_vars_args("dim_user_spanner") == [
+        "--vars",
+        "{dim_user_identifier: dim_user_spanner}",
+    ]
+    for bad in ("../x", 'a"; rm', "dim_user_spanner, model_version: x1", "A"):
+        with pytest.raises(SystemExit) as e:
+            cli.dbt_vars_args(bad)
+        assert e.value.code == 2, bad
+    seen: dict[str, list[str]] = {}
+
+    class Runner:
+        def invoke(self, args: list[str]) -> object:
+            seen["args"] = args
+            return type("R", (), {"success": True})()
+
+    import dbt.cli.main as dbt_main
+
+    monkeypatch.setattr(dbt_main, "dbtRunner", Runner)
+    monkeypatch.setattr(cli, "load", lambda p, t="": 0)
+    assert cli.dbt_build("tiny", "duckdb", dim_user_identifier="dim_user_spanner") == 0
+    assert seen["args"][-2:] == ["--vars", "{dim_user_identifier: dim_user_spanner}"]
+    assert cli.dbt_build("tiny", "duckdb") == 0
+    assert "--vars" not in seen["args"]  # the default build is unchanged
+    with pytest.raises(SystemExit):
+        cli.dbt_build("tiny", "duckdb", dim_user_identifier="../x")
+
+
+def test_int_spanner_cli_refuses_a_non_tiny_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round 1 #23: the integration run's pins are tiny's; another PROFILE is
+    a CLI refusal (exit 2) before the gate carries anything to pytest."""
+    import subprocess
+
+    def never(*a: object, **k: object) -> object:
+        raise AssertionError("pytest spawned for a refused profile")
+
+    monkeypatch.setattr(subprocess, "run", never)
+    for profile in ("medium", "../x", ""):
+        with pytest.raises(SystemExit) as e:
+            cli.int_spanner(profile, "ontime-rate-recovery", "yes", "command line")
+        assert e.value.code == 2, profile
+    assert cli.INT_PROFILE == "tiny"
+
+
+def test_spanner_clients_disable_the_builtin_metrics_exporter() -> None:
+    """Round 1 #8: every google-cloud-spanner Client the repo constructs passes
+    `disable_builtin_metrics=True` — no Cloud Monitoring exporter thread, no
+    unreviewed egress, no failing exports under a SA with no monitoring grant
+    (dbt telemetry is off for the same reason)."""
+    calls = []
+    for path in (ROOT / "loader" / "spanner.py", ROOT / "serving" / "spanner.py"):
+        text = path.read_text()
+        calls += re.findall(r"spanner\.Client\(([^)]*)\)", text)
+    assert len(calls) == 2, calls
+    assert all("disable_builtin_metrics=True" in c for c in calls), calls
+    assert "OTR_GCP_PROJECT" not in os.environ  # no leak from a sibling test

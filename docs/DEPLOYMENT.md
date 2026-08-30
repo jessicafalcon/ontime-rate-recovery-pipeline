@@ -276,12 +276,21 @@ to the same working session as the apply.
    instance, database with the `dim_user` + `send_schedule` DDL, the BigQuery
    connection + `raw.dim_user_spanner` federation view, 3 scoped grants).
    **The same session, fill in the dated lines below.**
+   **While Spanner is up, EVERY `make tf-apply` carries
+   `VARS='enable_spanner=true'`** — the toggle defaults false and the
+   database has no deletion protection (the toggle-flip is the sanctioned
+   destroy), so an unrelated apply that omits it IS the teardown, with
+   `-auto-approve`. Before any apply in the window: `make tf-plan
+   PROJECT=<id> VARS='enable_spanner=true'` and read it for `destroy`.
 2. **Land the dims** (as the SA):
    `make spanner-load PROFILE=tiny PROJECT=<id> CONFIRM=yes`.
 3. **Prove it**: `make test-int-spanner PROJECT=<id> CONFIRM=yes` — the
    federated view returns the seed's rows, the swapped build
    (`dim_user_identifier: dim_user_spanner`) reproduces the three goldens,
-   and the Spanner write-back is idempotent with the DuckDB-pinned row hash.
+   and the Spanner write-back is idempotent with the DuckDB-pinned row hash
+   (its OK line reads `writeback OK: <id>.ontime → spanner, 20 users, 0
+   written` on the second run — the read is the warehouse's, not a
+   PROFILE's build). `PROFILE` is `tiny` only (a CLI refusal otherwise).
 4. **Tear down the same day** — the SCOPED destroy is the toggle flipped
    back: `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=false'`
    (count → 0 destroys exactly the module's resources; the two API

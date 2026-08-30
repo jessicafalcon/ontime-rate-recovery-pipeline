@@ -173,6 +173,78 @@ annotated **Superseded by …** in place and never deleted.
   first.** The `landing/`/`pipeline/` split (BACKLOG) is a separate
   `fix/landing-package` branch after this phase merges — mechanical churn
   does not belong in a Spanner diff (reconciliation item 3).
+- **The Spanner guard and upsert run in ONE read-write transaction
+  (review round 1, Amendment A).** `run_in_transaction(fn)`: the stored
+  pairs are read on the transaction, the winners computed by the shared
+  guard, and upserted in the same commit; Spanner aborts and re-runs `fn`
+  when a pair it read has moved, so replace-iff-greater holds across
+  concurrent write-backs. A snapshot read + a separate batch commit (the
+  first cut) held only within one run — two overlapping runs could lose an
+  update. Rejected: server-side conditional DML (still a second dialect the
+  offline suite can't run); relying on the DAG's `max_active_runs=1` (the
+  guard's contract must not depend on its caller). Scaling note, not code:
+  one commit carries every winner (tiny: 20; Spanner's per-commit mutation
+  cap is 80,000 cells) — a profile past that chunks the winners by
+  `user_id` range, each chunk its own transaction, the guard unchanged.
+- **`disable_builtin_metrics=True` on every Spanner client (round 1 #8).**
+  google-cloud-spanner ≥ 3.50 exports client metrics to Cloud Monitoring by
+  default (an exporter thread, `google-cloud-monitoring` in the lock). The
+  pipeline never asked for that egress and the SA has no monitoring grant
+  (the exports would only fail, loudly), so it is off — the same reason
+  dbt's telemetry is off. Pinned by
+  `tests/test_spanner_landing.py::test_spanner_clients_disable_the_builtin_metrics_exporter`.
+- **google-cloud-spanner's transitive set, recorded like 9b's (round 1
+  #17).** Beyond what dbt-bigquery already brought: `google-cloud-monitoring`
+  (the exporter above, disabled), `grpc-interceptor`, `mmh3`,
+  `opentelemetry-{api,sdk,semantic-conventions,resourcedetector-gcp}`,
+  `sqlparse`, `grpc-google-iam-v1`. All sit in the venv (CI's `uv sync
+  --locked`) on no pipeline path — the only Spanner imports are inside the
+  two `Google*Client` constructors the offline suite never calls.
+- **The Spanner DDL and the federation view are PINNED renders, not
+  generated files (round 1 #16).** `make gen-sources` writes `ddl.sql`,
+  `bq_schema.json` and `sources.yml`; it does NOT write into
+  `infra/modules/spanner/main.tf` (the `.tf` tree is the manifest's, and
+  `tf-freeze` is its only writer). `tests/test_dbt_sources.py` renders both
+  from the contract and fails on drift; the repair is a paste + `tf-freeze`.
+  The comments in the `.tf` and the script say "PINNED" — "GENERATED"
+  overclaimed a writer that does not exist. The view casts every column to
+  the generated BigQuery landing schema's type, so the swapped source has
+  `raw.dim_user`'s shape by construction (spec item 6's sentence, now true
+  in the render).
+- **The count-gated modules carry their own exact resource allowlists and
+  may read no data source (round 1 #11).** The root allowlist exempted
+  `modules/{composer,spanner}` entirely, so a `null_resource` + `local-exec`
+  (runs on the operator's machine during the ask-first apply) or a second
+  billable type could land there unseen. `tests/test_infra.py::
+  GATED_ALLOWED_RESOURCE_TYPES` is exact per module (composer: none yet).
+  With it: every grant's TYPE and scoping argument pinned (an instance-wide
+  `google_spanner_instance_iam_member` reddens), the `.tf` names pinned to
+  `loader/spanner.py::INSTANCE/DATABASE` and `serving/spanner.py::
+  MODELS_DATASET`, and `region` gains the same `validation {}` the other
+  interpolated variables carry (it lands inside the view's SQL literal).
+- **`dbt_build` admits exactly one var override, by name (round 1 #5,
+  Amendment C).** The Spanner run needs `dim_user_identifier:
+  dim_user_spanner`; a free-text `--vars` seam would have admitted any var
+  (`model_version: x1` included) from an internal caller. The seam is a
+  validated relation name rendered into the one var. Rejected: a make
+  variable for it (no user needs it; the integration launcher is its only
+  caller).
+- **On `TARGET=spanner`, PROFILE is optional and the OK line names the
+  warehouse read (round 1 #20).** The Spanner write-back reads BigQuery
+  `ontime` — whatever build landed it — so `writeback OK: tiny, …` attributed
+  the write to a build it never read. It prints `writeback OK:
+  <project>.ontime → spanner, N users, M written`; a PROFILE given anyway is
+  still validated (never an unvalidated value on the command line).
+- **The omitted-`VARS` apply IS the Spanner teardown — a runbook rule, not a
+  guard (round 1 #12).** While Spanner is up, any `make tf-apply …
+  CONFIRM=yes` without `VARS='enable_spanner=true'` plans the module for
+  destruction (toggle default false, `deletion_protection = false`,
+  `-auto-approve`). `docs/DEPLOYMENT.md`'s runbook now says: every apply in
+  the window carries the toggle, and `tf-plan` with the same `VARS` comes
+  first. Rejected: `prevent_destroy` (it blocks the sanctioned toggle-flip
+  teardown too — the two-apply dance the design avoided); a state-reading
+  guard in `infra/cli.py` (it would need a live plan parse before every
+  apply — the plan-first step is that, done by the operator who reads it).
 
 ### fix/tf-vars-argv (after Phase 9b, 2026-08-30)
 

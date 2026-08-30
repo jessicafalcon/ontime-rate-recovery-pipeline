@@ -1,7 +1,8 @@
 """Session-wide guards.
 
 1. Integration tests run ONLY under the `make test-int-*` targets (Phase 8
-   `test-int-airflow`, Phase 9 `test-int-bigquery`), which export OTR_INT=1.
+   `test-int-airflow`, Phase 9 `test-int-bigquery`, Phase 10
+   `test-int-spanner`), which export OTR_INT=1.
    A bare `pytest` (the run-tests hook makes it routine) must never touch a
    live target. Without the
    marker every `tests/integration` test is SKIPPED, loudly (Phase 8b added the

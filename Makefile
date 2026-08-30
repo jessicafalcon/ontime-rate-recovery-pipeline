@@ -20,7 +20,7 @@ setup:
 	uv run pre-commit install
 
 # Offline unit suite: no services, no network. tests/integration is skipped
-# unless OTR_INT=1 (conftest.py); only the Phase 8/9 test-int-* targets export it.
+# unless OTR_INT=1 (conftest.py); only the Phase 8/9/10 test-int-* targets export it.
 test:
 	uv run pytest --ignore=tests/integration
 
@@ -162,7 +162,8 @@ power:
 # stand-in, §2.9) — no CONFIRM (create-if-not-exists + upsert, never
 # destructive). TARGET=spanner (Phase 10): read the same two relations off
 # BigQuery `ontime`, write the Spanner table — cloud-cost, CONFIRM=yes from the
-# COMMAND LINE ($(origin CONFIRM)) and PROJECT validated before any client.
+# COMMAND LINE ($(origin CONFIRM)) and PROJECT validated before any client;
+# PROFILE is optional there (the read is the warehouse's, not a build's).
 writeback:
 	uv run python -m serving.cli writeback $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 

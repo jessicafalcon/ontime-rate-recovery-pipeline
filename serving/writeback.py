@@ -16,7 +16,7 @@ tz comes from the `dim_user_current` dbt model (the open row), not `raw.dim_user
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime
 from pathlib import Path
 
@@ -45,6 +45,23 @@ class Candidate:
     confidence: float
     model_version: str
     computed_as_of: datetime
+
+
+# The nine §2.9 columns, in order: Candidate's eight fields (by NAME — the
+# dataclass declaration order IS the serving order) + written_at. Every
+# writer (DuckDB, Spanner) and the offline row hash read this one tuple;
+# tests/test_writeback.py pins it to SEND_SCHEDULE_GOLDEN.columns.
+COLUMNS: tuple[str, ...] = tuple(f.name for f in fields(Candidate)) + ("written_at",)
+EXISTING_SQL = f"select user_id, model_version, computed_as_of from {SEND_SCHEDULE}"
+
+
+def row_of(c: Candidate) -> tuple:
+    """The nine column values in COLUMNS order, looked up BY NAME (a positional
+    build could swap two same-typed fields and no type check would notice);
+    `written_at = computed_as_of` (data-derived)."""
+    values = {f.name: getattr(c, f.name) for f in fields(c)}
+    values["written_at"] = c.computed_as_of
+    return tuple(values[name] for name in COLUMNS)
 
 
 def ensure_table(con: duckdb.DuckDBPyConnection) -> None:
@@ -78,9 +95,7 @@ def read_existing(
     con: duckdb.DuckDBPyConnection,
 ) -> dict[str, tuple[str, datetime]]:
     """user_id → the stored (model_version, computed_as_of) the guard compares."""
-    rows = con.execute(
-        f"select user_id, model_version, computed_as_of from {SEND_SCHEDULE}"
-    ).fetchall()
+    rows = con.execute(EXISTING_SQL).fetchall()
     return {r[0]: (r[1], r[2]) for r in rows}
 
 
@@ -99,13 +114,16 @@ def should_replace(candidate: Candidate, existing: tuple[str, datetime] | None) 
     """Replace iff the candidate's `(model_version, computed_as_of)` is strictly
     greater than the stored pair — model_version under `version_key`'s numeric
     order. An absent user inserts; a tie or a lesser pair leaves the row
-    untouched (§4 invariant 5). Data-derived, no caller marker."""
+    untouched (§4 invariant 5). Data-derived, no caller marker.
+
+    The candidate's version is parsed FIRST, on every path: a malformed
+    `model_version` (a `--vars` override) refuses on the insert path too, so
+    it can never be stored and wedge every later run's comparison
+    (review round 1, finding 1)."""
+    incoming = (version_key(candidate.model_version), candidate.computed_as_of)
     if existing is None:
         return True
-    return (version_key(candidate.model_version), candidate.computed_as_of) > (
-        version_key(existing[0]),
-        existing[1],
-    )
+    return incoming > (version_key(existing[0]), existing[1])
 
 
 def winners_of(
@@ -126,24 +144,9 @@ def apply_writeback(con: duckdb.DuckDBPyConnection, winners: list[Candidate]) ->
     marks = ", ".join(["?"] * len(ids))
     con.execute(f"delete from {SEND_SCHEDULE} where user_id in ({marks})", ids)
     con.executemany(
-        f"insert into {SEND_SCHEDULE} "
-        "(user_id, cohort_id, send_hour_local, send_minute_local, tz, "
-        "confidence, model_version, computed_as_of, written_at) "
-        "values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            (
-                w.user_id,
-                w.cohort_id,
-                w.send_hour_local,
-                w.send_minute_local,
-                w.tz,
-                w.confidence,
-                w.model_version,
-                w.computed_as_of,
-                w.computed_as_of,  # written_at = computed_as_of (data-derived)
-            )
-            for w in winners
-        ],
+        f"insert into {SEND_SCHEDULE} ({', '.join(COLUMNS)}) "
+        f"values ({', '.join('?' * len(COLUMNS))})",
+        [row_of(w) for w in winners],
     )
 
 

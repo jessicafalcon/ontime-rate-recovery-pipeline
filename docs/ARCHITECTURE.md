@@ -225,7 +225,11 @@ store may stamp a real ingest time in a carved-out audit column, never
 asserted. Phase 10: `make writeback TARGET=spanner` reads the same two
 relations off BigQuery `ontime` and writes the Spanner `send_schedule` (the
 module's DDL — the nine columns, `model_version` compared under a parsed
-numeric order, `v10 > v2`); `TARGET=duckdb` (default) keeps the stand-in.
+numeric order, `v10 > v2`); `TARGET=duckdb` (default) keeps the stand-in. On
+Spanner the stored-pair read and the winners' `insert_or_update` are ONE
+read-write transaction (`run_in_transaction`, retried on abort), so
+replace-iff-greater holds across concurrent write-backs, not only within one
+run (Phase 10 Amendment A).
 
 ## 3. Components
 
@@ -521,3 +525,17 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   and outside the manifest, so a toggle could reach an apply with nothing in
   the tree or the argv showing it; `infra/cli.py` refuses plan/apply/destroy
   while one exists (Amendment T).
+- **google-cloud-spanner exports client metrics to Cloud Monitoring by
+  default** (Phase 10, review round 1). `spanner.Client()` starts a
+  built-in metrics exporter thread (`disable_builtin_metrics=False`;
+  `google-cloud-monitoring` arrives transitively). The pipeline never asked
+  for that egress and the SA carries no monitoring grant, so both clients
+  pass `disable_builtin_metrics=True`; pinned statically in
+  `tests/test_spanner_landing.py`.
+- **The BigQuery Connection service agent exists only after the first
+  connection** (Phase 10, named in the spec's stack risk, coded before the
+  first apply). `service-<number>@gcp-sa-bigqueryconnection.iam.gserviceaccount.com`
+  is provisioned by the connection API on use, so the `databaseReader` grant
+  to it `depends_on` the connection resource (and the connection on the API
+  enablement) — otherwise a first apply can bind a member that does not
+  exist yet.

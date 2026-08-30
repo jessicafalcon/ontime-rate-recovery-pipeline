@@ -171,9 +171,11 @@ def render_sources() -> str:
 
 
 # Phase 10: the Spanner dims shapes, rendered from the SAME contract. Not
-# files — they are pinned INSIDE infra/modules/spanner/main.tf (tf-freeze's
-# manifest pins *.tf only, so a side file could drift under the frozen tree);
-# tests/test_dbt_sources.py fails when the .tf drifts from these renders.
+# files `make gen-sources` writes — they are PINNED inside
+# infra/modules/spanner/main.tf (tf-freeze's manifest pins *.tf only, so a
+# side file could drift under the frozen tree): tests/test_dbt_sources.py
+# fails when the .tf drifts from these renders, and the repair is to paste
+# the render into the .tf by hand (then `make tf-freeze CONFIRM=yes`).
 SPANNER_TYPES = {"varchar": "string(max)", "timestamp": "timestamp", "date": "date"}
 SPANNER_CONNECTION = "spanner_dims"
 
@@ -192,11 +194,18 @@ def spanner_dim_user_ddl() -> str:
 
 def federation_view_sql() -> str:
     """The `raw.dim_user_spanner` view body: EXTERNAL_QUERY over the Spanner
-    connection, one column per line, the exact text the .tf embeds (the
-    `${var.*}` placeholders are Terraform's, rendered at apply)."""
-    names = [c[0] for c in columns(DimUserRow)]
+    connection, one column per line, each CAST to the generated BigQuery
+    landing schema's type (the same map `bq_schema.json` is rendered from —
+    so the view's shape is the landed table's by construction, not by
+    Spanner's type map, a named stack risk), the exact text the .tf embeds
+    (the `${var.*}` placeholders are Terraform's, rendered at apply)."""
+    cols = columns(DimUserRow)
+    names = [c[0] for c in cols]
     inner = f"select {', '.join(names)} from dim_user"
-    body = ",\n".join(f"    {n}" for n in names)
+    body = ",\n".join(
+        f"    cast({name} as {BQ_TYPES[typ].lower()}) as {name}"
+        for name, typ, _, _ in cols
+    )
     return (
         "select\n"
         f"{body}\n"

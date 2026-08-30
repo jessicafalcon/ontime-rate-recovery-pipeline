@@ -18,6 +18,7 @@ renderer as the DuckDB stand-in — hashes to SEND_SCHEDULE_SHA256_TINY
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -36,7 +37,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "fixtures" / "tiny"
 MODELS_DATASET = "ontime"
 GOLDENS = (golden.ATTRIBUTION, golden.ONTIME_RATE_DAILY, golden.SCORES_SEND_TIME)
-SWAP = "dim_user_identifier: dim_user_spanner"
+SWAP = "dim_user_spanner"  # loader.cli.dbt_build's one var seam (dim_user_identifier)
+MANIFEST = ROOT / "dbt" / "target" / "manifest.json"
 
 
 def _project() -> str:
@@ -65,10 +67,28 @@ def built() -> Iterator[str]:
     rc = loader_cli.spanner_load("tiny", project, confirm, origin)
     assert rc == 0, "make spanner-load failed"
     rc = loader_cli.dbt_build(
-        "tiny", "bigquery", confirm, origin, project=project, dbt_vars=SWAP
+        "tiny", "bigquery", confirm, origin, project=project, dim_user_identifier=SWAP
     )
     assert rc == 0, "dbt-build TARGET=bigquery with the federated dims failed"
     yield project
+
+
+def _dim_user_source_relation() -> str:
+    """The relation dbt resolved the `dim_user` SOURCE to in the build just
+    run — off dbt's own manifest, the artifact of that build."""
+    manifest = json.loads(MANIFEST.read_text())
+    (node,) = [n for k, n in manifest["sources"].items() if k.endswith(".raw.dim_user")]
+    return f"{node['identifier']}|{node['relation_name']}"
+
+
+def test_build_read_dims_through_the_federation_view(built: str) -> None:
+    """Round 1 #5 — Done-when 4 falsifiable: the goldens could match off the
+    landed table too (view rows ≡ landed rows), so this asserts the build
+    actually resolved the dim_user source to `raw.dim_user_spanner` (dbt's
+    manifest for the swapped build), not the landed table."""
+    identifier, relation = _dim_user_source_relation().split("|")
+    assert identifier == SWAP
+    assert relation == f"`{built}`.`raw`.`{SWAP}`", relation
 
 
 def _bq(project: str):  # noqa: ANN202 — the google type is a runtime import
