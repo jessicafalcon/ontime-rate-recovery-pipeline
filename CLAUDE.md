@@ -688,11 +688,14 @@ detour (undelete + `terraform import`), `Apply complete! 18 added` with
 `operator_principal = user:<operator>`, then `dbt-build OK:
 tiny/bigquery` (PASS=126 — the DuckDB count) and `make test-int-bigquery` →
 `3 passed`: the three goldens byte-identical off BigQuery, pins hold, exactly
-two datasets. Two live surprises, both §8: dbt-bigquery admits no custom
+two datasets. Re-proven at round-2 HEAD (`d204513`): `PASS=126`, `4 passed` (a
+planted conflict fails on BigQuery too), and an empty-selection landing
+executed W′'s `recreate` live. Two live surprises, both §8: dbt-bigquery admits no custom
 incremental strategy → **Amendment U** (native `insert_overwrite` selected on
 `target.type`; the dispatch body raises by design), and unit fixtures had
 DuckDB-only forms (`::json`, `date_diff`) → portable fixtures. Offline suite
-green, lint clean, mutate 7/7. **Phase 9's Done-when is met.** Next: review
+green (431), lint clean, mutate 9/9; review rounds 1–2 applied (amendments
+V, W/W′). **Phase 9's Done-when is met.** Next: review
 round 1 (full union), scoped rounds after, coherence-auditor once at exit;
 the applied stack stays up (cents) until `tf-destroy` is asked for.
 Open BACKLOG rows: **13** (9b struck: the two-datasets row, the DAG-landing
