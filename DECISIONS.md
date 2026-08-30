@@ -279,6 +279,18 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
   the RESULTS/AB_DESIGN prover is `make test` (pre-existing). Forward risk
   → BACKLOG: the write-back reads DuckDB relation names on a DuckDB
   connection only — Phase 10's read seam.
+- **Architect's exit questions, answered for the record (2026-08-30).**
+  (1) "Five seams" stands as a count; four are two-body macros, the fifth is
+  a *materialization* seam the adapter owns on BigQuery — the records no
+  longer say "each has a BigQuery body". (2) `loader/` carries the build
+  dispatcher and the integration launcher beside two landings — a BACKLOG
+  row (rename `landing/`, move the plumbing to `pipeline/`). (3) The
+  injectable `Clients` + offline fake would be chosen again: the four
+  rounds were a second mechanism on the empty path, which the fake could
+  describe but not verify; the rule learned — a fake must model what the
+  invariant is about, and when a fix needs a NEW fake method, the mechanism
+  is wrong. (4) 9b supports Phase 10 on the model side and exposes the
+  write-back's DuckDB-only read seam (BACKLOG).
 - Not chosen and noted: BigQuery clustering (tiny; `user_id` is the candidate
   when a profile is large enough to measure); `medium` on BigQuery (109 MB, a
   deliberate later run).

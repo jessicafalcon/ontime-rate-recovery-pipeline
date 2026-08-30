@@ -711,13 +711,14 @@ an empty selection; `recreate` gone). The coherence-auditor's whole-repo exit
 pass ran (10 findings: records, one BACKLOG row for Phase 10's write-back
 seam). Next: PR → merge; then `fix/tf-vars-argv` (BACKLOG) and, when asked,
 `tf-destroy` — the applied stack stays up (cents) until then.
-Open BACKLOG rows: **14** (9b struck: the two-datasets row, the DAG-landing
+Open BACKLOG rows: **15** (9b struck: the two-datasets row, the DAG-landing
 row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
 (first 9b apply 2026-08-30); opened: the guard's contract residual (JSON
 null vs missing key, `|` in a value) and the env-`TF_VAR_*` bypass of
 Amendment T (a 9a residual → `fix/tf-vars-argv` after 9b merges), the
 project-id/SA-email-in-records note (round 2), the write-back's DuckDB-only
-relation/connection seam for Phase 10 (exit audit); the
+relation/connection seam for Phase 10 (exit audit), the `loader/` package
+shape (exit questions); the
 CI-drift row re-deferred with the trigger "the first `enable_ci_wif = true`
 apply"; THROUGH-calendar, Spanner, argmax-bins re-deferred with 9b notes).
 
