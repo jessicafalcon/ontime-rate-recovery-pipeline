@@ -102,7 +102,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `modules/{composer,spanner}` `count`-gated behind `enable_*` toggles that
   default false (so is the CI WIF layer inside `iam`: `enable_ci_wif`).
   `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`/`tf-freeze` on
-  `CONFIRM=yes $(origin)`) drives `make tf-validate|tf-plan|tf-apply|tf-destroy|tf-freeze`.
+  `CONFIRM=yes $(origin)`; toggles only as a command-line `VARS` → argv
+  `-var`, refuses `TF_VAR_*`/`TF_CLI_ARGS*` and auto-loaded tfvars, runs
+  terraform under an env allowlist — `fix/tf-vars-argv`) drives
+  `make tf-validate|tf-plan|tf-apply|tf-destroy|tf-freeze`.
   `terraform.tfvars.example` only (never a `*.tfvars`); `.terraform.lock.hcl`
   is tracked (the provider pin); ADC/WIF, never a key. A pipeline dir — guarded
   by `test_truth_isolation.py`; the `.tf` tree is pinned byte-for-byte by
@@ -297,14 +300,20 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   -platform=…` + `tf-freeze` (§8 Gotchas). Downloads the google provider once from
   the registry (a setup step, outside the offline `make test`); no GCP auth, no
   cloud call
-- `make tf-plan PROJECT=<id>` *(Phase 9a)* — validates `PROJECT` (a GCP
-  project-id shape) before deriving `-var project_id=<id>`, then `terraform
-  -chdir=infra plan`. Reads GCP APIs (ADC/WIF); shows the diff, creates nothing.
-  `tf-plan`/`tf-apply`/`tf-destroy` REFUSE (exit 2, before terraform) while an
-  auto-loaded `infra/terraform.tfvars` or `*.auto.tfvars{,.json}` exists —
-  gitignored and unpinned, so a toggle reaches Terraform only as a
-  command-line `-var` (Amendment T); `tf-validate` is not gated
-- `make tf-apply | tf-destroy PROJECT=<id> CONFIRM=yes` *(Phase 9a)* — apply
+- `make tf-plan PROJECT=<id> [VARS='name=value,…']` *(Phase 9a; VARS
+  `fix/tf-vars-argv`)* — validates `PROJECT` (a GCP project-id shape) before
+  deriving `-var project_id=<id>`, parses each `VARS` item into an argv `-var`
+  (`name=scalar` or `name=[n,n]`; malformed, whitespace, `project_id`, or an
+  env-origin `VARS` → refused — `$(origin VARS)`, like `CONFIRM`), then
+  `terraform -chdir=infra plan` under an ALLOWLISTED environment (`PATH`,
+  `HOME`, `CLOUDSDK_*`, locale/proxy — no `GOOGLE_*CREDENTIALS*`,
+  `TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*`). Reads GCP APIs (your own ADC —
+  never the impersonated SA, §8); shows the diff, creates nothing. EVERY
+  `tf-*` REFUSES (exit 2, before terraform) while any `TF_VAR_*` /
+  `TF_CLI_ARGS*` is in the environment, and plan/apply/destroy also while an
+  auto-loaded `infra/terraform.tfvars` or `*.auto.tfvars{,.json}` exists
+  (Amendment T) — the argv is the whole input by construction
+- `make tf-apply | tf-destroy PROJECT=<id> CONFIRM=yes [VARS=…]` *(Phase 9a)* — apply
   creates the free-tier layer: 9 API enablements (free, kept on by destroy),
   two BigQuery datasets, a GCS staging bucket, a least-privilege service
   account with 4 scoped grants, and budget alerts at 50/150 in the billing
@@ -669,7 +678,7 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 9b implemented and live-proven, in review (`phase-9b-bigquery-dialect`).**
+**Phase 9 complete (9a PR #12, 9b PR #13); `fix/tf-vars-argv` in flight.**
 Phases 0–8 merged (PRs #1–#11); **9a merged as PR #12** (2026-08-29, amendments
 A–T, 8 review rounds) — the Terraform foundation, meter off by default, plan-clean
 and destroy-empty proven live. **9b** owns Phase 9's two warehouse clauses: `make
@@ -709,13 +718,21 @@ previous round's fixes — the landing's empty-selection path): Amendment X
 re-implemented it once as ONE mechanism (the load job; a zero-byte object for
 an empty selection; `recreate` gone). The coherence-auditor's whole-repo exit
 pass ran (10 findings: records, one BACKLOG row for Phase 10's write-back
-seam). Next: PR → merge; then `fix/tf-vars-argv` (BACKLOG) and, when asked,
-`tf-destroy` — the applied stack stays up (cents) until then.
-Open BACKLOG rows: **15** (9b struck: the two-datasets row, the DAG-landing
+seam). **9b merged as PR #13** (`8c1c389`, 2026-08-30). `fix/tf-vars-argv`
+(this branch, reviewed by the three agents — 11 findings, all applied):
+toggles only as a command-line `VARS='name=value,…'` → argv `-var`
+(`$(origin VARS)`); any `TF_VAR_*`/`TF_CLI_ARGS*` refuses every `tf-*`; the
+terraform child runs under an env allowlist (no keyfile env, no
+`TF_WORKSPACE`); two §8 gotchas (the impersonated-SA ADC cannot run
+Terraform — the first post-9b `tf-destroy` failed at refresh, no resource or
+state changed; env `TF_VAR_*`/`TF_CLI_ARGS*`). **The stack on
+`ontime-rate-recovery` was destroyed 2026-08-30** (re-auth as the operator,
+then `tf-destroy`) — nothing billable is up; the SA id is reserved again
+until ~2026-09-29 (undelete + import detour in DEPLOYMENT).
+Open BACKLOG rows: **14** (`fix/tf-vars-argv` struck the env-`TF_VAR_*` row; 9b struck: the two-datasets row, the DAG-landing
 row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
 (first 9b apply 2026-08-30); opened: the guard's contract residual (JSON
-null vs missing key, `|` in a value) and the env-`TF_VAR_*` bypass of
-Amendment T (a 9a residual → `fix/tf-vars-argv` after 9b merges), the
+null vs missing key, `|` in a value), the
 project-id/SA-email-in-records note (round 2), the write-back's DuckDB-only
 relation/connection seam for Phase 10 (exit audit), the `loader/` package
 shape (exit questions); the
