@@ -106,9 +106,10 @@ Toggles are command-line `-var`s only. Terraform would auto-load an
 the manifest, so a plan could differ from the pinned tree with nothing showing
 it — so `tf-plan`/`tf-apply`/`tf-destroy` refuse while one exists (`tf-plan:
 refused — infra/terraform.tfvars auto-loads …`, Amendment T): delete it and
-pass `TF_VAR_x=…` inline on the command you run (the argv shows it; an
-EXPORTED `TF_VAR_*` is the one input T does not see — BACKLOG,
-`fix/tf-vars-argv`). Read the `tf-plan` output
+pass `TF_VAR_x=…` inline on the command you run — the shell line you typed
+shows it, though it is an env assignment, not terraform's argv, so the
+difference from an EXPORTED `TF_VAR_*` is presentational until the BACKLOG
+fix PR (`fix/tf-vars-argv`) turns toggles into argv `-var`s. Read the `tf-plan` output
 before every `tf-apply`; the plan is the review.
 
 `tf-validate`'s init is `-lockfile=readonly`: `infra/.terraform.lock.hcl` pins
@@ -186,8 +187,9 @@ datasets — so every BigQuery build runs **as the SA** (below), and
 ## Building on BigQuery (Phase 9b) — as the SA, ask-first
 
 1. Apply with `operator_principal` set inline on the SAME command line (never
-   a tfvars — T; `infra/cli.py` has no `-var` passthrough, and an EXPORTED
-   `TF_VAR_*` is outside T's control — BACKLOG, `fix/tf-vars-argv`):
+   a tfvars — T; `infra/cli.py` has no `-var` passthrough; the inline form is
+   an env assignment the typed line shows, not argv — BACKLOG,
+   `fix/tf-vars-argv`):
    `TF_VAR_operator_principal="user:<you>" make tf-apply PROJECT=<id> CONFIRM=yes`
    — Terraform grants you `serviceAccountTokenCreator` ON `ontime-pipeline`
    (Amendment Q).

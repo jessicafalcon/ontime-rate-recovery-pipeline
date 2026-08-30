@@ -405,7 +405,7 @@ make test && make lint && make review-gate SPEC=specs/phase-9b-bigquery-dialect.
 | Invariant ("for all …, … holds") | Falsified by (scenario test) |
 |---|---|
 | 1. **Every relation lands in a Terraform dataset.** For all models on the `bigquery` target, the resolved schema is `target.schema` (`ontime`); for all sources it is `raw`; for all models on any other target the resolved schema is dbt's default (`main_<folder>` on DuckDB) — the layout the DuckDB readers hard-code. | `tests/test_dbt_conventions.py::test_generate_schema_name_collapses_only_on_bigquery` (the branch dropped or keyed on `target.name` → red); the DuckDB in-process build (`tests/test_incremental.py`, `tests/test_scores.py` relation names); live `bq ls` = two datasets |
-| 2. **Same rows, both dialects.** For all three frozen goldens, the rows read from BigQuery, rendered by the same `Golden` spec (columns, sort key, `render`), equal the frozen file byte-for-byte; every `tests/pins.py` number holds off the BigQuery rows. | `tests/integration/test_int_bigquery.py::test_goldens_match_frozen`, `::test_pins_hold_on_bigquery` (a `to_local_time` body off by a zone rule, a `timestamp_diff` argument order swapped, a `safe_divide` integer-dividing → a differing row); offline `tests/test_eval.py::test_bigquery_rows_render_like_duckdb_rows` (the tz-aware/`Decimal` normalisation) |
+| 2. **Same rows, both dialects.** For all three frozen goldens, the rows read from BigQuery, rendered by the same `Golden` spec (columns, sort key, `render`), equal the frozen file byte-for-byte; every `tests/pins.py` number holds off the BigQuery rows. | `tests/integration/test_int_bigquery.py::test_goldens_match_frozen`, `::test_pins_hold_on_bigquery` (a `to_local_time` body off by a zone rule, a `timestamp_diff` argument order swapped, a `safe_divide` integer-dividing → a differing row); offline `tests/test_eval.py::test_bigquery_rows_render_like_duckdb_rows` (the tz-aware normalisation; no golden carries NUMERIC) |
 | 3. **The landing is a function of the fixture and `THROUGH`.** For all `(profile, through)`, the BigQuery landing loads exactly the files `loader.load.event_files` selects, into tables whose schema is the generated contract, recreating both (a second landing is byte-identical, never appended). | `tests/test_bq_landing.py::test_selects_the_same_files_as_the_duckdb_loader`, `::test_uploads_then_loads_with_the_generated_schema` (`WRITE_APPEND` → red; a hand-typed schema → red via `tests/test_dbt_sources.py::test_bq_schema_is_generated_from_the_contract`) |
 | 4. **The build's landing matches its target.** For all `dbt_build(profile, target)`, the landing that runs is the target's — the DuckDB `load()` on `duckdb`, `bq_load()` on `bigquery`, never both, never the other — and `OTR_GCP_PROJECT` reaches dbt only as the validated `PROJECT`. | `tests/test_loader.py::test_bigquery_build_lands_through_bq_not_duckdb`, `::test_bigquery_target_needs_a_validated_project`, `::test_cloud_target_requires_confirm_from_the_command_line` (kept) |
 | 5. **Five dispatch macros, two bodies each, no default, no sixth.** For all macro files, `adapter.dispatch` appears in exactly the five; each has non-empty `duckdb__` and `bigquery__` bodies and no `default__` — `bigquery__partition_overwrite` raises by design because the adapter's native `insert_overwrite`, selected in config on `target.type`, is that seam's BigQuery half (U); `generate_schema_name` and the strategy macro dispatch nothing. | `tests/test_dbt_conventions.py::test_exactly_five_dispatch_macros`, `::test_each_macro_has_duckdb_and_bigquery_bodies`, `::test_no_default_dispatch_body`, `::test_bigquery_bodies_are_the_named_forms` |
@@ -427,6 +427,8 @@ loader/cli.py::land                  constant-return:0
 loader/cli.py::land                  invert-guard
 loader/bq.py::selected_files         constant-return:{'events': [], 'dim_user': []}
 loader/bq.py::load_job_config        constant-return:{}
+loader/bq.py::bq_load                invert-guard
+loader/bq.py::default_clients        constant-return:None
 eval/golden.py::normalize_cell       constant-return:'x'
 ```
 
@@ -487,7 +489,7 @@ scratch copy:
 - **Pin parity is the three goldens through the same `Golden` specs, off
   BigQuery rows, behind `OTR_INT` (`make test-int-bigquery`)** — satisfies
   invariant 2. `eval/golden.py` gains a row-source seam (`rows_from(iterable)`
-  + `normalize_cell` for tz-aware timestamps, dates, `Decimal`) so the
+  + `normalize_cell` for tz-aware timestamps and NULLs; dates/ints/floats agree already) so the
   renderer is one function for both engines; `tests/pins.py` is untouched.
   Rejected: a BigQuery-specific CSV writer (two renderers can agree by
   accident); re-freezing (forbidden — the central constraint).
@@ -583,7 +585,7 @@ sentinel in the offline run.
 |---|---|---|---|---|---|---|
 | `make bq-load PROFILE=<p> PROJECT=<id> CONFIRM=yes [THROUGH=…]` | `PROFILE=`/`PROJECT=` refused; `CONFIRM=` refused; `THROUGH=` = all files | refused (`PROFILE` `[a-z0-9_]+`, `PROJECT` `PROJECT_RE`), never a path or prefix | one literal, refused | reaches Python, validated the same; env `CONFIRM=yes` ignored | command-line only | `tests/test_makefile.py::test_bq_targets_confirm_from_command_line_only`, `::test_bq_targets_pass_project_as_one_literal`; `tests/test_bq_landing.py::test_no_client_is_built_before_validation` |
 | `make dbt-build PROFILE=<p> TARGET=bigquery PROJECT=<id> CONFIRM=yes` | `PROJECT=` refused (exit 2, before any landing); `TARGET=` = duckdb (no `PROJECT` needed) | refused | one literal, refused | validated the same; env `CONFIRM=yes` ignored | command-line only (kept from Phase 2) | `tests/test_loader.py::test_bigquery_target_needs_a_validated_project`, `::test_cloud_target_requires_confirm_from_the_command_line`; `tests/test_makefile.py::test_bq_targets_pass_project_as_one_literal` |
-| `make test-int-bigquery PROJECT=<id> CONFIRM=yes` | refused (the target's Python entry validates before `pytest`) | refused | one literal, refused | validated the same; env `CONFIRM=yes` ignored; `OTR_INT=1` is set in-recipe, never by the user | command-line only | `tests/test_makefile.py::test_bq_targets_confirm_from_command_line_only`, `::test_bq_targets_pass_project_as_one_literal` |
+| `make test-int-bigquery PROJECT=<id> CONFIRM=yes` | refused (the target's Python entry validates before `pytest`) | refused | one literal, refused | validated the same; env `CONFIRM=yes` ignored by the entry; the entry then CARRIES its verdict to the pytest as `OTR_CONFIRM`/`OTR_CONFIRM_ORIGIN` (V) — a hand-set pair beside `OTR_INT=1` is the stated residual (the same as `test-int-airflow`'s `OTR_INT`; an in-process `pytest.main` would put `pytest` on a pipeline module — accepted, round 2 #12) | command-line only at the entry | `tests/test_makefile.py::test_bq_targets_confirm_from_command_line_only`, `::test_bq_targets_pass_project_as_one_literal` |
 
 ## Review & stack risk
 

@@ -695,11 +695,12 @@ DuckDB-only forms (`::json`, `date_diff`) → portable fixtures. Offline suite
 green, lint clean, mutate 7/7. **Phase 9's Done-when is met.** Next: review
 round 1 (full union), scoped rounds after, coherence-auditor once at exit;
 the applied stack stays up (cents) until `tf-destroy` is asked for.
-Open BACKLOG rows: **12** (9b struck: the two-datasets row, the DAG-landing
+Open BACKLOG rows: **13** (9b struck: the two-datasets row, the DAG-landing
 row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
 (first 9b apply 2026-08-30); opened: the guard's contract residual (JSON
 null vs missing key, `|` in a value) and the env-`TF_VAR_*` bypass of
-Amendment T (a 9a residual → `fix/tf-vars-argv` after 9b merges); the
+Amendment T (a 9a residual → `fix/tf-vars-argv` after 9b merges), the
+project-id/SA-email-in-records note (round 2); the
 CI-drift row re-deferred with the trigger "the first `enable_ci_wif = true`
 apply"; THROUGH-calendar, Spanner, argmax-bins re-deferred with 9b notes).
 

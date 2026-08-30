@@ -75,10 +75,6 @@ BQ_TYPES = {
 }
 
 
-def bigquery_type(annotation: object) -> str:
-    return BQ_TYPES[duckdb_type(annotation)]
-
-
 def columns(model: type[BaseModel]) -> list[tuple[str, str, bool, list[str] | None]]:
     """(name, duckdb type, nullable, accepted values) per field, in field order."""
     out = []
@@ -126,10 +122,10 @@ def render_bq_schema() -> str:
         out[table] = [
             {
                 "name": name,
-                "type": bigquery_type(model.model_fields[name].annotation),
+                "type": BQ_TYPES[typ],
                 "mode": "NULLABLE" if nullable else "REQUIRED",
             }
-            for name, _typ, nullable, _ in columns(model)
+            for name, typ, nullable, _ in columns(model)
         ]
     return json.dumps(out, indent=2) + "\n"
 

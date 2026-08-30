@@ -35,8 +35,9 @@ class Clients(Protocol):
         ...
 
     def recreate(self, table_id: str, schema: list[dict[str, str]]) -> None:
-        """Drop-if-exists and create `table_id` EMPTY with the contract schema —
-        an empty selection's landing (Amendment W: parity with DuckDB)."""
+        """Create `table_id` if absent (contract schema) and truncate it — an
+        empty selection's landing (Amendments W/W′: parity with DuckDB; the
+        table object is never dropped)."""
         ...
 
 
@@ -66,7 +67,8 @@ class GoogleClients:
         return int(job.output_rows or 0)
 
     def recreate(self, table_id: str, schema: list[dict[str, str]]) -> None:
-        self._client.delete_table(table_id, not_found_ok=True)
+        # W′: create-if-not-exists, then truncate — never drop-then-create, so
+        # the table object survives and a failure in between leaves a table.
         table = self._bq.Table(
             table_id,
             schema=[
@@ -74,7 +76,8 @@ class GoogleClients:
                 for f in schema
             ],
         )
-        self._client.create_table(table)
+        self._client.create_table(table, exists_ok=True)
+        self._client.query(f"truncate table `{table_id}`").result()
 
 
 ClientFactory = Callable[[str], Clients]

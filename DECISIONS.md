@@ -232,6 +232,19 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
   9a residual, its own fix PR after 9b merges (BACKLOG); 9b's runbook uses
   the inline form. The operator address is redacted to `user:<operator>` in
   tracked records (#13). Wording: #6, #12, #14, #16–#20.
+- **Review round 2 (19 findings, scoped to round-1..HEAD; W′; approved
+  2026-08-30).** W′ — `recreate` is create-if-not-exists + `truncate`, never
+  drop-then-create (the table object and its metadata survive; a failure in
+  between leaves a table). Test pins closing round-1 fixes: the default
+  factory IS `GoogleClients` (+ a mutation line), the guard's key list equals
+  `PROPERTY_KEYS`, the carried gate refuses offline when absent, a planted
+  conflict fails on BigQuery too, a second landing is the same call sequence,
+  `profiles.yml`'s `dataset` is Terraform's. Accepted: V's env channel (an
+  in-process `pytest.main` would put `pytest` on a pipeline module — the
+  `test-int-airflow` posture stands); the project id / SA email in records
+  (BACKLOG, informational). **Cap watch:** round 2's correctness rows were
+  in round 1's fixes — one such round; a round 3 of the same shape invokes
+  the cap.
 - Not chosen and noted: BigQuery clustering (tiny; `user_id` is the candidate
   when a profile is large enough to measure); `medium` on BigQuery (109 MB, a
   deliberate later run).

@@ -24,6 +24,7 @@ class Recorder:
         self.project = project
         self.uploads: list[tuple[str, str, Path]] = []
         self.loads: list[tuple[str, list[str], dict]] = []
+        self.recreated: list[tuple[str, list[dict]]] = []
 
     def upload(self, bucket: str, name: str, path: Path) -> None:
         self.uploads.append((bucket, name, path))
@@ -33,7 +34,6 @@ class Recorder:
         return {"events": 970, "dim_user": 22}[table_id.rsplit(".", 1)[1]]
 
     def recreate(self, table_id: str, schema: list[dict]) -> None:
-        self.recreated: list[tuple[str, list[dict]]] = getattr(self, "recreated", [])
         self.recreated.append((table_id, schema))
 
 
@@ -89,6 +89,20 @@ def test_uploads_then_loads_with_the_generated_schema() -> None:
     assert r.loads[1][2]["null_marker"] == ""  # empty valid_to = the open row
     # the config is the only place the disposition lives (a mutation target)
     assert bq.load_job_config("events")["write_disposition"] == "WRITE_TRUNCATE"
+    assert r.recreated == []  # a full landing never recreates (round 2 #18)
+
+
+def test_second_landing_is_the_same_call_sequence() -> None:
+    """Invariant 3's "a second landing is byte-identical" (round 1 #13): two
+    landings of the same (fixture, THROUGH) issue identical uploads, loads and
+    configs — nothing accumulates, nothing depends on prior state."""
+    runs = []
+    for _ in range(2):
+        made, make = _factory()
+        bq.bq_load("tiny", "my-project", None, make)
+        r = made[0]
+        runs.append((r.uploads, r.loads, r.recreated))
+    assert runs[0] == runs[1]
 
 
 def test_empty_selection_recreates_empty_tables() -> None:
@@ -116,6 +130,7 @@ def test_no_client_is_built_before_validation(
     def sentinel(project: str) -> bq.Clients:
         raise AssertionError(f"a real client was requested for {project!r}")
 
+    assert bq.default_clients() is bq.GoogleClients  # round 2 #1: the real one
     monkeypatch.setattr(bq, "default_clients", lambda: sentinel)
     bad = [
         ("../x", "my-project", "yes", "command line", ""),
@@ -177,6 +192,38 @@ def test_int_bigquery_entry_validates_and_gates_before_pytest(
     assert env["OTR_CONFIRM"] == "yes" and env["OTR_CONFIRM_ORIGIN"] == "command line"
 
 
+def test_parity_fixture_refuses_without_the_carried_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Amendment V's own pin (round 2 #3): with no OTR_CONFIRM /
+    OTR_CONFIRM_ORIGIN in the env the parity module refuses before any build;
+    with the pair it passes them through unchanged, never a forged literal."""
+    from tests.integration import test_int_bigquery as parity
+
+    for var in ("OTR_CONFIRM", "OTR_CONFIRM_ORIGIN"):
+        monkeypatch.delenv(var, raising=False)
+    with pytest.raises(RuntimeError, match="refused"):
+        parity.carried_gate()
+    monkeypatch.setenv("OTR_CONFIRM", "yes")
+    with pytest.raises(RuntimeError, match="refused"):
+        parity.carried_gate()
+    monkeypatch.setenv("OTR_CONFIRM_ORIGIN", "environment")
+    assert parity.carried_gate() == ("yes", "environment")  # passed through
+    src = (ROOT / "tests" / "integration" / "test_int_bigquery.py").read_text()
+    assert '"command line"' not in src  # never forged in the module
+
+
+def test_duplicate_guard_keys_are_the_contract() -> None:
+    """Round 2 #2: the singular test's key list equals the union of
+    generator/models.py::PROPERTY_KEYS — a dropped or invented key is red."""
+    from generator.models import PROPERTY_KEYS
+
+    sql = (ROOT / "dbt" / "tests" / "assert_no_conflicting_duplicates.sql").read_text()
+    m = re.search(r"set keys = \[(.*?)\]", sql)
+    listed = {k.strip().strip("'") for k in m.group(1).split(",")}
+    assert listed == set().union(*PROPERTY_KEYS.values())
+
+
 def _tf_default(var: str) -> str:
     text = (ROOT / "infra" / "variables.tf").read_text()
     block = re.search(r'variable "' + var + r'" \{(.*?)\n\}', text, re.S).group(1)
@@ -191,6 +238,10 @@ def test_dataset_and_bucket_names_are_the_terraform_defaults() -> None:
 
     assert bq.RAW_DATASET == _tf_default("raw_dataset")
     assert parity.MODELS_DATASET == _tf_default("models_dataset")
+    profiles = (ROOT / "dbt" / "profiles.yml").read_text()  # round 2 #10
+    assert re.search(
+        r"^\s*dataset:\s*" + _tf_default("models_dataset") + r"\s*$", profiles, re.M
+    )
     main = (ROOT / "infra" / "main.tf").read_text()
     m = re.search(r'staging_bucket\s*=\s*"\$\{var\.project_id\}(-[a-z0-9-]+)"', main)
     assert m and bq.bucket_name("p") == "p" + m.group(1)
