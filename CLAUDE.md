@@ -210,8 +210,11 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   *(Phase 9b)* — the BigQuery landing alone (`loader/cli.py bq-load`): the same
   files `load` selects → `gs://<id>-ontime/landing/<p>/{raw,dims}/` → `raw.events`
   / `raw.dim_user` with the schema GENERATED from `generator/models.py`
-  (`loader/bq_schema.json`), recreated (`WRITE_TRUNCATE` — idempotent); prints
-  `bq-load OK: <p> — N files, E event rows, D dim rows`. Cloud-cost (cents):
+  (`loader/bq_schema.json`), one `WRITE_TRUNCATE` load job per table — the
+  only landing mechanism; an empty selection lands a zero-byte
+  `_empty.jsonl` through it (BigQuery rejects a job over zero URIs; §8) —
+  idempotent; prints `bq-load OK: <p> — N files[, landing ≤ <THROUGH>], E
+  event rows, D dim rows`. Cloud-cost (cents):
   `CONFIRM=yes` command-line origin; `PROJECT` validated before any client;
   ADC (impersonated SA), never a key. Verifies `MANIFEST.sha256` like `load`
 - `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` and its
@@ -689,13 +692,15 @@ detour (undelete + `terraform import`), `Apply complete! 18 added` with
 tiny/bigquery` (PASS=126 — the DuckDB count) and `make test-int-bigquery` →
 `3 passed`: the three goldens byte-identical off BigQuery, pins hold, exactly
 two datasets. Re-proven at round-2 HEAD (`d204513`): `PASS=126`, `4 passed` (a
-planted conflict fails on BigQuery too), and an empty-selection landing
-executed W′'s `recreate` live. Two live surprises, both §8: dbt-bigquery admits no custom
+planted conflict fails on BigQuery too); re-proven again at round-3 HEAD
+(`5878cf5`) after the cap's Amendment X: an empty-selection landing through
+the ONE mechanism (a zero-byte `_empty.jsonl` load job → `0 event rows`),
+`PASS=126`, `4 passed`. Two live surprises, both §8: dbt-bigquery admits no custom
 incremental strategy → **Amendment U** (native `insert_overwrite` selected on
 `target.type`; the dispatch body raises by design), and unit fixtures had
 DuckDB-only forms (`::json`, `date_diff`) → portable fixtures. Offline suite
-green (431), lint clean, mutate 9/9; review rounds 1–3 applied (amendments
-V, W/W′ → X). **Phase 9's Done-when is met.** Round 3 invoked the
+green (431), lint clean, mutate 8/8; review rounds 1–4 applied (amendments
+V, W/W′ → X; round 4 was the cap's one scoped re-review). **Phase 9's Done-when is met.** Round 3 invoked the
 **cap** (two rounds of findings inside the previous round's fixes — the
 landing's empty-selection path): Amendment X re-implemented it once as ONE
 mechanism (the load job; a zero-byte object for an empty selection;

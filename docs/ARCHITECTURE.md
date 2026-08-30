@@ -278,7 +278,7 @@ data profile, `TARGET` the warehouse.
 | stub | replaces | swap |
 |---|---|---|
 | generator → `fixtures/<profile>/raw/events_<upload-date>.jsonl` (one file per UTC `server_upload_time` date — the landing unit Phase 7 replays) | Amplitude → BigQuery export | dbt `source` config |
-| `make bq-load` — the fixture files → the GCS staging bucket (`landing/<profile>/`) → `raw.events` / `raw.dim_user`, explicit schema generated from the contract, recreated per landing (Phase 9b) | Amplitude's own export job writing the `raw` dataset | the landing step is dropped; the source config is unchanged |
+| `make bq-load` — the fixture files → the GCS staging bucket (`landing/<profile>/`) → `raw.events` / `raw.dim_user`, explicit schema generated from the contract, one `WRITE_TRUNCATE` load job per table — an empty selection lands a zero-byte object through it (Phase 9b, X) | Amplitude's own export job writing the `raw` dataset | the landing step is dropped; the source config is unchanged |
 | `dim_user` seed file (`dims/dim_user.csv`, loaded as the `raw.dim_user` source by `make load` — not a dbt seed, whose path could not follow `PROFILE`) | Spanner change streams / federation | `EXTERNAL_QUERY` source (demo), Dataflow template (prod) — a source-config swap, no model changes |
 | DuckDB `send_schedule` table | Spanner serving table | write-back target flag |
 
@@ -463,6 +463,14 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   (`date_diff('second', …)`, DuckDB-only) is written as the literal it
   evaluates to. The models' dialect denylist never covered `schema.yml`; the
   BigQuery build is what caught both.
+- **BigQuery rejects a load job over zero URIs, but loads a zero-byte NDJSON
+  object as 0 rows** (Phase 9b, review rounds 2–4 — the cap's seam). An
+  empty selection (`THROUGH` before the first upload) must still recreate
+  `raw.events` empty (the DuckDB landing exits 0 with an empty table). A
+  second mechanism for it (create/truncate) drew three rounds of findings;
+  Amendment X lands a zero-byte `landing/<profile>/raw/_empty.jsonl` through
+  the same `WRITE_TRUNCATE` load job — one mechanism, schema always the
+  contract, no SQL string on the path. Proven live 2026-08-30.
 - **`generate_schema_name_for_env` is not dbt's default** (Phase 9b, first
   DuckDB build after the override). The obvious "else keep the default" call
   collapses EVERY non-`prod` target to `target.schema` — the first build landed

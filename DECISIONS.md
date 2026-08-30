@@ -211,7 +211,7 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
 - **Review round 1 (20 findings; 2 amendments V, W; approved 2026-08-30).**
   V — the parity fixture carries `OTR_CONFIRM`/`OTR_CONFIRM_ORIGIN` from the
   gated `int_bigquery` entry instead of forging them (a bare `pytest` with
-  `OTR_INT=1` ran a billable build); W — an empty selection recreates empty
+  `OTR_INT=1` ran a billable build); W (superseded by X, round 3) — an empty selection recreates empty
   raw tables (parity with the DuckDB landing; BigQuery rejects a load over
   zero URIs). Fixes: the default client factory resolves at call time so the
   offline sentinel is a control, not a claim (#1); the duplicate test marks
@@ -233,7 +233,7 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
   the inline form. The operator address is redacted to `user:<operator>` in
   tracked records (#13). Wording: #6, #12, #14, #16–#20.
 - **Review round 2 (19 findings, scoped to round-1..HEAD; W′; approved
-  2026-08-30).** W′ — `recreate` is create-if-not-exists + `truncate`, never
+  2026-08-30).** W′ (superseded by X, round 3) — `recreate` is create-if-not-exists + `truncate`, never
   drop-then-create (the table object and its metadata survive; a failure in
   between leaves a table). Test pins closing round-1 fixes: the default
   factory IS `GoogleClients` (+ a mutation line), the guard's key list equals
@@ -260,6 +260,16 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
   read-less protocol, pinned statically). Round 4 is the one scoped
   re-review. Records: the mangled Phase 2 line repaired; invariants 3/6/7
   name every round-2 test.
+- **Review round 4 — the cap's one scoped re-review (17 findings; approved
+  2026-08-30; no round 5).** Test pins the fake could not express: its rows
+  now follow the URIs (a zero-byte object → 0), the CLI's empty landing is
+  driven to success offline, the one-mechanism grep covers `loader/cli.py`,
+  the planted insert is built by column name. Records: invariant 3 restated
+  in its own table; W/W′ marked superseded; §8 gains the zero-URI / zero-byte
+  fact; CLAUDE/PHASES numbers. Accepted: a two-landing test on the fake
+  proves only the fake (the disposition + read-less protocol are the pin);
+  the per-landing temp dir stays (one syscall; lazy creation re-opens the
+  seam). Later residue → BACKLOG with a trigger.
 - Not chosen and noted: BigQuery clustering (tiny; `user_id` is the candidate
   when a profile is large enough to measure); `medium` on BigQuery (109 MB, a
   deliberate later run).

@@ -373,7 +373,7 @@ dated BACKLOG row, not a job. The partition-overwrite seam's BigQuery half is
 the adapter's native `insert_overwrite` (dbt-bigquery admits no custom
 strategy — Amendment U, §8). **Live 2026-08-30** on `ontime-rate-recovery`,
 as the SA, after the undelete + import detour: `dbt-build OK: tiny/bigquery`
-(PASS=126, the DuckDB count) and `test-int-bigquery` `3 passed` — the three
+(PASS=126, the DuckDB count) and `test-int-bigquery` `4 passed` (round 2 added a planted conflict on BigQuery) — the three
 goldens byte-identical, pins hold, two datasets. Phase 9's Done-when is met.
 
 ---

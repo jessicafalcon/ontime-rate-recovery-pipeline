@@ -3,14 +3,15 @@ staging bucket → the `raw` dataset, as `bq load` would do it.
 
 The `make load` contract, second dialect: the SAME files the DuckDB loader
 selects (`load.event_files`, THROUGH-filtered by name), an EXPLICIT schema
-generated from the contract (`loader/bq_schema.json`, never inferred), and a
-recreate (`WRITE_TRUNCATE`) so a second landing is byte-identical, never
-appended — and that load job is the ONLY landing mechanism (Amendment X: an
-empty selection lands a zero-byte object through it). Every cloud call goes
-through a `Clients` object built by an
-injectable factory: the offline suite injects a fake and the default factory
-(the google clients dbt-bigquery brings) is never constructed there. Auth is
-ADC — the operator's impersonated SA credential — never a keyfile."""
+generated from the contract (`loader/bq_schema.json`, never inferred), and one
+`WRITE_TRUNCATE` load job per table — the ONLY landing mechanism, so a second
+landing is byte-identical, never appended, and nothing reads prior table state
+(Amendment X: an empty selection lands a zero-byte object through the same
+job — BigQuery rejects a job over zero URIs but loads a zero-byte object as 0
+rows). Every cloud call goes through a `Clients` object built by an injectable
+factory: the offline suite injects a fake and the default factory (the google
+clients dbt-bigquery brings) is never constructed there. Auth is ADC — the
+operator's impersonated SA credential — never a keyfile."""
 
 from __future__ import annotations
 

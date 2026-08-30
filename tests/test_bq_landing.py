@@ -1,8 +1,9 @@
 """The BigQuery landing (specs/phase-9b-bigquery-dialect.md invariants 3, 7):
-the same files the DuckDB loader selects, the generated schema, a recreate —
-against FAKE clients. No google client is ever built here: the default factory
-is replaced by a sentinel that raises, so a code path constructing one goes red
-offline instead of reaching the network."""
+the same files the DuckDB loader selects, the generated schema, ONE
+WRITE_TRUNCATE load job per table (a zero-byte object for an empty selection —
+Amendment X) — against FAKE clients. No google client is ever built here: the
+default factory is replaced by a sentinel that raises, so a code path
+constructing one goes red offline instead of reaching the network."""
 
 from __future__ import annotations
 
@@ -24,14 +25,18 @@ class Recorder:
         self.project = project
         self.uploads: list[tuple[str, str, Path]] = []
         self.loads: list[tuple[str, list[str], dict]] = []
+        self.sizes: dict[str, int] = {}
 
     def upload(self, bucket: str, name: str, path: Path) -> None:
         self.uploads.append((bucket, name, path))
-        self.sizes = getattr(self, "sizes", {})
         self.sizes[name] = path.stat().st_size  # read now: a temp file may vanish
 
     def load(self, table_id: str, uris: list[str], config: dict) -> int:
+        """Rows follow the URIs, as BigQuery's would: a zero-byte object loads
+        0 rows (round 4 #2 — a constant could not pin the empty landing)."""
         self.loads.append((table_id, uris, config))
+        if all(u.endswith(bq.EMPTY_OBJECT) for u in uris):
+            return 0
         return {"events": 970, "dim_user": 22}[table_id.rsplit(".", 1)[1]]
 
 
@@ -108,8 +113,29 @@ def test_landing_reads_nothing_and_uses_one_mechanism(
         "my-project.zz.events",
         "my-project.zz.dim_user",
     ]
-    src = (ROOT / "loader" / "bq.py").read_text()
-    assert ".query(" not in src and "truncate" not in src and "delete_table" not in src
+    for module in ("bq.py", "cli.py"):  # round 4 #1: the whole cloud path
+        src = (ROOT / "loader" / module).read_text()
+        for forbidden in (".query(", "truncate", "delete_table", "create_table"):
+            assert forbidden not in src, (module, forbidden)
+
+
+def test_cli_empty_landing_succeeds_and_reports_zero(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Round 4 #1/#2: the CLI path to a successful EMPTY landing — the line
+    Evidence row 4 quotes, off the fake whose rows follow the URIs."""
+    made, make = _factory()
+    rc = cli.bq_load("tiny", "my-project", "yes", "command line", "2025-01-01", make)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert (
+        "bq-load OK: tiny — 0 files, landing ≤ 2025-01-01, 0 event rows, 22 dim rows"
+        in out
+    )
+    assert [t for t, _, _ in made[0].loads] == [
+        "my-project.raw.events",
+        "my-project.raw.dim_user",
+    ]
 
 
 def test_empty_selection_lands_a_zero_byte_object_through_the_same_job() -> None:
@@ -121,7 +147,7 @@ def test_empty_selection_lands_a_zero_byte_object_through_the_same_job() -> None
     DuckDB landing's exit-0-empty."""
     made, make = _factory()
     files, events, dims = bq.bq_load("tiny", "my-project", "2025-01-01", make)
-    assert (files, events, dims) == (0, 970, 22)  # the fake's rows; live: 0
+    assert (files, events, dims) == (0, 0, 22)
     r = made[0]
     empties = [(n, p) for _, n, p in r.uploads if n.endswith(bq.EMPTY_OBJECT)]
     assert len(empties) == 1 and empties[0][0] == "landing/tiny/raw/_empty.jsonl"

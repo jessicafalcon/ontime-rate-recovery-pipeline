@@ -15,6 +15,7 @@ exactly two datasets exist (invariant 1 — nothing created out of band)."""
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -131,7 +132,6 @@ def test_planted_conflict_fails_on_bigquery(built: str) -> None:
     one clock triple whose payloads differ only in `""` vs `null` make
     `assert_no_conflicting_duplicates` fail through the json_value form; the
     rows are removed after, and the test is re-run green."""
-    import json
 
     from dbt.cli.main import dbtRunner
 
