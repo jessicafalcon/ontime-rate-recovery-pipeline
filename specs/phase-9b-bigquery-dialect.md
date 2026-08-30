@@ -263,10 +263,14 @@ build at tiny as the SA, `to_local_time` across the tz-change users first.
   same function on both engines): the DuckDB landing exits 0 with an empty
   `raw.events` when `THROUGH` precedes the first upload; the BigQuery landing
   issued `load_table_from_uri([])`, which BigQuery rejects. Mechanism:
-  `Clients` gains `recreate(table_id, schema)` (delete-if-exists + create with
-  the contract schema); `bq_load` calls it instead of `load` when a table's
-  selection is empty; the fake records it. Rejected: refusing (the two
-  landings would differ on the same input).
+  `Clients` gains `recreate(table_id, schema)`; `bq_load` calls it instead of
+  `load` when a table's selection is empty; the fake records it. Rejected:
+  refusing (the two landings would differ on the same input). **W′ (round 2
+  #7):** `recreate` is `create_table(…, exists_ok=True)` followed by a
+  `truncate table` query — never delete-then-create — so the table object and
+  its metadata survive and a failure between the two calls leaves a table
+  (empty or old), never none; the fake pins the two-call shape and the full
+  landing never recreates.
 - Fixes without amendment (approved in the same round): #1 the default client
   factory is resolved at call time (`clients=None` → `bq.default_clients()`)
   so the offline sentinel is a real control; #3/#4 the conflicting-duplicate
@@ -282,6 +286,21 @@ build at tiny as the SA, `to_local_time` across the tz-change users first.
   specs' renamed Evidence ids updated in place, "(renamed in Phase 9b)" — the
   one sanctioned edit to a merged spec, recorded in DECISIONS; #6, #12,
   #16–#20 test/wording.
+
+## Amendments (review round 2, approved 2026-08-30 — scoped to round-1..HEAD)
+
+- **W′ folded into W above (#7).** Fixes: #1 `default_clients() is
+  GoogleClients` asserted + a mutation line; #2 the guard's key list tied to
+  `PROPERTY_KEYS`; #3 the carried gate (`carried_gate()`) refused offline
+  when absent; #4 a planted `""`-vs-`null` conflict on BigQuery in
+  `test-int-bigquery`; #9 `bq_load invert-guard` line; #10 `profiles.yml`
+  `dataset` pinned to Terraform; #13 a second landing's call sequence is
+  identical; #18 the fake's `recreated` is eager; #17 one type derivation;
+  #5/#6 the cloud half re-run at HEAD (incl. one `THROUGH=2025-01-01`
+  landing so `recreate` executes live). Accepted: #12 (V's residual, in the
+  threat model), #19 (project id / SA email informational — BACKLOG row).
+  Cap watch: round 2's correctness rows sit in round 1's fixes; a round 3 of
+  the same shape invokes the cap.
 
 ---
 
