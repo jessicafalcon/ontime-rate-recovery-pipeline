@@ -24,17 +24,15 @@ class Recorder:
         self.project = project
         self.uploads: list[tuple[str, str, Path]] = []
         self.loads: list[tuple[str, list[str], dict]] = []
-        self.recreated: list[tuple[str, list[dict]]] = []
 
     def upload(self, bucket: str, name: str, path: Path) -> None:
         self.uploads.append((bucket, name, path))
+        self.sizes = getattr(self, "sizes", {})
+        self.sizes[name] = path.stat().st_size  # read now: a temp file may vanish
 
     def load(self, table_id: str, uris: list[str], config: dict) -> int:
         self.loads.append((table_id, uris, config))
         return {"events": 970, "dim_user": 22}[table_id.rsplit(".", 1)[1]]
-
-    def recreate(self, table_id: str, schema: list[dict]) -> None:
-        self.recreated.append((table_id, schema))
 
 
 def _factory() -> tuple[list[Recorder], bq.ClientFactory]:
@@ -89,34 +87,50 @@ def test_uploads_then_loads_with_the_generated_schema() -> None:
     assert r.loads[1][2]["null_marker"] == ""  # empty valid_to = the open row
     # the config is the only place the disposition lives (a mutation target)
     assert bq.load_job_config("events")["write_disposition"] == "WRITE_TRUNCATE"
-    assert r.recreated == []  # a full landing never recreates (round 2 #18)
+    assert all(bq.EMPTY_OBJECT not in n for _, n, _ in r.uploads)  # no empty marker
 
 
-def test_second_landing_is_the_same_call_sequence() -> None:
-    """Invariant 3's "a second landing is byte-identical" (round 1 #13): two
-    landings of the same (fixture, THROUGH) issue identical uploads, loads and
-    configs — nothing accumulates, nothing depends on prior state."""
-    runs = []
-    for _ in range(2):
-        made, make = _factory()
-        bq.bq_load("tiny", "my-project", None, make)
-        r = made[0]
-        runs.append((r.uploads, r.loads, r.recreated))
-    assert runs[0] == runs[1]
+def test_landing_reads_nothing_and_uses_one_mechanism(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Amendment X (invariant 3): the `Clients` protocol declares upload and
+    load ONLY — no read, query or DDL — so a landing cannot depend on prior
+    table state; every table id follows RAW_DATASET (round 3 #4); the source
+    interpolates no identifier into SQL."""
+    assert sorted(n for n in vars(bq.Clients) if not n.startswith("_")) == [
+        "load",
+        "upload",
+    ]
+    monkeypatch.setattr(bq, "RAW_DATASET", "zz")
+    made, make = _factory()
+    bq.bq_load("tiny", "my-project", None, make)
+    assert [t for t, _, _ in made[0].loads] == [
+        "my-project.zz.events",
+        "my-project.zz.dim_user",
+    ]
+    src = (ROOT / "loader" / "bq.py").read_text()
+    assert ".query(" not in src and "truncate" not in src and "delete_table" not in src
 
 
-def test_empty_selection_recreates_empty_tables() -> None:
-    """Amendment W (invariant 3): a THROUGH before the first upload lands an
-    EMPTY raw.events (recreated with the contract schema — no load job over
-    zero URIs, which BigQuery rejects) and the dim seed as usual — the same
-    function of (fixture, THROUGH) as the DuckDB landing's exit-0-empty."""
+def test_empty_selection_lands_a_zero_byte_object_through_the_same_job() -> None:
+    """Amendments W → X (invariant 3): a THROUGH before the first upload lands
+    an EMPTY raw.events by the ONE mechanism — a zero-byte `_empty.jsonl`
+    uploaded and loaded with the contract schema + WRITE_TRUNCATE (BigQuery
+    rejects a job over zero URIs; a second mechanism was the cap's cause) —
+    and the dim seed as usual: the same function of (fixture, THROUGH) as the
+    DuckDB landing's exit-0-empty."""
     made, make = _factory()
     files, events, dims = bq.bq_load("tiny", "my-project", "2025-01-01", make)
-    assert (files, events, dims) == (0, 0, 22)
+    assert (files, events, dims) == (0, 970, 22)  # the fake's rows; live: 0
     r = made[0]
-    assert r.recreated == [("my-project.raw.events", bq.schema_fields("events"))]
-    assert [t for t, _, _ in r.loads] == ["my-project.raw.dim_user"]
-    assert all(n.startswith("landing/tiny/dims/") for _, n, _ in r.uploads)
+    empties = [(n, p) for _, n, p in r.uploads if n.endswith(bq.EMPTY_OBJECT)]
+    assert len(empties) == 1 and empties[0][0] == "landing/tiny/raw/_empty.jsonl"
+    assert r.sizes[empties[0][0]] == 0
+    ev_id, ev_uris, ev_cfg = r.loads[0]
+    assert ev_id == "my-project.raw.events"
+    assert ev_uris == ["gs://my-project-ontime/landing/tiny/raw/_empty.jsonl"]
+    assert ev_cfg == bq.load_job_config("events")  # the same job, same schema
+    assert [t for t, _, _ in r.loads][1] == "my-project.raw.dim_user"
 
 
 def test_no_client_is_built_before_validation(
@@ -211,6 +225,11 @@ def test_parity_fixture_refuses_without_the_carried_gate(
     assert parity.carried_gate() == ("yes", "environment")  # passed through
     src = (ROOT / "tests" / "integration" / "test_int_bigquery.py").read_text()
     assert '"command line"' not in src  # never forged in the module
+    # round 3 #10: the planted conflict is always cleaned up, and #9: the
+    # insert names its columns from the contract
+    cleanup = r"finally:\n\s+client\.query\(f\"delete from \{table\} where insert_id"
+    assert re.search(cleanup, src)
+    assert "insert into {table} ({columns}) values" in src
 
 
 def test_duplicate_guard_keys_are_the_contract() -> None:

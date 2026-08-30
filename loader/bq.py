@@ -5,7 +5,9 @@ The `make load` contract, second dialect: the SAME files the DuckDB loader
 selects (`load.event_files`, THROUGH-filtered by name), an EXPLICIT schema
 generated from the contract (`loader/bq_schema.json`, never inferred), and a
 recreate (`WRITE_TRUNCATE`) so a second landing is byte-identical, never
-appended. Every cloud call goes through a `Clients` object built by an
+appended — and that load job is the ONLY landing mechanism (Amendment X: an
+empty selection lands a zero-byte object through it). Every cloud call goes
+through a `Clients` object built by an
 injectable factory: the offline suite injects a fake and the default factory
 (the google clients dbt-bigquery brings) is never constructed there. Auth is
 ADC — the operator's impersonated SA credential — never a keyfile."""
@@ -13,6 +15,7 @@ ADC — the operator's impersonated SA credential — never a keyfile."""
 from __future__ import annotations
 
 import json
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -23,21 +26,17 @@ SCHEMA_PATH = loader.ROOT / "loader" / "bq_schema.json"
 RAW_DATASET = "raw"  # infra/variables.tf raw_dataset default
 LANDING_PREFIX = "landing"  # objects: landing/<profile>/<raw|dims>/<file>
 FILES_PER_TABLE = {"events": "raw", "dim_user": "dims"}  # table → fixture subtree
+EMPTY_OBJECT = "_empty.jsonl"  # the zero-byte landing of an empty selection (X)
 
 
 class Clients(Protocol):
-    """The two cloud calls the landing makes; a fake implements the same two."""
+    """The two cloud calls the landing makes — and only these: no read, no
+    query, no DDL (Amendment X) — so a fake implements the same two."""
 
     def upload(self, bucket: str, name: str, path: Path) -> None: ...
 
     def load(self, table_id: str, uris: list[str], config: dict[str, Any]) -> int:
         """Load `uris` into `table_id` under `config`; returns rows loaded."""
-        ...
-
-    def recreate(self, table_id: str, schema: list[dict[str, str]]) -> None:
-        """Create `table_id` if absent (contract schema) and truncate it — an
-        empty selection's landing (Amendments W/W′: parity with DuckDB; the
-        table object is never dropped)."""
         ...
 
 
@@ -65,19 +64,6 @@ class GoogleClients:
         )
         job.result()
         return int(job.output_rows or 0)
-
-    def recreate(self, table_id: str, schema: list[dict[str, str]]) -> None:
-        # W′: create-if-not-exists, then truncate — never drop-then-create, so
-        # the table object survives and a failure in between leaves a table.
-        table = self._bq.Table(
-            table_id,
-            schema=[
-                self._bq.SchemaField(f["name"], f["type"], mode=f["mode"])
-                for f in schema
-            ],
-        )
-        self._client.create_table(table, exists_ok=True)
-        self._client.query(f"truncate table `{table_id}`").result()
 
 
 ClientFactory = Callable[[str], Clients]
@@ -135,23 +121,25 @@ def bq_load(
     clients: ClientFactory | None = None,
 ) -> tuple[int, int, int]:
     """(event files, event rows, dim rows). Uploads the selected files under
-    `landing/<profile>/`, then one load job per table into `<project>.raw`; a
-    table with no selected file is recreated empty (Amendment W)."""
+    `landing/<profile>/`, then ONE load job per table into `<project>.raw` —
+    the only landing mechanism (Amendment X): a table with no selected file
+    lands a zero-byte object through the same job, so `WRITE_TRUNCATE` + the
+    contract schema re-create it empty."""
     fixture = loader.fixture_dir(profile)
     files = selected_files(fixture, through)
     c = (clients or default_clients())(project)
     bucket = bucket_name(project)
     rows: dict[str, int] = {}
-    for table, paths in files.items():
-        table_id = f"{project}.{RAW_DATASET}.{table}"
-        if not paths:
-            c.recreate(table_id, schema_fields(table))
-            rows[table] = 0
-            continue
-        uris = []
-        for path in paths:
-            name = object_name(profile, table, path)
-            c.upload(bucket, name, path)
-            uris.append(f"gs://{bucket}/{name}")
-        rows[table] = c.load(table_id, uris, load_job_config(table))
+    with tempfile.TemporaryDirectory() as tmp:
+        empty = Path(tmp) / EMPTY_OBJECT
+        empty.write_bytes(b"")
+        for table, paths in files.items():
+            uris = []
+            for path in paths or [empty]:
+                name = object_name(profile, table, path)
+                c.upload(bucket, name, path)
+                uris.append(f"gs://{bucket}/{name}")
+            rows[table] = c.load(
+                f"{project}.{RAW_DATASET}.{table}", uris, load_job_config(table)
+            )
     return len(files["events"]), rows["events"], rows["dim_user"]

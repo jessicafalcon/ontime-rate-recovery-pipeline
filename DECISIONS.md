@@ -245,6 +245,21 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
   (BACKLOG, informational). **Cap watch:** round 2's correctness rows were
   in round 1's fixes — one such round; a round 3 of the same shape invokes
   the cap.
+  Round 2 also edited the two merged specs again (Phase 2 :202 wording,
+  Phase 7 :262 note placement) under the same sanctioned-edit rule.
+- **Review round 3 — the cap invoked (12 findings; Amendment X; approved
+  2026-08-30).** Round 2's correctness rows were in round 1's fixes and
+  round 3's in round 2's (W′'s `recreate`: an unpinned two-call shape, a
+  schema-preserving `exists_ok`, the one interpolated SQL string on the
+  cloud path) — two consecutive rounds. Invariant 3 restated: ONE landing
+  mechanism, the load job with the contract schema and `WRITE_TRUNCATE`;
+  nothing on the path reads table state or interpolates an identifier.
+  Re-implemented once: `recreate` deleted; an empty selection uploads a
+  zero-byte `_empty.jsonl` and loads it through the same job. The vacuous
+  "second landing" test was deleted (the property is the disposition plus a
+  read-less protocol, pinned statically). Round 4 is the one scoped
+  re-review. Records: the mangled Phase 2 line repaired; invariants 3/6/7
+  name every round-2 test.
 - Not chosen and noted: BigQuery clustering (tiny; `user_id` is the candidate
   when a profile is large enough to measure); `medium` on BigQuery (109 MB, a
   deliberate later run).

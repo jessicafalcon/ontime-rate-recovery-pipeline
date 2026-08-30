@@ -694,10 +694,14 @@ executed W′'s `recreate` live. Two live surprises, both §8: dbt-bigquery admi
 incremental strategy → **Amendment U** (native `insert_overwrite` selected on
 `target.type`; the dispatch body raises by design), and unit fixtures had
 DuckDB-only forms (`::json`, `date_diff`) → portable fixtures. Offline suite
-green (431), lint clean, mutate 9/9; review rounds 1–2 applied (amendments
-V, W/W′). **Phase 9's Done-when is met.** Next: review
-round 1 (full union), scoped rounds after, coherence-auditor once at exit;
-the applied stack stays up (cents) until `tf-destroy` is asked for.
+green (431), lint clean, mutate 9/9; review rounds 1–3 applied (amendments
+V, W/W′ → X). **Phase 9's Done-when is met.** Round 3 invoked the
+**cap** (two rounds of findings inside the previous round's fixes — the
+landing's empty-selection path): Amendment X re-implemented it once as ONE
+mechanism (the load job; a zero-byte object for an empty selection;
+`recreate` gone). Next: round 4, the one scoped re-review, then the
+coherence-auditor once at exit; the applied stack stays up (cents) until
+`tf-destroy` is asked for.
 Open BACKLOG rows: **13** (9b struck: the two-datasets row, the DAG-landing
 row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
 (first 9b apply 2026-08-30); opened: the guard's contract residual (JSON

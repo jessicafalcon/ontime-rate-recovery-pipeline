@@ -131,10 +131,14 @@ def test_planted_conflict_fails_on_bigquery(built: str) -> None:
     one clock triple whose payloads differ only in `""` vs `null` make
     `assert_no_conflicting_duplicates` fail through the json_value form; the
     rows are removed after, and the test is re-run green."""
+    import json
+
     from dbt.cli.main import dbtRunner
 
     client = _client(built)
     table = f"`{built}.raw.events`"
+    schema = json.loads((ROOT / "loader" / "bq_schema.json").read_text())
+    columns = ", ".join(f["name"] for f in schema["events"])  # contract order
     common = (
         "'e-planted', 'upload_started', 'u-1', 'd-1', "
         "timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:01', "
@@ -149,7 +153,7 @@ def test_planted_conflict_fails_on_bigquery(built: str) -> None:
             '{"prompt_id": "p-x", "attempt": 1, "error_code": null}',
         ):
             client.query(
-                f"insert into {table} values ({common} json '{payload}')"
+                f"insert into {table} ({columns}) values ({common} json '{payload}')"
             ).result()
         assert not dbtRunner().invoke(args).success
     finally:
