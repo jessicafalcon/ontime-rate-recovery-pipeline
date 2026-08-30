@@ -1,5 +1,5 @@
-{#- Delete-and-insert per partition on DuckDB, insert_overwrite on BigQuery
-    (§2.7). The set-based subquery form has no partition list to mis-quote: it
+{#- Delete-and-insert per partition on DuckDB; on BigQuery the adapter's native
+    insert_overwrite strategy, selected in the models' config (§2.7, Amendment U). The set-based subquery form has no partition list to mis-quote: it
     replaces exactly the partitions present in the incoming batch. `dest_cols` is
     the model's column list (from dbt's dest_columns), so the insert is
     column-explicit, not `select *`. First caller: the incremental event-level
@@ -15,14 +15,16 @@
     select {{ dest_cols }} from {{ batch_relation }}
 {% endmacro %}
 
-{#- The same delete-in-set + insert, as one two-statement BigQuery script; the target is natively
-    date-partitioned on partition_col (the models' dialect-guarded partition_by), so the delete prunes to the
-    batch's partitions (Phase 9b). -#}
+{#- Unreachable BY DESIGN (Phase 9b, Amendment U). dbt-bigquery ships its own
+    incremental materialization and validates incremental_strategy against
+    'merge' | 'insert_overwrite' | 'microbatch' — a custom get_incremental_<name>_sql
+    is never looked up there — so on BigQuery the models select the adapter's
+    NATIVE insert_overwrite in config() (dynamic mode: delete the partitions
+    present in the batch, then insert — the same semantics as the DuckDB body;
+    §2.7, ARCHITECTURE §8). Reaching this body means a model bypassed that
+    selection: fail loudly rather than emit SQL nobody runs. -#}
 {% macro bigquery__partition_overwrite(target_relation, batch_relation, partition_col, dest_cols) %}
-    delete from {{ target_relation }}
-    where {{ partition_col }} in (select distinct {{ partition_col }} from {{ batch_relation }});
-    insert into {{ target_relation }} ({{ dest_cols }})
-    select {{ dest_cols }} from {{ batch_relation }}
+    {{ exceptions.raise_compiler_error("partition_overwrite: on BigQuery the seam is the adapter's native insert_overwrite strategy (Amendment U); this body must not be reached") }}
 {% endmacro %}
 
 {#- The custom incremental strategy (dbt resolves incremental_strategy=

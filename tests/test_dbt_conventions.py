@@ -116,14 +116,24 @@ def _body(name: str, dialect: str) -> str:
     return m.group(2)
 
 
+# The one BigQuery body that raises BY DESIGN (Phase 9b, Amendment U): dbt-bigquery
+# rejects a custom incremental strategy, so the models select its native
+# insert_overwrite on that dialect and this seam must not be reached there.
+UNREACHABLE_ON_BIGQUERY = ("partition_overwrite",)
+
+
 def test_each_macro_has_duckdb_and_bigquery_bodies() -> None:
-    """Phase 9b (invariant 5): both bodies exist and neither raises — the
-    `raise_compiler_error` stubs of Phases 2–8 are gone."""
+    """Phase 9b (invariant 5): both bodies exist; four BigQuery bodies are real
+    SQL (the Phase 2–8 stubs are gone) and partition_overwrite's raises with the
+    Amendment U message (an unreachable path fails loudly)."""
     for name in MACROS:
         for dialect in ("duckdb", "bigquery"):
             body = _body(name, dialect)
             assert body.strip(), (name, dialect)
-            assert "raise_compiler_error" not in body, (name, dialect)
+            if dialect == "bigquery" and name in UNREACHABLE_ON_BIGQUERY:
+                assert "raise_compiler_error" in body and "Amendment U" in body
+            else:
+                assert "raise_compiler_error" not in body, (name, dialect)
 
 
 def test_bigquery_bodies_are_the_named_forms() -> None:
@@ -150,8 +160,7 @@ def test_bigquery_bodies_are_the_named_forms() -> None:
         r"datetime\(\{\{ ts_utc \}\}, \{\{ tz \}\}\)",
         _body("to_local_time", "bigquery"),
     )
-    po = _body("partition_overwrite", "bigquery")
-    assert "delete from" in po and "insert into" in po and "select distinct" in po
+    assert "native insert_overwrite" in _body("partition_overwrite", "bigquery")
 
 
 def test_no_default_dispatch_body() -> None:
@@ -221,11 +230,15 @@ def test_incremental_models_use_the_partition_overwrite_strategy() -> None:
     """The three event-level models are incremental on the one strategy; the
     marts/features/scores stay table (they aggregate the full inputs)."""
     incr = {"stg_events", "stg_prompts", "attribution"}
+    strategy = (
+        "incremental_strategy=('insert_overwrite' if target.type == 'bigquery' "
+        "else 'partition_overwrite')"
+    )  # Amendment U: the adapter's native strategy on BigQuery, ours on DuckDB
     for p in (DBT / "models").rglob("*.sql"):
         text = p.read_text()
         if p.stem in incr:
             assert "materialized='incremental'" in text, p.stem
-            assert "incremental_strategy='partition_overwrite'" in text, p.stem
+            assert strategy in text, p.stem
         else:
             assert "materialized='incremental'" not in text, p.stem
 

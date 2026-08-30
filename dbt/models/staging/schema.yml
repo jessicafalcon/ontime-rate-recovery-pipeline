@@ -76,12 +76,12 @@ unit_tests:
       - input: source('raw', 'events')
         format: sql
         rows: |
-          select 'e-1' as insert_id, 'app_opened' as event_type, 'u-1' as user_id, 'd-1' as device_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:01' as server_received_time, timestamp '2026-01-05 08:01:00' as server_upload_time, '{}'::json as event_properties
-          union all select 'e-1', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:01', timestamp '2026-01-06 08:01:00', '{}'::json
-          union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 09:00:00', timestamp '2026-01-05 09:00:01', timestamp '2026-01-05 09:01:00', '{}'::json
-          union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 09:00:00', timestamp '2026-01-05 09:30:00', timestamp '2026-01-05 09:01:00', '{}'::json
-          union all select 'e-3', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:05:00', timestamp '2026-01-05 10:06:00', timestamp '2026-01-05 10:07:00', '{}'::json
-          union all select 'e-3', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:00:00', timestamp '2026-01-05 10:06:00', timestamp '2026-01-05 10:07:00', '{}'::json
+          select 'e-1' as insert_id, 'app_opened' as event_type, 'u-1' as user_id, 'd-1' as device_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:01' as server_received_time, timestamp '2026-01-05 08:01:00' as server_upload_time, {% if target.type == 'bigquery' %}json '{}'{% else %}'{}'::json{% endif %} as event_properties
+          union all select 'e-1', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:01', timestamp '2026-01-06 08:01:00', {% if target.type == 'bigquery' %}json '{}'{% else %}'{}'::json{% endif %}
+          union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 09:00:00', timestamp '2026-01-05 09:00:01', timestamp '2026-01-05 09:01:00', {% if target.type == 'bigquery' %}json '{}'{% else %}'{}'::json{% endif %}
+          union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 09:00:00', timestamp '2026-01-05 09:30:00', timestamp '2026-01-05 09:01:00', {% if target.type == 'bigquery' %}json '{}'{% else %}'{}'::json{% endif %}
+          union all select 'e-3', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:05:00', timestamp '2026-01-05 10:06:00', timestamp '2026-01-05 10:07:00', {% if target.type == 'bigquery' %}json '{}'{% else %}'{}'::json{% endif %}
+          union all select 'e-3', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 10:00:00', timestamp '2026-01-05 10:06:00', timestamp '2026-01-05 10:07:00', {% if target.type == 'bigquery' %}json '{}'{% else %}'{}'::json{% endif %}
       - input: source('raw', 'dim_user')
         format: sql
         rows: |
@@ -104,9 +104,9 @@ unit_tests:
       - input: source('raw', 'events')
         format: sql
         rows: |
-          select 'e-1' as insert_id, 'app_opened' as event_type, 'u-8' as user_id, 'd-8' as device_id, timestamp '2026-01-10 23:00:00' as client_event_time, timestamp '2026-01-10 23:00:01' as server_received_time, timestamp '2026-01-10 23:01:00' as server_upload_time, '{}'::json as event_properties
-          union all select 'e-2', 'app_opened', 'u-8', 'd-8', timestamp '2026-01-11 00:00:00', timestamp '2026-01-11 00:00:01', timestamp '2026-01-11 00:01:00', '{}'::json
-          union all select 'e-3', 'app_opened', 'u-8', 'd-8', timestamp '2027-06-01 12:00:00', timestamp '2027-06-01 12:00:01', timestamp '2027-06-01 12:01:00', '{}'::json
+          select 'e-1' as insert_id, 'app_opened' as event_type, 'u-8' as user_id, 'd-8' as device_id, timestamp '2026-01-10 23:00:00' as client_event_time, timestamp '2026-01-10 23:00:01' as server_received_time, timestamp '2026-01-10 23:01:00' as server_upload_time, {% if target.type == 'bigquery' %}json '{}'{% else %}'{}'::json{% endif %} as event_properties
+          union all select 'e-2', 'app_opened', 'u-8', 'd-8', timestamp '2026-01-11 00:00:00', timestamp '2026-01-11 00:00:01', timestamp '2026-01-11 00:01:00', {% if target.type == 'bigquery' %}json '{}'{% else %}'{}'::json{% endif %}
+          union all select 'e-3', 'app_opened', 'u-8', 'd-8', timestamp '2027-06-01 12:00:00', timestamp '2027-06-01 12:00:01', timestamp '2027-06-01 12:01:00', {% if target.type == 'bigquery' %}json '{}'{% else %}'{}'::json{% endif %}
       - input: source('raw', 'dim_user')
         format: sql
         rows: |
@@ -126,8 +126,8 @@ unit_tests:
       - input: source('raw', 'events')
         format: sql
         rows: |
-          select 'e-1' as insert_id, 'upload_started' as event_type, 'u-1' as user_id, 'd-1' as device_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:01' as server_received_time, timestamp '2026-01-05 08:01:00' as server_upload_time, '{"attempt":1,"error_code":null,"prompt_id":"p-1"}'::json as event_properties
-          union all select 'e-2', 'upload_failed', 'u-1', 'd-1', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:01', timestamp '2026-01-05 08:01:00', '{"attempt":1,"error_code":"E_NET","prompt_id":"p-1"}'::json
+          select 'e-1' as insert_id, 'upload_started' as event_type, 'u-1' as user_id, 'd-1' as device_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 08:00:01' as server_received_time, timestamp '2026-01-05 08:01:00' as server_upload_time, {% if target.type == 'bigquery' %}json '{"attempt":1,"error_code":null,"prompt_id":"p-1"}'{% else %}'{"attempt":1,"error_code":null,"prompt_id":"p-1"}'::json{% endif %} as event_properties
+          union all select 'e-2', 'upload_failed', 'u-1', 'd-1', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:00:01', timestamp '2026-01-05 08:01:00', {% if target.type == 'bigquery' %}json '{"attempt":1,"error_code":"E_NET","prompt_id":"p-1"}'{% else %}'{"attempt":1,"error_code":"E_NET","prompt_id":"p-1"}'::json{% endif %}
       - input: source('raw', 'dim_user')
         format: sql
         rows: |
@@ -146,8 +146,8 @@ unit_tests:
       - input: source('raw', 'events')
         format: sql
         rows: |
-          select 'e-1' as insert_id, 'app_opened' as event_type, 'u-1' as user_id, 'd-1' as device_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 09:00:00' as server_received_time, timestamp '2026-01-05 09:01:00' as server_upload_time, '{}'::json as event_properties
-          union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 08:10:00', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:01:00', '{}'::json
+          select 'e-1' as insert_id, 'app_opened' as event_type, 'u-1' as user_id, 'd-1' as device_id, timestamp '2026-01-05 08:00:00' as client_event_time, timestamp '2026-01-05 09:00:00' as server_received_time, timestamp '2026-01-05 09:01:00' as server_upload_time, {% if target.type == 'bigquery' %}json '{}'{% else %}'{}'::json{% endif %} as event_properties
+          union all select 'e-2', 'app_opened', 'u-1', 'd-1', timestamp '2026-01-05 08:10:00', timestamp '2026-01-05 08:00:00', timestamp '2026-01-05 08:01:00', {% if target.type == 'bigquery' %}json '{}'{% else %}'{}'::json{% endif %}
       - input: source('raw', 'dim_user')
         format: sql
         rows: |
