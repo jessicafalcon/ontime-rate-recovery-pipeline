@@ -239,6 +239,47 @@ build at tiny as the SA, `to_local_time` across the tz-change users first.
   and the 42 `date_diff('second', …)` fixture constants became literal
   seconds. Both §8.
 
+## Amendments (review round 1, approved 2026-08-30)
+
+- **V — The parity test carries the gate; it does not re-derive it (#2).**
+  Restores **invariant 7** (cloud targets are gated before any client exists).
+  The module fixture forged `("yes", "command line")`, so a bare `pytest` with
+  `OTR_INT=1` and a valid `OTR_GCP_PROJECT` in the environment ran a billable
+  landing + build. Mechanism: `loader/cli.py::int_bigquery` — the one gated
+  entry — exports `OTR_CONFIRM=yes` and `OTR_CONFIRM_ORIGIN=command line`
+  beside `OTR_INT`/`OTR_GCP_PROJECT`; the fixture passes those through to
+  `dbt_build` unchanged and refuses when either is absent, so the CONFIRM
+  check that ran in the entry is the one dbt_build sees. Residual, stated: an
+  environment can be hand-forged; the sanctioned path is the `make` target
+  (the `test-int-airflow` posture — `OTR_INT` is set in-recipe only).
+  `tests/test_bq_landing.py::test_int_bigquery_entry_validates_and_gates_before_pytest`
+  pins the exports. Rejected: a nonce the fixture verifies (the same shell
+  sets both — no stronger).
+- **W — An empty selection recreates empty tables (#7).** Restores
+  **invariant 3** (the landing is a function of `(fixture, THROUGH)`, the
+  same function on both engines): the DuckDB landing exits 0 with an empty
+  `raw.events` when `THROUGH` precedes the first upload; the BigQuery landing
+  issued `load_table_from_uri([])`, which BigQuery rejects. Mechanism:
+  `Clients` gains `recreate(table_id, schema)` (delete-if-exists + create with
+  the contract schema); `bq_load` calls it instead of `load` when a table's
+  selection is empty; the fake records it. Rejected: refusing (the two
+  landings would differ on the same input).
+- Fixes without amendment (approved in the same round): #1 the default client
+  factory is resolved at call time (`clients=None` → `bq.default_clients()`)
+  so the offline sentinel is a real control; #3/#4 the conflicting-duplicate
+  test marks nulls explicitly and a planted `""`-vs-`null` conflict pins it
+  (JSON-null-vs-missing and a `|` in a value are unreachable by contract —
+  BACKLOG row with a trigger); #5 MAE/coverage asserted off BigQuery rows;
+  #8 dataset/bucket names pinned to the Terraform defaults; #9 the runbook's
+  `TF_VAR_x=… make …` form (inline, not `-- -var`); the env-`TF_VAR_*`
+  bypass of Amendment T is a 9a residual → BACKLOG row + `fix/tf-vars-argv`
+  after 9b merges; #10/#11 the transitive footprint recorded and the two
+  google clients declared as direct dependencies; #13 the operator address
+  redacted to `user:<operator>`; #14 the SA-id row struck; #15 the two earlier
+  specs' renamed Evidence ids updated in place, "(renamed in Phase 9b)" — the
+  one sanctioned edit to a merged spec, recorded in DECISIONS; #6, #12,
+  #16–#20 test/wording.
+
 ---
 
 ## Why
