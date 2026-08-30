@@ -302,6 +302,33 @@ build at tiny as the SA, `to_local_time` across the tz-change users first.
   Cap watch: round 2's correctness rows sit in round 1's fixes; a round 3 of
   the same shape invokes the cap.
 
+## Amendment X (review round 3 — the cap, approved 2026-08-30)
+
+Round 2's correctness rows sat in round 1's fixes and round 3's (#1, #2,
+#3, #9, #10, #11) in round 2's — two consecutive rounds, the cap. The seam
+under churn is the BigQuery landing's empty-selection path: W/W′ introduced
+a SECOND landing mechanism (`recreate`: create/truncate, interpolated SQL,
+schema-preserving) beside the load job. **Invariant 3, restated so W′
+cannot survive it:** for all `(fixture, THROUGH)`, each raw table on
+BigQuery is landed by exactly ONE mechanism — a load job with the generated
+contract schema and `WRITE_TRUNCATE` — so its schema is always the contract
+and its rows are exactly the selected files' rows; nothing on the landing
+path reads prior table state or interpolates an identifier into SQL.
+**Mechanism (re-implemented once):** `recreate` is deleted; an empty
+selection uploads a zero-byte object (`landing/<profile>/raw/_empty.jsonl`,
+through the same `upload`) and runs the same load job over that one URI —
+0 rows, and `WRITE_TRUNCATE` + the explicit schema re-create the table from
+the contract. `Clients` is back to two calls; the fake is unchanged; no
+`truncate` SQL exists. Closes #1 (only the one config to pin), #2 (schema
+always the contract), #3 (no interpolated SQL), #12. Tests: #4 the table id
+follows `RAW_DATASET` (monkeypatched); #11 the "second landing" test is
+deleted as vacuous — the property is `WRITE_TRUNCATE` plus a `Clients`
+protocol with no read call (static pin); #9 the planted insert names its
+columns from `bq_schema.json`; #10 the `finally` cleanup is statically
+pinned. Records: #5–#8. Stack risk: a 0-byte NDJSON load must succeed —
+proven by the live re-run (`0 files, 0 event rows`); a rejection is a STOP.
+Round 4 is the ONE scoped re-review (`review-round-3..HEAD`).
+
 ---
 
 ## Why
