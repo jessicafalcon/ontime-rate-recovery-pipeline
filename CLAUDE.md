@@ -811,11 +811,18 @@ shortcut — the BLOCKER), C (the build's one validated var seam +
 manifest-proven swap); fakes that execute the SQL on DuckDB; grant scope /
 gated-module allowlists / name literals / `region` validation pinned;
 `disable_builtin_metrics`; the view casts; records; suite 474, mutate 5/5,
-review-gate 6/6, tf-validate/tf-freeze clean. PENDING (ask-first, cloud): the
-`enable_spanner=true` apply (undelete+import detour while the SA id is
-reserved), `spanner-load`, `test-int-spanner`, the same-day
-`enable_spanner=false` teardown with the dated DEPLOYMENT lines — then the
-review rounds and the exit audit.
+review-gate 6/6, tf-validate/tf-freeze clean. **Live 2026-08-30
+(`ontime-rate-recovery`):** SA undelete + `terraform import` detour, toggled
+plan `27 to add`, first apply 26/27 → **Amendment D** (no service-agent
+grant: a Spanner federated query runs as the querying principal; module = 8
+resources, two grants both to the SA), re-plan `No changes`; as the SA:
+`spanner-load OK: tiny — 22 dim rows`, `make test-int-spanner` **`4 passed`**
+(view ≡ seed, manifest resolved the source to the view, three goldens
+byte-identical, write-back idempotent with the DuckDB hash), `writeback OK:
+ontime-rate-recovery.ontime → spanner, 20 users, 0 written`. Trial clock
+started 2026-08-30 (ends 2026-11-28); dated lines in DEPLOYMENT. PENDING:
+the same-day `enable_spanner=false` teardown (operator ADC) — then the
+scoped re-review (round 2) and the exit audit.
 Open BACKLOG rows: **12** (Phase 10 struck: the write-back read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /

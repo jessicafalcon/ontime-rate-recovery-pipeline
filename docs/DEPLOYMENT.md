@@ -293,6 +293,9 @@ to the same working session as the apply.
    (its OK line reads `writeback OK: <id>.ontime → spanner, 20 users, 0
    written` on the second run — the read is the warehouse's, not a
    PROFILE's build). `PROFILE` is `tiny` only (a CLI refusal otherwise).
+   **Live 2026-08-30:** `spanner-load OK: tiny — 22 dim rows`; `4 passed
+   in 221.01s`; `writeback OK: ontime-rate-recovery.ontime → spanner, 20
+   users, 0 written`.
 4. **Tear down the same day** — the SCOPED destroy is the toggle flipped
    back: `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=false'`
    (count → 0 destroys exactly the module's resources; the two API
@@ -302,6 +305,10 @@ to the same working session as the apply.
 
 Dated lines (fill on apply day — the BACKLOG trial row's trigger):
 
-- `enable_spanner=true` applied: *(not yet — the trial clock has not started)*
-- Trial ends (apply + 90 days): —
-- Destroyed (`enable_spanner=false` re-applied): —
+- `enable_spanner=true` applied: **2026-08-30** (23:37 UTC, `ontime-rate-recovery`,
+  operator ADC after the SA undelete + `terraform import` detour; 26/27 on
+  the first apply — Amendment D dropped the failed service-agent grant — then
+  `No changes` on the toggled re-plan). **The trial clock is running.**
+- Trial ends (apply + 90 days): **2026-11-28**
+- Destroy-by (before the trial ends; the runbook tears down the same day): **2026-08-30**
+- Destroyed (`enable_spanner=false` re-applied): *(pending — this session)*

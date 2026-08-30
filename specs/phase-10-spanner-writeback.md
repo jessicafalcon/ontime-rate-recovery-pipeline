@@ -200,12 +200,27 @@ make test && make lint && make review-gate SPEC=specs/phase-10-spanner-writeback
 | 5 | `tests/test_infra.py::test_spanner_module_is_count_gated_and_default_off`, `…::test_every_declared_resource_type_is_on_the_allowlist` (the gated modules' own exact allowlists), `…::test_spanner_grants_are_scoped_to_the_one_database_and_connection`, `…::test_spanner_names_pin_the_python_constants`, `…::test_input_shape_validations_exist` (`region`) (static), live `tf-plan` outputs (default: no spanner resource; toggled: only the module's), the dated `docs/DEPLOYMENT.md` lines, teardown apply output |
 | 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_spanner_targets_pass_variables_as_one_literal`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter`; the audited table in Threat model |
 
-**Live status at this HEAD (review round 1, finding 18):** the live halves of
-Done-when 1, 4 and 5 — `test-int-spanner`, the toggled `tf-plan`/apply
-outputs, the dated DEPLOYMENT lines, the teardown output — are UNPROVEN.
-They wait on the ask-first `enable_spanner=true` apply (undelete + import
-detour while the SA id is reserved) and are recorded here on that day; the
-offline halves are green.
+**Live status (2026-08-30, `ontime-rate-recovery`):** the live halves of
+Done-when 1, 4 and 5 ran after the ask-first apply:
+- Apply (operator ADC, after `gcloud iam service-accounts undelete
+  100054726773702357820` + `terraform import module.iam.google_service_account.pipeline …`):
+  toggled plan `Plan: 27 to add, 0 to change, 0 to destroy` (18 root + the
+  module's 9 as then written; the imported SA absent from the list); first
+  apply 26/27 — the service-agent grant failed (`Service account
+  service-<number>@gcp-sa-bigqueryconnection… does not exist`) → **Amendment
+  D** removed it; the toggled re-plan: `No changes. Your infrastructure
+  matches the configuration.` (module = 8 resources).
+- As the SA (impersonated ADC): `spanner-load OK: tiny — 22 dim rows`;
+  `make test-int-spanner PROJECT=ontime-rate-recovery CONFIRM=yes` →
+  **`4 passed in 221.01s`** (view rows ≡ seed; dbt's manifest resolved
+  `dim_user` to `raw.dim_user_spanner`; three goldens byte-identical off the
+  federated build; write-back twice, second writes 0, read-back hash ==
+  `SEND_SCHEDULE_SHA256_TINY`); then `make writeback TARGET=spanner
+  PROJECT=ontime-rate-recovery CONFIRM=yes` → `writeback OK:
+  ontime-rate-recovery.ontime → spanner, 20 users, 0 written`.
+- Teardown (`VARS='enable_spanner=false'` re-apply) and the dated
+  DEPLOYMENT lines: see `docs/DEPLOYMENT.md` § Spanner (filled the same
+  session).
 
 ## Invariants (REQUIRED)
 
