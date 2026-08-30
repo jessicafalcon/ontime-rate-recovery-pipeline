@@ -15,6 +15,7 @@ tz comes from the `dim_user_current` dbt model (the open row), not `raw.dim_user
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,8 @@ DDL = loader.ROOT / "serving" / "ddl.sql"
 SCORES = "main_scores.scores_send_time"
 DIM_CURRENT = "main_marts.dim_user_current"
 SEND_SCHEDULE = "serving.send_schedule"
+
+VERSION_RE = re.compile(r"^v(\d+)$")
 
 
 @dataclass(frozen=True)
@@ -50,16 +53,24 @@ def ensure_table(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(DDL.read_text())
 
 
+def candidates_sql(scores: str = SCORES, dims: str = DIM_CURRENT) -> str:
+    """The ONE read the write-back makes on any target: the served pair joined
+    to the open dim_user tz. `scores`/`dims` override the DuckDB relation names
+    (TARGET=spanner reads `<project>.ontime.…` off BigQuery — Phase 10, the
+    Golden-style relation seam)."""
+    return (
+        "select s.user_id, s.cohort_id, s.send_hour_local, s.send_minute_local, "
+        "d.tz, s.confidence, s.model_version, s.computed_as_of "
+        f"from {scores} as s "
+        f"join {dims} as d using (user_id) "
+        "order by s.user_id"
+    )
+
+
 def read_candidates(con: duckdb.DuckDBPyConnection) -> list[Candidate]:
     """The served pair from scores_send_time, tz from the open dim_user row
     (dim_user_current) — never the source events or the unclamped centre."""
-    rows = con.execute(
-        "select s.user_id, s.cohort_id, s.send_hour_local, s.send_minute_local, "
-        "d.tz, s.confidence, s.model_version, s.computed_as_of "
-        f"from {SCORES} as s "
-        f"join {DIM_CURRENT} as d using (user_id) "
-        "order by s.user_id"
-    ).fetchall()
+    rows = con.execute(candidates_sql()).fetchall()
     return [Candidate(*r) for r in rows]
 
 
@@ -73,13 +84,36 @@ def read_existing(
     return {r[0]: (r[1], r[2]) for r in rows}
 
 
+def version_key(model_version: str) -> tuple[int]:
+    """The order `model_version` compares under: `v<int>` parsed numerically, so
+    `v10 > v2` (Phase 10; lexical tuple comparison had `'v10' < 'v2'`). Any
+    other shape is a loud refusal — never a lexical fallback that would
+    silently re-introduce the bug."""
+    m = VERSION_RE.match(model_version)
+    if not m:
+        raise ValueError(f"model_version must be v<int>, got {model_version!r}")
+    return (int(m.group(1)),)
+
+
 def should_replace(candidate: Candidate, existing: tuple[str, datetime] | None) -> bool:
     """Replace iff the candidate's `(model_version, computed_as_of)` is strictly
-    greater than the stored pair. An absent user inserts; a tie or a lesser pair
-    leaves the row untouched (§4 invariant 5). Data-derived, no caller marker."""
+    greater than the stored pair — model_version under `version_key`'s numeric
+    order. An absent user inserts; a tie or a lesser pair leaves the row
+    untouched (§4 invariant 5). Data-derived, no caller marker."""
     if existing is None:
         return True
-    return (candidate.model_version, candidate.computed_as_of) > existing
+    return (version_key(candidate.model_version), candidate.computed_as_of) > (
+        version_key(existing[0]),
+        existing[1],
+    )
+
+
+def winners_of(
+    candidates: list[Candidate], existing: dict[str, tuple[str, datetime]]
+) -> list[Candidate]:
+    """The rows to write — shared by every target (versions parsed up front, so
+    a malformed one refuses before anything is written)."""
+    return [c for c in candidates if should_replace(c, existing.get(c.user_id))]
 
 
 def apply_writeback(con: duckdb.DuckDBPyConnection, winners: list[Candidate]) -> None:
@@ -122,7 +156,7 @@ def write_back(profile: str, db: Path | None = None) -> tuple[int, int]:
         ensure_table(con)
         candidates = read_candidates(con)
         existing = read_existing(con)
-        winners = [c for c in candidates if should_replace(c, existing.get(c.user_id))]
+        winners = winners_of(candidates, existing)
         apply_writeback(con, winners)
     finally:
         con.close()

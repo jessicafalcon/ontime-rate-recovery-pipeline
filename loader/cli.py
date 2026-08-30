@@ -1,10 +1,13 @@
-"""`make load | bq-load | dbt-build | drop-db | test-int-bigquery` (loader/).
+"""`make load | bq-load | spanner-load | dbt-build | drop-db | test-int-*` (loader/).
 
 One entry point validates every name (`[a-z0-9_]+`; PROJECT by the GCP
 project-id shape `infra.cli.PROJECT_RE`) before any path, env var or client
 is derived:
 load      — fixtures/<p>/{raw,dims} → data/<p>.duckdb schema `raw`.
 bq-load   — the same files → GCS staging → BigQuery `raw` (Phase 9b; cloud:
+            CONFIRM=yes from the command line).
+spanner-load — the same dim seed → the Spanner `dim_user` table, the
+            production dims home BigQuery federates from (Phase 10; cloud:
             CONFIRM=yes from the command line).
 dbt-build — the TARGET's landing (duckdb → load(); bigquery → bq_load(), never
             the other — THROUGH lands only files uploaded on or before it, a
@@ -13,7 +16,8 @@ dbt-build — the TARGET's landing (duckdb → load(); bigquery → bq_load(), n
             `OTR_GCP_PROJECT`, set HERE from the validated PROJECT, never from
             the caller's environment); exit 1 on any failure.
 drop-db   — delete data/<p>.duckdb; only with CONFIRM=yes from the command line.
-test-int-bigquery — validate + gate, then the pin-parity pytest behind OTR_INT."""
+test-int-bigquery — validate + gate, then the pin-parity pytest behind OTR_INT.
+test-int-spanner — validate + gate, then the Spanner/federation pytest (Phase 10)."""
 
 from __future__ import annotations
 
@@ -25,7 +29,7 @@ import sys
 from typing import NoReturn
 
 from infra.cli import validate_project
-from loader import bq
+from loader import bq, spanner
 from loader import load as loader
 
 NAME_RE = re.compile(r"^[a-z0-9_]+$")
@@ -130,6 +134,42 @@ def bq_load(
     return 0
 
 
+def spanner_load(
+    profile: str,
+    project: str,
+    confirm: str = "",
+    origin: str = "",
+    clients: spanner.DimClientFactory | None = None,
+) -> int:
+    """The Spanner dims landing (Phase 10): PROFILE/PROJECT validated and
+    CONFIRM gated before any client exists; upserts the seed into `dim_user`
+    (idempotent — same key, same values). Needs a spanner-enabled stack."""
+    validate_name("PROFILE", profile)
+    validate_project(project)
+    require_confirm("spanner-load", confirm, origin)
+    try:
+        source = loader.fixture_dir(profile)
+        drift = loader.manifest_drift(source)
+        if drift:
+            print(
+                f"spanner-load DRIFT: {len(drift)} files differ from "
+                f"{source.name}/manifest"
+            )
+            return 1
+        rows = spanner.load_dims(profile, project, clients)
+    except FileNotFoundError as e:
+        die(f"spanner-load: refused — {e}")
+    except ValueError as e:
+        die(f"spanner-load: refused — {e}")
+    tag = "" if source.parent.name == "fixtures" else " (unfrozen)"
+    print(
+        f"spanner-load: source={source.relative_to(loader.ROOT)}{tag} "
+        f"→ {project} spanner {spanner.INSTANCE}/{spanner.DATABASE}"
+    )
+    print(f"spanner-load OK: {profile} — {rows} dim rows")
+    return 0
+
+
 def land(
     profile: str,
     target: str,
@@ -166,7 +206,12 @@ def dbt_build(
     through: str = "",
     project: str = "",
     clients: bq.ClientFactory | None = None,
+    dbt_vars: str = "",
 ) -> int:
+    """`dbt_vars` is an internal seam (no make variable): the Spanner
+    integration run passes `dim_user_identifier: dim_user_spanner` to build
+    against the federation view (§3.3's source swap) — the three goldens must
+    not move."""
     validate_name("PROFILE", profile)
     if full and full != "yes":
         die(f"dbt-build: refused — FULL takes only the literal 'yes', got {full!r}")
@@ -203,6 +248,7 @@ def dbt_build(
             target,
         ]
         + full_refresh_args(full, full_origin)
+        + (["--vars", dbt_vars] if dbt_vars else [])
     )
     if not res.success:
         print(f"dbt-build FAIL: {profile}/{target}")
@@ -251,6 +297,29 @@ def int_bigquery(profile: str, project: str, confirm: str, origin: str) -> int:
     ).returncode
 
 
+def int_spanner(profile: str, project: str, confirm: str, origin: str) -> int:
+    """`make test-int-spanner` (Phase 10): validate + gate in THIS process, then
+    the Spanner/federation pytest with OTR_INT=1 and the validated project in
+    its env (the Amendment V shape: the gate that ran here is carried to the
+    fixture, never re-derived there)."""
+    validate_name("PROFILE", profile)
+    validate_project(project)
+    require_confirm("test-int-spanner", confirm, origin)
+    env = {
+        **os.environ,
+        "OTR_INT": "1",
+        "OTR_GCP_PROJECT": project,
+        "OTR_PROFILE": profile,
+        "OTR_CONFIRM": confirm,
+        "OTR_CONFIRM_ORIGIN": origin,
+    }
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/integration/test_int_spanner.py"],
+        cwd=str(loader.ROOT),
+        env=env,
+    ).returncode
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -263,11 +332,21 @@ def main(argv: list[str] | None = None) -> int:
     bl.add_argument("--confirm", default="")
     bl.add_argument("--confirm-origin", default="")
     bl.add_argument("--through", default="")
+    sl = sub.add_parser("spanner-load")
+    sl.add_argument("profile")
+    sl.add_argument("--project", default="")
+    sl.add_argument("--confirm", default="")
+    sl.add_argument("--confirm-origin", default="")
     ib = sub.add_parser("test-int-bigquery")
     ib.add_argument("profile")
     ib.add_argument("--project", default="")
     ib.add_argument("--confirm", default="")
     ib.add_argument("--confirm-origin", default="")
+    isp = sub.add_parser("test-int-spanner")
+    isp.add_argument("profile")
+    isp.add_argument("--project", default="")
+    isp.add_argument("--confirm", default="")
+    isp.add_argument("--confirm-origin", default="")
     b = sub.add_parser("dbt-build")
     b.add_argument("profile")
     b.add_argument("--target", default="")
@@ -286,8 +365,12 @@ def main(argv: list[str] | None = None) -> int:
         return load(a.profile, a.through)
     if a.cmd == "bq-load":
         return bq_load(a.profile, a.project, a.confirm, a.confirm_origin, a.through)
+    if a.cmd == "spanner-load":
+        return spanner_load(a.profile, a.project, a.confirm, a.confirm_origin)
     if a.cmd == "test-int-bigquery":
         return int_bigquery(a.profile, a.project, a.confirm, a.confirm_origin)
+    if a.cmd == "test-int-spanner":
+        return int_spanner(a.profile, a.project, a.confirm, a.confirm_origin)
     if a.cmd == "dbt-build":
         return dbt_build(
             a.profile,

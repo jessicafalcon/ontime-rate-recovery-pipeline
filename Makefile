@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline test-int-airflow bq-load test-int-bigquery tf-validate tf-plan tf-apply tf-destroy tf-freeze
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power writeback pipeline test-int-airflow bq-load test-int-bigquery spanner-load test-int-spanner tf-validate tf-plan tf-apply tf-destroy tf-freeze
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -156,12 +156,15 @@ power:
 	uv run python -m eval.cli power --write $(call _Q,$(value WRITE))
 
 # The write-back (serving/cli.py writeback): upsert scores_send_time + the open
-# dim_user tz into serving.send_schedule (the DuckDB stand-in for Spanner, §2.9),
-# replacing a user's row only on a strictly greater (model_version,
-# computed_as_of); idempotent (a re-run writes 0). No CONFIRM: it is
-# `create table if not exists` + upsert, never destructive. Needs `dbt-build`.
+# dim_user tz into send_schedule, replacing a user's row only on a strictly
+# greater (model_version, computed_as_of); idempotent (a re-run writes 0).
+# TARGET=duckdb (default): serving.send_schedule in data/<PROFILE>.duckdb (the
+# stand-in, §2.9) — no CONFIRM (create-if-not-exists + upsert, never
+# destructive). TARGET=spanner (Phase 10): read the same two relations off
+# BigQuery `ontime`, write the Spanner table — cloud-cost, CONFIRM=yes from the
+# COMMAND LINE ($(origin CONFIRM)) and PROJECT validated before any client.
 writeback:
-	uv run python -m serving.cli writeback $(call _Q,$(value PROFILE))
+	uv run python -m serving.cli writeback $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
 # The local pipeline with no scheduler (serving/cli.py pipeline): dbt build →
 # eval → write-back in one validated process, producing scores_send_time and
@@ -191,6 +194,26 @@ test-int-airflow:
 # docs/DEPLOYMENT.md).
 test-int-bigquery:
 	uv run python -m loader.cli test-int-bigquery $(call _Q,$(if $(value PROFILE),$(value PROFILE),tiny)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
+
+# ------------------------------------------------------------------ Phase 10
+# The Spanner dims landing (loader/cli.py spanner-load): the same dim seed the
+# other landings select → the Spanner `dim_user` table (the production dims
+# home BigQuery federates from, §2.3/§3.3), columns/types from the generated
+# contract, one idempotent batch upsert. Cloud-cost (a spanner-enabled stack):
+# CONFIRM=yes must have COMMAND-LINE origin; PROJECT validated before any
+# client; ADC, never a key.
+spanner-load:
+	uv run python -m loader.cli spanner-load $(call _Q,$(value PROFILE)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
+
+# Phase 10 integration: the Spanner write-back + federation run. Validates
+# PROFILE (default tiny) + PROJECT and gates CONFIRM in Python FIRST, then runs
+# the pytest (tests/integration/test_int_spanner.py) with OTR_INT=1: lands dims
+# in Spanner, builds on bigquery with the dim_user source swapped to the
+# federated view (same three goldens), runs the write-back twice (second writes
+# 0, row hash unchanged and equal to the DuckDB pin). Cloud-cost (ask first;
+# needs an `enable_spanner=true` apply); CI never runs it.
+test-int-spanner:
+	uv run python -m loader.cli test-int-spanner $(call _Q,$(if $(value PROFILE),$(value PROFILE),tiny)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
 # ------------------------------------------------------------------ Phase 9a
 # Terraform foundation (infra/cli.py): validates PROJECT (a GCP project-id shape)

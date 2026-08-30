@@ -214,7 +214,7 @@ make test && make lint && make review-gate SPEC=specs/phase-10-spanner-writeback
 serving/writeback.py::should_replace        invert-guard
 serving/writeback.py::version_key           constant-return:(0,)
 serving/spanner.py::apply_writeback         delete-call
-loader/spanner.py::load_dims                delete-call
+loader/spanner.py::load_dims                constant-return:0
 ```
 
 (The federation view and Spanner DDL are SQL rendered by

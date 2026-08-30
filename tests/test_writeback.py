@@ -13,7 +13,7 @@ import hashlib
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -296,3 +296,158 @@ def test_writeback_refuses_without_a_db() -> None:
     with pytest.raises(SystemExit) as e:
         cli.writeback("nodbabsent")
     assert e.value.code == 2
+
+
+# ------------------- Phase 10: numeric version order, the TARGET=spanner path
+
+
+def _cand(version: str, when: datetime, uid: str = "u", hour: int = 8) -> wb.Candidate:
+    return wb.Candidate(uid, "c", hour, 0, "UTC", 0.5, version, when)
+
+
+def test_version_orders_numerically_v10_beats_v2() -> None:
+    """The Done-when's for-all: an older model_version never overwrites a newer
+    one — under NUMERIC order ('v10' < 'v2' lexically was the BACKLOG bug)."""
+    t0 = datetime(2026, 1, 12, 0, 47)
+    t1 = datetime(2026, 1, 13, 0, 0)
+    assert wb.version_key("v10") > wb.version_key("v2")
+    assert wb.should_replace(_cand("v10", t0), ("v2", t1)) is True  # newer version
+    assert wb.should_replace(_cand("v2", t1), ("v10", t0)) is False  # older → keep
+    assert wb.should_replace(_cand("v2", t0), ("v2", t0)) is False  # tie → no-op
+
+
+def test_malformed_version_refuses() -> None:
+    """A version outside v<int> raises — never a lexical fallback."""
+    for bad in ("", "1", "v", "v1.2", "v-1", "x1", "V1"):
+        with pytest.raises(ValueError):
+            wb.version_key(bad)
+    t = datetime(2026, 1, 12)
+    with pytest.raises(ValueError):
+        wb.should_replace(_cand("x1", t), ("v1", t))
+
+
+def test_reader_relations_per_target() -> None:
+    """One read, two named configurations: duckdb reads the main_* relations,
+    spanner reads `<project>.ontime.*` off BigQuery — and neither read names
+    raw (§3.1; truth is the isolation test's grep)."""
+    from serving import spanner as sp
+
+    local = wb.candidates_sql()
+    assert wb.SCORES in local and wb.DIM_CURRENT in local
+    scores, dims = sp.relations("my-proj")
+    assert scores == "`my-proj.ontime.scores_send_time`"
+    assert dims == "`my-proj.ontime.dim_user_current`"
+    cloud = wb.candidates_sql(scores, dims)
+    assert "main_scores" not in cloud and "main_marts" not in cloud
+    for sql in (local, cloud, sp.EXISTING_SQL):
+        assert "raw" not in sql
+
+
+class FakeQuery:
+    """The one BigQuery call, canned."""
+
+    def __init__(self, rows: list[tuple]) -> None:
+        self.rows = rows
+        self.sqls: list[str] = []
+
+    def query(self, sql: str) -> list[tuple]:
+        self.sqls.append(sql)
+        return self.rows
+
+
+class FakeSpanner:
+    """The store as a dict keyed user_id — insert_or_update semantics."""
+
+    def __init__(self) -> None:
+        self.table: dict[str, tuple] = {}
+        self.upserts = 0
+
+    def read(self, sql: str) -> list[tuple]:
+        return [(u, r[6], r[7]) for u, r in sorted(self.table.items())]
+
+    def upsert(self, table: str, columns: tuple[str, ...], rows: list[tuple]) -> None:
+        assert table == "send_schedule" and len(columns) == 9
+        self.upserts += 1
+        for r in rows:
+            self.table[r[0]] = r
+
+
+def _bq_row(uid: str, hour: int, version: str, when: datetime) -> tuple:
+    """A candidates_sql result row off BigQuery (tz-aware timestamps)."""
+    return (uid, "c", hour, 0, "UTC", 0.5, version, when.replace(tzinfo=UTC))
+
+
+def test_spanner_writeback_second_run_writes_zero() -> None:
+    """Invariant 1 on the Spanner path: two runs over the same scores — the
+    second writes 0 and the store is byte-identical (written_at =
+    computed_as_of, data-derived, so nothing can move)."""
+    from serving import spanner as sp
+
+    rows = [
+        _bq_row("u-000001", 8, "v1", datetime(2026, 1, 13)),
+        _bq_row("u-000002", 21, "v1", datetime(2026, 1, 12, 23, 30)),
+    ]
+    store = FakeSpanner()
+    n, written = sp.write_back(
+        "my-proj", bq_clients=lambda p: FakeQuery(rows), spanner_clients=lambda p: store
+    )
+    assert (n, written) == (2, 2)
+    assert len(store.table) == 2
+    assert all(r[7] == r[8] for r in store.table.values())  # written_at = as_of
+    before = dict(store.table)
+    n, written = sp.write_back(
+        "my-proj", bq_clients=lambda p: FakeQuery(rows), spanner_clients=lambda p: store
+    )
+    assert (n, written) == (2, 0)  # nothing strictly greater
+    assert store.table == before
+
+
+def test_spanner_replace_only_on_strictly_greater() -> None:
+    """The full cloud path honours the guard: a v2 candidate never overwrites a
+    stored v10 row; a v10 candidate replaces a v2 row (numeric order)."""
+    from serving import spanner as sp
+
+    t0 = datetime(2026, 1, 12, tzinfo=UTC)
+    store = FakeSpanner()
+    store.table["u-000001"] = ("u-000001", "c", 9, 0, "UTC", 0.5, "v10", t0, t0)
+    store.table["u-000002"] = ("u-000002", "c", 9, 0, "UTC", 0.5, "v2", t0, t0)
+    rows = [
+        _bq_row(
+            "u-000001", 8, "v2", datetime(2026, 1, 13)
+        ),  # older version, later as_of
+        _bq_row(
+            "u-000002", 8, "v10", datetime(2026, 1, 12)
+        ),  # newer version, same as_of
+    ]
+    n, written = sp.write_back(
+        "my-proj", bq_clients=lambda p: FakeQuery(rows), spanner_clients=lambda p: store
+    )
+    assert (n, written) == (2, 1)
+    assert store.table["u-000001"][6] == "v10"  # v2 never overwrote v10
+    assert store.table["u-000002"][6] == "v10"  # v10 replaced v2
+
+
+def test_cloud_writeback_refuses_before_any_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every refusal — missing/env CONFIRM, a bad PROJECT, an unknown TARGET —
+    happens before either client factory is even resolved (spec invariant 6)."""
+    from serving import cli
+    from serving import spanner as sp
+
+    def boom() -> None:
+        raise AssertionError("client factory resolved before the gate")
+
+    monkeypatch.setattr(sp, "default_query_clients", boom)
+    monkeypatch.setattr(sp, "default_spanner_clients", boom)
+    cases = [
+        ("tiny", "spanner", "ontime-rate-recovery", "", ""),  # no CONFIRM
+        ("tiny", "spanner", "ontime-rate-recovery", "yes", "environment"),  # env origin
+        ("tiny", "spanner", "../x", "yes", "command line"),  # bad project
+        ("tiny", "postgres", "", "", ""),  # unknown target
+        ("../x", "spanner", "", "", ""),  # bad profile
+    ]
+    for args in cases:
+        with pytest.raises(SystemExit) as e:
+            cli.writeback(*args)
+        assert e.value.code == 2, args

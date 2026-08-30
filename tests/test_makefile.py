@@ -316,9 +316,10 @@ def test_power_passes_write_as_one_literal(value: str) -> None:
     ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""],
 )
 def test_writeback_and_pipeline_pass_profile_as_one_literal(value: str) -> None:
-    """Phase 8a: PROFILE reaches Python as one single-quoted token from either
-    origin; writeback/pipeline take no CONFIRM (non-destructive: create-if-not-
-    exists + upsert; a reset is `make drop-db … CONFIRM=yes`)."""
+    """Phase 8a (amended Phase 10): PROFILE reaches Python as one single-quoted
+    token from either origin. `pipeline` takes no CONFIRM (non-destructive on
+    the local target); `writeback` grew TARGET/PROJECT/CONFIRM for
+    TARGET=spanner — the default duckdb path still needs none."""
     quoted = "'" + value.replace("'", "'\\''") + "'"
     for target in ("writeback", "pipeline"):
         for origin in ("cmdline", "env"):
@@ -329,7 +330,58 @@ def test_writeback_and_pipeline_pass_profile_as_one_literal(value: str) -> None:
             )
             assert f"serving.cli {target} {quoted}" in out, (target, origin, out)
             assert "pwned" not in out.replace(value, "")
-            assert "--confirm" not in out  # no CONFIRM knob
+            if target == "pipeline":
+                assert "--confirm" not in out  # no CONFIRM knob
+
+
+# --------------------------- Phase 10: writeback TARGET=spanner, spanner targets
+
+
+def test_writeback_target_confirm_from_command_line_only() -> None:
+    """Phase 10: the writeback recipe carries `--confirm-origin '$(origin
+    CONFIRM)'` and forwards TARGET/PROJECT unexpanded, so an env-exported
+    CONFIRM reads `environment` and Python refuses the spanner target."""
+    out = _make_n("writeback", {"PROFILE": "tiny", "TARGET": "spanner"}, {})
+    assert "--confirm-origin 'command line'" not in out
+    assert "--target 'spanner'" in out
+    out = _make_n(
+        "writeback",
+        {"PROFILE": "tiny", "TARGET": "spanner", "CONFIRM": "yes"},
+        {},
+    )
+    assert "--confirm 'yes' --confirm-origin 'command line'" in out
+    out = _make_n(
+        "writeback",
+        {"PROFILE": "tiny", "TARGET": "spanner"},
+        {"CONFIRM": "yes"},
+    )
+    assert "--confirm 'yes' --confirm-origin 'environment'" in out
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""],
+)
+def test_spanner_targets_pass_variables_as_one_literal(value: str) -> None:
+    """Phase 10: spanner-load and test-int-spanner forward PROFILE/PROJECT as
+    one single-quoted token from either origin, with the CONFIRM origin word
+    beside them; test-int-spanner defaults PROFILE to tiny."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for target, cli in (
+        ("spanner-load", "loader.cli spanner-load"),
+        ("test-int-spanner", "loader.cli test-int-spanner"),
+    ):
+        for origin in ("cmdline", "env"):
+            out = _make_n(
+                target,
+                {"PROFILE": "tiny", "PROJECT": value} if origin == "cmdline" else {},
+                {"PROFILE": "tiny", "PROJECT": value} if origin == "env" else {},
+            )
+            assert f"{cli} 'tiny' --project {quoted}" in out, (target, origin, out)
+            assert "pwned" not in out.replace(value, "")
+            assert "--confirm-origin '" in out
+    out = _make_n("test-int-spanner", {}, {})
+    assert "loader.cli test-int-spanner 'tiny'" in out  # PROFILE defaults to tiny
 
 
 # ----------------------------------- Phase 8b: dbt-build THROUGH, test-int-airflow

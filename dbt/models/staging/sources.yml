@@ -46,6 +46,7 @@ sources:
               - not_null
       - name: dim_user
         description: One SCD2 row of `dim_user` (§2.3). `valid_to` None = current row.
+        identifier: "{{ var('dim_user_identifier', 'dim_user') }}"
         columns:
           - name: user_id
             description: varchar

@@ -246,6 +246,29 @@ def test_optional_modules_are_count_gated() -> None:
         ), mod
 
 
+def test_spanner_module_is_count_gated_and_default_off() -> None:
+    """Phase 10 (spec invariant 5): every Spanner-family resource sits inside
+    the count-gated module (test_optional_modules_are_count_gated pins the gate,
+    test_enable_toggles_default_false the default), the database carries
+    deletion_protection = false (the toggle-flip re-apply is the sanctioned,
+    CONFIRM-gated destroy path), the instance is the smallest size, and the two
+    APIs are kept on at destroy like the root set."""
+    module_dir = INFRA / "modules" / "spanner"
+    for f in _tf_files():
+        if f.parent == module_dir:
+            continue
+        text = _strip_hcl_comments(f.read_text())
+        assert not re.search(r'resource\s+"google_spanner_', text), f
+        assert not re.search(r'resource\s+"google_bigquery_connection', text), f
+    text = _stripped("modules", "spanner", "main.tf")
+    db = _block(text, r'resource "google_spanner_database" "this"')
+    assert re.search(r"^\s*deletion_protection\s*=\s*false", db, re.M)
+    inst = _block(text, r'resource "google_spanner_instance" "this"')
+    assert re.search(r"^\s*processing_units\s*=\s*100", inst, re.M)
+    api = _block(text, r'resource "google_project_service" "spanner"')
+    assert re.search(r"^\s*disable_on_destroy\s*=\s*false", api, re.M)
+
+
 def test_every_declared_resource_type_is_on_the_allowlist() -> None:
     """Invariant 2's teeth as an allowlist: no resource type outside the
     count-gated modules but the expected set — a `google_spanner_instance` /
@@ -618,6 +641,11 @@ LEAST_PRIVILEGE_ROLES = {
     "roles/bigquery.jobUser",
     "roles/bigquery.dataEditor",
     "roles/storage.objectAdmin",
+    # Phase 10 (spanner module, count-gated): each scoped to the ONE database
+    # or connection — never instance/database admin, never project-wide.
+    "roles/spanner.databaseReader",
+    "roles/spanner.databaseUser",
+    "roles/bigquery.connectionUser",
 }
 # … and ON the SA (who may act as it): CI's WIF binding, the operator's
 # impersonation (Amendment Q). Both are `google_service_account_iam_member`.
@@ -626,6 +654,18 @@ ON_SA_ROLES = {
     "roles/iam.serviceAccountTokenCreator",
 }
 SA_MEMBER = "serviceAccount:${google_service_account.pipeline.email}"
+# Phase 10: the spanner module's grants, pinned member-for-member — the
+# BigQuery Connection service agent (derived from the project number) reads
+# the one database; the pipeline SA (a var from module.iam) writes it and may
+# use the one connection.
+SPANNER_MEMBERS = {
+    '"connection_reader"': (
+        "serviceAccount:service-${var.project_number}"
+        "@gcp-sa-bigqueryconnection.iam.gserviceaccount.com"
+    ),
+    '"pipeline_user"': "serviceAccount:${var.sa_email}",
+    '"pipeline_connection_user"': "serviceAccount:${var.sa_email}",
+}
 
 
 def _grant_blocks() -> list[str]:
@@ -674,10 +714,13 @@ def test_every_grant_member_is_pinned() -> None:
             )
         elif b.startswith('resource "google_service_account_iam_member"'):
             assert member.startswith("principalSet://iam.googleapis.com/"), member
+        elif any(key in b.splitlines()[0] for key in SPANNER_MEMBERS):
+            key = next(k for k in SPANNER_MEMBERS if k in b.splitlines()[0])
+            assert member == SPANNER_MEMBERS[key], member
         else:
             assert member == SA_MEMBER, member
         seen += 1
-    assert seen == 6, seen
+    assert seen == 9, seen
 
 
 def test_no_role_can_create_a_dataset() -> None:
