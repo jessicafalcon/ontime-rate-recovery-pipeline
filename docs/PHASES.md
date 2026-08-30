@@ -296,7 +296,9 @@ privilege IAM, budget alerts (50/150 in the account's currency), GCS state
 backend (bootstrap documented),
 `terraform.tfvars` gitignored; `make tf-plan | tf-apply | tf-destroy`. dbt
 `bigquery` target; the five macros proven on BigQuery (the fifth,
-`to_local_time`, added in Phase 2); `make test-int-bigquery`.
+`to_local_time`, added in Phase 2; as landed: four bodies, the
+partition seam's BigQuery half being the adapter's native strategy — 9b,
+Amendment U); `make test-int-bigquery`.
 
 **Done when.** `terraform plan` clean from a fresh clone with only
 `project_id` (the two bootstrap APIs, `serviceusage` + `cloudresourcemanager`,

@@ -139,7 +139,8 @@ def render_sources() -> str:
         f"  - name: {SCHEMA}",
         f"    schema: {SCHEMA}",
         "    description: Raw landing — the Amplitude export shape and the dim seed"
-        " file, loaded by `make load`. No freshness config (it reads the clock).",
+        " file, loaded by `make load` (DuckDB) / `make bq-load` (BigQuery)."
+        " No freshness config (it reads the clock).",
         "    tables:",
     ]
     for table, model in TABLES:

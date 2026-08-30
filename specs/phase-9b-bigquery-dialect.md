@@ -647,8 +647,10 @@ sentinel in the offline run.
 - **coherence-auditor** at exit (mandatory, whole repo, ONCE): "raises until
   Phase 9" gone from ARCHITECTURE §3.2, CLAUDE.md, the agent files; the
   `TARGET=bigquery is REFUSED` sentence gone; PHASES "Delivered (9b)"; the
-  BACKLOG count; that 9b supports Phase 10 (the write-back reads
-  `scores_send_time` from either warehouse by relation name).
+  BACKLOG count; that 9b supports Phase 10: the models exist on both
+  warehouses; the write-back's relation/connection seam (it hard-codes
+  `main_scores.…` / `main_marts.…` on a DuckDB connection) is Phase 10's —
+  a BACKLOG row names it (exit audit #4).
 - Stack risk (first hour, STOP on any surprise, §8): (1) **`to_local_time`
   across tiny's tz-change users** (`u-000008`, `u-000010`: Tokyo → London
   mid-window) and the Tokyo previous-UTC-day prompts — `datetime(ts, tz)`

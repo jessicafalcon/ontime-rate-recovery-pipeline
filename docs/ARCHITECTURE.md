@@ -155,9 +155,11 @@ project is about. Every event-level model is incremental with a **reprocessing
 lookback window** of `LOOKBACK_DAYS` (spec-pinned, 3–7; 5 in Phase 7) partitioned
 by the local event date: `prompt_date` (the local send date) for `stg_prompts`
 and `attribution`, and `event_date` (the local `client_event_time` date) for
-`stg_events`, whose `app_opened` rows carry no `prompt_id`. BigQuery
-`insert_overwrite`, DuckDB delete-and-insert per partition, both behind one
-macro. The horizon is data-derived (`max(server_upload_time)`), never the clock;
+`stg_events`, whose `app_opened` rows carry no `prompt_id`. DuckDB
+delete-and-insert per partition behind the `partition_overwrite` dispatch
+macro; on BigQuery the adapter's native `insert_overwrite` strategy, selected
+in the models' `config()` on `target.type` — dbt-bigquery admits no custom
+strategy, so that dispatch body raises by design (Phase 9b, Amendment U; §8). The horizon is data-derived (`max(server_upload_time)`), never the clock;
 `final` once a partition is ≥ `LOOKBACK_DAYS` behind it, and
 `LOOKBACK_DAYS · 24 > late_arrival_max_hours` keeps a late event off a closed
 partition. Running the lookback twice over the same raw converges (idempotent).
@@ -247,7 +249,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | component | reads | writes | may NOT |
 |---|---|---|---|
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
-| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
+| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load); on BigQuery also the staging objects `gs://<project>-ontime/landing/<p>/{raw,dims}/` incl. a zero-byte `_empty.jsonl` (Phase 9b) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
 | eval | dbt outputs, truth, the profile JSON (the generator's input) | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), the marker-confined blocks of `docs/RESULTS.md` and `docs/AB_DESIGN.md` *(Phase 6; `WRITE=yes` only)* | write any table the pipeline reads; write under `fixtures/`; create or append to a doc |
 | write-back | `scores_send_time`, `dim_user_current` (the open `dim_user` row's tz — Phase 8a) | `send_schedule` | read truth; read raw; re-derive a score |

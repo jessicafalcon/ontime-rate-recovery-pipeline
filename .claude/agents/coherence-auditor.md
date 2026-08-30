@@ -41,8 +41,10 @@ CLAUDE.md, docs/ARCHITECTURE.md, docs/PHASES.md, DECISIONS.md, the specs in
 - Makefile targets vs CI steps vs CLAUDE.md → Commands vs the Airflow DAG's
   task commands — same names, same behavior?
 - Spec DONE commands that no longer run as written.
-- The five dispatch macros: still exactly five, and each proven on both
-  targets once Phase 9 lands.
+- The five dispatch macros: still exactly five; four proven on both targets
+  (Phase 9b), the fifth's BigQuery half is the adapter's native
+  `insert_overwrite` selected in config — its dispatch body raises by
+  design (Amendment U).
 
 ### 2. Architecture erosion
 Logic leaking out of its layer: attribution in Python, a score computed

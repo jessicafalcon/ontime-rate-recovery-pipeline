@@ -270,6 +270,15 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
   proves only the fake (the disposition + read-less protocol are the pin);
   the per-landing temp dir stays (one syscall; lazy creation re-opens the
   seam). Later residue → BACKLOG with a trigger.
+- **Coherence-auditor exit pass (10 findings, records only; 2026-08-30).**
+  §2.7's "both behind one macro" corrected to U; the agent files' allowlist
+  and five-macro clause; CLAUDE status numbers; `gen-sources` described with
+  its three outputs (the Phase 2 spec's `2 files` pin updated in place —
+  the third sanctioned edit); §3.1's loader row writes the GCS landing; the
+  generated source description names both landings; PHASES' Goal wording;
+  the RESULTS/AB_DESIGN prover is `make test` (pre-existing). Forward risk
+  → BACKLOG: the write-back reads DuckDB relation names on a DuckDB
+  connection only — Phase 10's read seam.
 - Not chosen and noted: BigQuery clustering (tiny; `user_id` is the candidate
   when a profile is large enough to measure); `medium` on BigQuery (109 MB, a
   deliberate later run).

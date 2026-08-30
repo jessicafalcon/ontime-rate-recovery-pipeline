@@ -102,7 +102,8 @@ bq-load:
 drop-db:
 	uv run python -m loader.cli drop-db $(call _Q,$(value PROFILE)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
-# Re-render loader/ddl.sql + dbt/models/staging/sources.yml from generator/models.py
+# Re-render loader/ddl.sql, loader/bq_schema.json (Phase 9b) and
+# dbt/models/staging/sources.yml from generator/models.py
 # (scripts/gen_dbt_sources.py). tests/test_dbt_sources.py fails on a hand edit.
 gen-sources:
 	uv run python scripts/gen_dbt_sources.py

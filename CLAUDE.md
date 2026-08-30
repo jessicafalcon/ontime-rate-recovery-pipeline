@@ -119,7 +119,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   (`make check-docs`), `round_tag.py` (review-round boundary tags;
   `make round-reset` clears them at phase start), `review_common.py` (shared
   SPEC validator / section parser / reduced env), `gen_dbt_sources.py`
-  (`make gen-sources`: raw DDL + `sources.yml` from `generator/models.py`).
+  (`make gen-sources`: raw DDL + BigQuery load schema + `sources.yml` from
+  `generator/models.py`).
 - `docs/` — ARCHITECTURE.md (spec), PHASES.md (plan), METRICS.md (Phase 4:
   the single definition of every served metric — grain, numerator,
   denominator, null policy, pinning test), RESULTS.md (Phase 6: the
@@ -422,7 +423,8 @@ DECISIONS.md or fix it.
   logic never does.
 - Model scoring and simulation are seeded; the generated blocks of
   `docs/RESULTS.md` and `docs/AB_DESIGN.md` regenerate byte-identically
-  (`make simulate` / `make power` check mode is the CI proof). The
+  (`tests/test_simulate.py` / `tests/test_power.py` under `make test` are the
+  CI proof; `make simulate` / `make power` check mode is the local one). The
   simulation uses common random numbers (four uniforms per prompt, one
   seeded stream, `prompt_id` order), so the lift is a function of the
   schedules alone.
@@ -699,20 +701,23 @@ the ONE mechanism (a zero-byte `_empty.jsonl` load job → `0 event rows`),
 incremental strategy → **Amendment U** (native `insert_overwrite` selected on
 `target.type`; the dispatch body raises by design), and unit fixtures had
 DuckDB-only forms (`::json`, `date_diff`) → portable fixtures. Offline suite
-green (431), lint clean, mutate 8/8; review rounds 1–4 applied (amendments
-V, W/W′ → X; round 4 was the cap's one scoped re-review). **Phase 9's Done-when is met.** Round 3 invoked the
-**cap** (two rounds of findings inside the previous round's fixes — the
-landing's empty-selection path): Amendment X re-implemented it once as ONE
-mechanism (the load job; a zero-byte object for an empty selection;
-`recreate` gone). Next: round 4, the one scoped re-review, then the
-coherence-auditor once at exit; the applied stack stays up (cents) until
-`tf-destroy` is asked for.
-Open BACKLOG rows: **13** (9b struck: the two-datasets row, the DAG-landing
+green (432), lint clean, mutate 8/8; review rounds 1–4 applied (amendments
+V, W/W′ → X; round 4 was the cap's one scoped re-review, re-proven live:
+`test-int-bigquery` `4 passed` at `374ab4e`). **Phase 9's Done-when is
+met.** Round 3 invoked the **cap** (two rounds of findings inside the
+previous round's fixes — the landing's empty-selection path): Amendment X
+re-implemented it once as ONE mechanism (the load job; a zero-byte object for
+an empty selection; `recreate` gone). The coherence-auditor's whole-repo exit
+pass ran (10 findings: records, one BACKLOG row for Phase 10's write-back
+seam). Next: PR → merge; then `fix/tf-vars-argv` (BACKLOG) and, when asked,
+`tf-destroy` — the applied stack stays up (cents) until then.
+Open BACKLOG rows: **14** (9b struck: the two-datasets row, the DAG-landing
 row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
 (first 9b apply 2026-08-30); opened: the guard's contract residual (JSON
 null vs missing key, `|` in a value) and the env-`TF_VAR_*` bypass of
 Amendment T (a 9a residual → `fix/tf-vars-argv` after 9b merges), the
-project-id/SA-email-in-records note (round 2); the
+project-id/SA-email-in-records note (round 2), the write-back's DuckDB-only
+relation/connection seam for Phase 10 (exit audit); the
 CI-drift row re-deferred with the trigger "the first `enable_ci_wif = true`
 apply"; THROUGH-calendar, Spanner, argmax-bins re-deferred with 9b notes).
 
