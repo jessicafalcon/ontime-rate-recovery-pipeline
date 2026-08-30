@@ -311,4 +311,10 @@ Dated lines (fill on apply day — the BACKLOG trial row's trigger):
   `No changes` on the toggled re-plan). **The trial clock is running.**
 - Trial ends (apply + 90 days): **2026-11-28**
 - Destroy-by (before the trial ends; the runbook tears down the same day): **2026-08-30**
-- Destroyed (`enable_spanner=false` re-applied): *(pending — this session)*
+- Destroyed (`enable_spanner=false` re-applied): **2026-08-30** (23:50 UTC,
+  operator ADC): plan `0 to add, 0 to change, 8 to destroy` — exactly the
+  module's — then `Apply complete! Resources: 0 added, 0 changed, 8
+  destroyed`; `gcloud spanner instances list` → `Listed 0 items.`; state
+  keeps the 21 free-tier entries (two datasets, bucket, SA + grants, budget,
+  API enablements). **Nothing billable is up.** The two Spanner-side API
+  enablements stay on (free, like the root set).

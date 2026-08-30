@@ -218,9 +218,12 @@ Done-when 1, 4 and 5 ran after the ask-first apply:
   `SEND_SCHEDULE_SHA256_TINY`); then `make writeback TARGET=spanner
   PROJECT=ontime-rate-recovery CONFIRM=yes` → `writeback OK:
   ontime-rate-recovery.ontime → spanner, 20 users, 0 written`.
-- Teardown (`VARS='enable_spanner=false'` re-apply) and the dated
-  DEPLOYMENT lines: see `docs/DEPLOYMENT.md` § Spanner (filled the same
-  session).
+- Teardown, same session (operator ADC): `make tf-plan …
+  VARS='operator_principal=user:<operator>'` → `Plan: 0 to add, 0 to change,
+  8 to destroy` (exactly the module's), `make tf-apply … CONFIRM=yes` →
+  `Apply complete! Resources: 0 added, 0 changed, 8 destroyed` (23:50 UTC);
+  `gcloud spanner instances list` → `Listed 0 items.`; the dated lines are in
+  `docs/DEPLOYMENT.md` § Spanner. **Done-when 1–6 are met, live and offline.**
 
 ## Invariants (REQUIRED)
 

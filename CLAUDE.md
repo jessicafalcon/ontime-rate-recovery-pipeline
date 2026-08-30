@@ -820,9 +820,13 @@ resources, two grants both to the SA), re-plan `No changes`; as the SA:
 (view ≡ seed, manifest resolved the source to the view, three goldens
 byte-identical, write-back idempotent with the DuckDB hash), `writeback OK:
 ontime-rate-recovery.ontime → spanner, 20 users, 0 written`. Trial clock
-started 2026-08-30 (ends 2026-11-28); dated lines in DEPLOYMENT. PENDING:
-the same-day `enable_spanner=false` teardown (operator ADC) — then the
-scoped re-review (round 2) and the exit audit.
+started 2026-08-30 (ends 2026-11-28); torn down the same session (operator
+ADC, `8 destroyed`, `Listed 0 items.`) — dated lines in DEPLOYMENT.
+**Nothing billable is up; the free-tier layer (two datasets, bucket, SA,
+budget) is UP** — `make tf-destroy … CONFIRM=yes` when the phase is done
+with it. **Phase 10's Done-when is met.** NEXT: the scoped re-review (round
+2 over round 1's diff + Amendments A–D) and the coherence-auditor exit
+pass, then the PR.
 Open BACKLOG rows: **12** (Phase 10 struck: the write-back read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /
