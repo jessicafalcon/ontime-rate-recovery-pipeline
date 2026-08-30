@@ -58,12 +58,15 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `generate_schema_name.sql` — a dbt hook override, not a dispatch macro),
   `tests/` (singular data tests), `profiles.yml` (`duckdb`, `bigquery` targets).
   `models/staging/sources.yml` is GENERATED (`make gen-sources`), never edited.
-- `loader/` *(Phase 2; 9b)* — raw landing: `load.py` (fixtures → DuckDB `raw`
-  schema, types from the generated `ddl.sql`), `bq.py` (Phase 9b: the same
-  files → GCS staging → BigQuery `raw`, schema from the generated
+- `loader/` *(Phase 2; 9b; 10)* — raw landing: `load.py` (fixtures → DuckDB
+  `raw` schema, types from the generated `ddl.sql`), `bq.py` (Phase 9b: the
+  same files → GCS staging → BigQuery `raw`, schema from the generated
   `bq_schema.json`, `WRITE_TRUNCATE`; every cloud call through an injectable
-  `Clients` factory — the offline suite injects fakes), `cli.py` (`load`,
-  `bq-load`, `dbt-build` — lands by target — `drop-db`, `test-int-bigquery`).
+  `Clients` factory — the offline suite injects fakes), `spanner.py`
+  (Phase 10: the same dim seed → the Spanner `dim_user` table, contract
+  types from `bq_schema.json`, idempotent batch upsert, injectable client),
+  `cli.py` (`load`, `bq-load`, `spanner-load`, `dbt-build` — lands by
+  target — `drop-db`, `test-int-bigquery`, `test-int-spanner`).
   Pipeline code — guarded by `test_truth_isolation.py`.
 - `eval/` *(Phase 3+)* — the ONLY code that reads truth: `score.py` (label
   accuracy vs `truth/prompts.jsonl`; Phase 5: reachable-centre MAE and
@@ -84,10 +87,16 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   never a table, never `fixtures/`.
 - `serving/` *(Phase 8a; Spanner target Phase 10)* — the idempotent write-back:
   `writeback.py` (`should_replace` replace-iff-greater on the row's own
-  `(model_version, computed_as_of)`, key `user_id`; `apply_writeback`
-  delete-and-insert of winners; `written_at = computed_as_of`), `cli.py`
-  (`writeback`, `pipeline`), `ddl.sql` (hand-written 9-column serving DDL, §2.9).
-  Reads `scores_send_time` + `dim_user_current` (tz), writes `serving.send_schedule`;
+  `(model_version, computed_as_of)` with `version_key` numeric version order —
+  `v10 > v2`, non-`v<int>` refuses; `candidates_sql(scores, dims)` the ONE
+  read with a Golden-style relation override; `winners_of` shared;
+  `written_at = computed_as_of`), `spanner.py` (Phase 10: `TARGET=spanner` —
+  reads BigQuery `ontime`, writes Spanner `send_schedule` by batch
+  `insert_or_update` of winners; injectable `QueryClient`/`SpannerClient`
+  factories, fakes offline), `cli.py` (`writeback [TARGET]`, `pipeline`),
+  `ddl.sql` (hand-written 9-column serving DDL, §2.9; the Spanner DDL lives
+  in the terraform module, pinned to the same columns).
+  Reads `scores_send_time` + `dim_user_current` (tz), writes `send_schedule`;
   never truth/raw. A pipeline dir — guarded by `test_truth_isolation.py`.
 - `orchestration/` *(Phase 8b)* — the Airflow DAG (Docker-local), no logic, only
   ordering: `dags/pipeline_dag.py` (BashOperators over `make` targets, `dbt_build
@@ -97,10 +106,17 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `docker-compose.yml` (lean `SequentialExecutor`/SQLite; `apache-airflow` never
   in `uv.lock`). A pipeline dir — `test_truth_isolation.py` covers it. `eval` is
   NOT a DAG task (union-only gate — reads truth, asserts full-data pins).
-- `infra/` *(Phase 9a)* — Terraform. `main.tf`/`variables.tf`/`outputs.tf` +
+- `infra/` *(Phase 9a; 10)* — Terraform. `main.tf`/`variables.tf`/`outputs.tf` +
   `modules/{bigquery,gcs,iam,budget}` (unconditional, free/near-free) and
   `modules/{composer,spanner}` `count`-gated behind `enable_*` toggles that
   default false (so is the CI WIF layer inside `iam`: `enable_ci_wif`).
+  Phase 10 filled the spanner module: instance (100 PU), database with the
+  `dim_user` + `send_schedule` DDL inlined (pinned by
+  `tests/test_dbt_sources.py` against the contract renders),
+  `EXTERNAL_QUERY` connection + `raw.dim_user_spanner` view, three
+  database/connection-scoped grants; `deletion_protection = false` — the
+  scoped teardown is the toggle flipped back
+  (`tf-apply … VARS='enable_spanner=false'`), no `MODULE`, no `-target`.
   `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`/`tf-freeze` on
   `CONFIRM=yes $(origin)`; toggles only as a command-line `VARS` → argv
   `-var`, refuses `TF_VAR_*`/`TF_CLI_ARGS*` and auto-loaded tfvars, runs
@@ -274,14 +290,22 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   at α 0.05 / power 0.8 off the pinned baseline rates, rendered as the
   `<!-- power:begin -->` block of `docs/AB_DESIGN.md`; same check /
   `WRITE=yes` shape; prints `power OK: 6 rows, block matches`
-- `make writeback PROFILE=<p>` — the idempotent write-back (`serving/cli.py
-  writeback`): upsert `scores_send_time` + the open-`dim_user` tz
-  (`dim_user_current`) into `serving.send_schedule` (the DuckDB stand-in for
-  Spanner, §2.9), replacing a user's row only on a strictly greater
-  `(model_version, computed_as_of)`; `written_at = computed_as_of`. Prints
-  `writeback OK: <p>, N users, M written` — a re-run over the same scores writes
-  `0` (idempotent). No `CONFIRM` (create-if-not-exists + upsert, never
-  destructive; a reset is `make drop-db … CONFIRM=yes`). Needs `dbt-build` first
+- `make writeback PROFILE=<p> [TARGET=duckdb|spanner] [PROJECT=<id>]
+  [CONFIRM=yes]` — the idempotent write-back (`serving/cli.py writeback`):
+  upsert `scores_send_time` + the open-`dim_user` tz (`dim_user_current`) into
+  `send_schedule`, replacing a user's row only on a strictly greater
+  `(model_version, computed_as_of)` (`model_version` compared NUMERICALLY via
+  `version_key` — `v10 > v2`, any non-`v<int>` refuses; Phase 10);
+  `written_at = computed_as_of`. Prints `writeback OK: <p>, N users, M
+  written` — a re-run over the same scores writes `0` (idempotent).
+  `TARGET=duckdb` (default): `serving.send_schedule` in `data/<p>.duckdb`
+  (the stand-in, §2.9) — no `CONFIRM` (create-if-not-exists + upsert, never
+  destructive; a reset is `make drop-db … CONFIRM=yes`); needs `dbt-build`
+  first. `TARGET=spanner` (Phase 10): reads the same two relations off
+  BigQuery `ontime` (`candidates_sql` relation override) and writes the
+  Spanner table via batch `insert_or_update` — cloud-cost: `CONFIRM=yes`
+  command-line origin and `PROJECT` validated BEFORE any client; needs the
+  spanner-enabled stack and a `TARGET=bigquery` build
 - `make pipeline PROFILE=<p>` — the local chain with no scheduler (`serving/cli.py
   pipeline`): `dbt build → eval → write-back` in one validated process,
   producing `scores_send_time` and `send_schedule`; prints `pipeline OK: <p>`.
@@ -347,6 +371,28 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   the three golden tables back through the same `Golden` specs and diffs them
   against `fixtures/tiny/expected/` byte-for-byte, re-asserts the pins, and
   asserts exactly two datasets exist. Cloud-cost, ask first, as the SA
+- `make spanner-load PROFILE=<p> PROJECT=<id> CONFIRM=yes` *(Phase 10)* — the
+  Spanner dims landing (`loader/cli.py spanner-load`): the same
+  `dims/dim_user.csv` the other landings select → the Spanner `dim_user`
+  table (the production dims home BigQuery federates from, §2.3/§3.3),
+  columns/types from the generated `loader/bq_schema.json`, one idempotent
+  batch `insert_or_update` keyed `(user_id, valid_from)`; prints
+  `spanner-load OK: <p> — N dim rows`. Cloud-cost: `CONFIRM=yes` command-line
+  origin, `PROJECT` validated before any client, ADC never a key; verifies
+  `MANIFEST.sha256` like `load`. Needs an `enable_spanner=true` apply
+- `make test-int-spanner PROJECT=<id> CONFIRM=yes [PROFILE=tiny]` *(Phase 10)*
+  — the Spanner/federation run behind `OTR_INT` (CI never runs it):
+  `loader/cli.py test-int-spanner` validates and gates `CONFIRM` FIRST, then
+  runs `tests/integration/test_int_spanner.py`: lands the dims in Spanner,
+  builds on `bigquery` with the `dim_user` source swapped to the federation
+  view (`dim_user_identifier: dim_user_spanner`) and asserts the three
+  goldens byte-for-byte, asserts the `raw.dim_user_spanner` view returns
+  exactly the seed's rows, then runs the Spanner write-back twice — the
+  second writes 0 and the read-back hashes to `SEND_SCHEDULE_SHA256_TINY`
+  (cross-store byte parity). Cloud-cost, ask-first, as the SA; needs the
+  ask-first `make tf-apply … VARS='enable_spanner=true'` (trial clock — the
+  dated teardown lines in `docs/DEPLOYMENT.md` are filled the same session,
+  and the scoped teardown is `VARS='enable_spanner=false'` re-applied)
 - Later phases add their targets, each listed here in the same PR.
 
 ## Event model facts (from ARCHITECTURE.md §2; update if reality differs)
@@ -376,9 +422,12 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   'bigquery'` only (Phase 9b, §8). Vars `skew_max_min` (5 = `generator/models.py`),
   `delivery_grace_min` (10), `unattributed_max` (0.10), `retention_days` (28),
   the send-time model's `feature_window_days` (30), `max_user_shift_min`
-  (120), `shrinkage_pseudo_count` (5), `model_version` (`v1`), and the
+  (120), `shrinkage_pseudo_count` (5), `model_version` (`v1`), the
   incremental `lookback_days` (5 — Phase 7; `lookback_days·24 >
-  late_arrival_max_hours` on every profile) in `dbt_project.yml`.
+  late_arrival_max_hours` on every profile), and `dim_user_identifier`
+  (`dim_user` — Phase 10: which relation the `raw.dim_user` SOURCE resolves
+  to; the Spanner run overrides it to the federation view
+  `dim_user_spanner`) in `dbt_project.yml`.
 - Send-time model (Phase 5, `docs/METRICS.md` § scores_send_time):
   `features_user_hour` counts ORGANIC `app_opened` only (responses are
   exposure-biased), per `user_id` on each event's own local hour — a
@@ -678,10 +727,11 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 9 complete (9a PR #12, 9b PR #13); `fix/tf-vars-argv` in flight.**
+**Phase 9 complete (9a PR #12, 9b PR #13); `fix/tf-vars-argv` merged (PR #14,
+2026-08-30); Phase 10 in flight.**
 Phases 0–8 merged (PRs #1–#11); **9a merged as PR #12** (2026-08-29, amendments
 A–T, 8 review rounds) — the Terraform foundation, meter off by default, plan-clean
-and destroy-empty proven live. **9b** owns Phase 9's two warehouse clauses: `make
+and destroy-empty proven live; **`fix/tf-vars-argv` merged as PR #14**. **9b** owns Phase 9's two warehouse clauses: `make
 dbt-build TARGET=bigquery PROFILE=tiny` green with the same pins, and `make
 test-int-bigquery`. Landed on the branch (spec `specs/phase-9b-bigquery-dialect.md`,
 reconciliation items 1–9 approved 2026-08-29; item 4 = (b), the CI WIF job
@@ -729,7 +779,28 @@ state changed; env `TF_VAR_*`/`TF_CLI_ARGS*`). **The stack on
 `ontime-rate-recovery` was destroyed 2026-08-30** (re-auth as the operator,
 then `tf-destroy`) — nothing billable is up; the SA id is reserved again
 until ~2026-09-29 (undelete + import detour in DEPLOYMENT).
-Open BACKLOG rows: **14** (`fix/tf-vars-argv` struck the env-`TF_VAR_*` row; 9b struck: the two-datasets row, the DAG-landing
+**Phase 10 in flight** (`phase-10-spanner-writeback`, spec approved
+2026-08-30, reconciliation items 1–6): offline complete — the TARGET-keyed
+read seam (`candidates_sql` relation override; `TARGET=spanner` reads
+BigQuery `ontime`, writes Spanner through injectable clients, fakes offline),
+`version_key` numeric order (BACKLOG row 32 struck; contract wording
+unchanged), `loader/spanner.py` dims landing + `make spanner-load`, the
+spanner terraform module body (instance 100 PU, database DDL, EXTERNAL_QUERY
+connection + `raw.dim_user_spanner` view, three scoped grants; count-gated,
+default plan still creates nothing), the generated `dim_user_identifier`
+source swap, `make test-int-spanner`, threat-model sweep; suite 462, mutate
+4/4, tf-validate/tf-freeze clean. PENDING (ask-first, cloud): the
+`enable_spanner=true` apply (undelete+import detour while the SA id is
+reserved), `spanner-load`, `test-int-spanner`, the same-day
+`enable_spanner=false` teardown with the dated DEPLOYMENT lines — then the
+review rounds and the exit audit.
+Open BACKLOG rows: **12** (Phase 10 struck: the write-back read-seam row and
+the `model_version`-lexical row; re-deferred: the `computed_as_of`
+discriminator (new trigger: a served-row change without an advancing as-of /
+a dim change mid-schedule / two live versions), the `loader/`→`landing/`
+rename (trigger: `fix/landing-package` after Phase 10 merges, before
+Phase 11); the Spanner-trial row's dated DEPLOYMENT lines land on apply day.
+Earlier: `fix/tf-vars-argv` struck the env-`TF_VAR_*` row; 9b struck: the two-datasets row, the DAG-landing
 row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
 (first 9b apply 2026-08-30); opened: the guard's contract residual (JSON
 null vs missing key, `|` in a value), the

@@ -257,11 +257,40 @@ Or wait for the window to close.
 
 ## Spanner trial (Phase 10) and Composer (Phase 11) — teardown dates
 
-Both stay off (`enable_spanner`/`enable_composer` default false) until their
-phase, so 9a's `tf-*` targets never create them. When applied: **Spanner** starts
-a 90-day free trial, then bills ~$65/mo — tear it down before day 90 by setting
-`enable_spanner=false` and re-applying (Phase 10 adds a scoped
-`make tf-destroy MODULE=spanner`; **no `MODULE` variable exists in 9a**, so a 9a
-`make tf-destroy` destroys the whole stack). **Composer** bills ~$300+/mo —
-Phase 11 applies it on demo day and destroys it the same hour (Phase 12). Record
-the actual apply dates here when they land.
+Both stay off (`enable_spanner`/`enable_composer` default false), so a default
+apply never creates them. **Composer** bills ~$300+/mo — Phase 11 applies it on
+demo day and destroys it the same hour (Phase 12). Record the actual apply
+dates here when they land.
+
+### Spanner: bring-up, run, teardown (Phase 10)
+
+Applying Spanner starts the 90-day trial clock; after it, the 100-processing-
+unit instance bills ~$65/mo. Every step is ask-first, and the teardown belongs
+to the same working session as the apply.
+
+1. **Apply** (your operator ADC — Terraform never runs as the SA, §8; before
+   ~2026-09-29 the soft-deleted `ontime-pipeline` SA id needs the
+   undelete + import detour above):
+   `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=true'` —
+   adds exactly the spanner module's 9 resources (2 kept-on API enablements,
+   instance, database with the `dim_user` + `send_schedule` DDL, the BigQuery
+   connection + `raw.dim_user_spanner` federation view, 3 scoped grants).
+   **The same session, fill in the dated lines below.**
+2. **Land the dims** (as the SA):
+   `make spanner-load PROFILE=tiny PROJECT=<id> CONFIRM=yes`.
+3. **Prove it**: `make test-int-spanner PROJECT=<id> CONFIRM=yes` — the
+   federated view returns the seed's rows, the swapped build
+   (`dim_user_identifier: dim_user_spanner`) reproduces the three goldens,
+   and the Spanner write-back is idempotent with the DuckDB-pinned row hash.
+4. **Tear down the same day** — the SCOPED destroy is the toggle flipped
+   back: `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=false'`
+   (count → 0 destroys exactly the module's resources; the two API
+   enablements stay on — free, like the root set). There is no `MODULE`
+   variable and no `-target`; a full `make tf-destroy … CONFIRM=yes` also
+   removes Spanner along with everything else.
+
+Dated lines (fill on apply day — the BACKLOG trial row's trigger):
+
+- `enable_spanner=true` applied: *(not yet — the trial clock has not started)*
+- Trial ends (apply + 90 days): —
+- Destroyed (`enable_spanner=false` re-applied): —

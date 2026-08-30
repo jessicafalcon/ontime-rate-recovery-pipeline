@@ -69,6 +69,10 @@ arrived" from "arrived at a bad time".
 time**; the conversion happens once, in staging
 (`stg_events.client_event_time_local`), against the tz valid at
 `client_event_time` — `valid_from <= t and (valid_to is null or t < valid_to)`.
+Phase 10: Spanner is the production dims home — `make spanner-load` upserts the
+seed into the Spanner `dim_user` table (key `(user_id, valid_from)`, DDL
+generated from the contract), and BigQuery reads it through the
+`raw.dim_user_spanner` `EXTERNAL_QUERY` view (§3.3's source swap).
 
 ### 2.4 Ground truth (generator side-file, never a source)
 
@@ -214,10 +218,14 @@ idempotent batch upsert keyed `user_id`; a row is replaced only when
 falls back to the cohort default when no row exists. `tz` is the current (open
 SCD2) `dim_user` zone, joined at write-back time from the `dim_user_current`
 model (Phase 8a), not carried on the score. `written_at = computed_as_of` on the
-DuckDB stand-in (Phase 8a): a per-row data-derived value keeps `send_schedule`
-byte-identical on a re-run and under a backfill — a wall clock would break both
-(§4, the determinism policy); a production serving store may stamp a real ingest
-time in a carved-out audit column, never asserted.
+DuckDB stand-in (Phase 8a) AND on Spanner (Phase 10): a per-row data-derived
+value keeps `send_schedule` byte-identical on a re-run and under a backfill — a
+wall clock would break both (§4, the determinism policy); a production serving
+store may stamp a real ingest time in a carved-out audit column, never
+asserted. Phase 10: `make writeback TARGET=spanner` reads the same two
+relations off BigQuery `ontime` and writes the Spanner `send_schedule` (the
+module's DDL — the nine columns, `model_version` compared under a parsed
+numeric order, `v10 > v2`); `TARGET=duckdb` (default) keeps the stand-in.
 
 ## 3. Components
 
@@ -249,7 +257,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | component | reads | writes | may NOT |
 |---|---|---|---|
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
-| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load); on BigQuery also the staging objects `gs://<project>-ontime/landing/<p>/{raw,dims}/` incl. a zero-byte `_empty.jsonl` (Phase 9b) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
+| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load); on BigQuery also the staging objects `gs://<project>-ontime/landing/<p>/{raw,dims}/` incl. a zero-byte `_empty.jsonl` (Phase 9b); on Spanner the `dim_user` table (`make spanner-load`, idempotent upsert — Phase 10) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
 | eval | dbt outputs, truth, the profile JSON (the generator's input) | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), the marker-confined blocks of `docs/RESULTS.md` and `docs/AB_DESIGN.md` *(Phase 6; `WRITE=yes` only)* | write any table the pipeline reads; write under `fixtures/`; create or append to a doc |
 | write-back | `scores_send_time`, `dim_user_current` (the open `dim_user` row's tz — Phase 8a) | `send_schedule` | read truth; read raw; re-derive a score |
@@ -281,8 +289,8 @@ data profile, `TARGET` the warehouse.
 |---|---|---|
 | generator → `fixtures/<profile>/raw/events_<upload-date>.jsonl` (one file per UTC `server_upload_time` date — the landing unit Phase 7 replays) | Amplitude → BigQuery export | dbt `source` config |
 | `make bq-load` — the fixture files → the GCS staging bucket (`landing/<profile>/`) → `raw.events` / `raw.dim_user`, explicit schema generated from the contract, one `WRITE_TRUNCATE` load job per table — an empty selection lands a zero-byte object through it (Phase 9b, X) | Amplitude's own export job writing the `raw` dataset | the landing step is dropped; the source config is unchanged |
-| `dim_user` seed file (`dims/dim_user.csv`, loaded as the `raw.dim_user` source by `make load` — not a dbt seed, whose path could not follow `PROFILE`) | Spanner change streams / federation | `EXTERNAL_QUERY` source (demo), Dataflow template (prod) — a source-config swap, no model changes |
-| DuckDB `send_schedule` table | Spanner serving table | write-back target flag |
+| `dim_user` seed file (`dims/dim_user.csv`, loaded as the `raw.dim_user` source by `make load` — not a dbt seed, whose path could not follow `PROFILE`) | Spanner change streams / federation | *Delivered Phase 10:* the `raw.dim_user_spanner` `EXTERNAL_QUERY` view (spanner module, behind `enable_spanner`) over the Spanner dims `make spanner-load` lands; the swap is the generated source's `dim_user_identifier` var (default = the landed table, so free-tier builds never touch Spanner) — a source-config swap, no model changes. Dataflow template stays the prod path |
+| DuckDB `send_schedule` table | Spanner serving table | *Delivered Phase 10:* `make writeback TARGET=spanner` (default `duckdb` keeps the stand-in) |
 
 ## 4. System invariants (hold across every phase)
 

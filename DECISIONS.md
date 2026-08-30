@@ -122,6 +122,58 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### Phase 10 — Spanner: dims and write-back (2026-08-30)
+
+- **One `TARGET` knob, two named configurations — no read×write matrix.**
+  `writeback TARGET=duckdb` (default) reads and writes the local DuckDB;
+  `TARGET=spanner` reads BigQuery `ontime` and writes Spanner. The read seam
+  is `serving/writeback.py::candidates_sql(scores, dims)` — the Golden-style
+  relation override; `Candidate`/`should_replace`/`winners_of` are shared
+  verbatim. Rejected: independent read and write flags — no configuration in
+  that matrix serves anything (a Spanner write off a DuckDB read crosses a
+  laptop and a cloud stack for no consumer).
+- **`version_key` parses `v<int>`; any other shape refuses loudly.** Phase
+  10's Done-when ("an older `model_version` never overwrites a newer one") is
+  a for-all claim lexical tuple order falsifies at `v10` vs `v2`, so the
+  comparator was fixed before a Spanner table could hold a mis-ordered
+  version — closing the Phase 8a BACKLOG row with no contract change.
+  Rejected: a lexical fallback for unparseable versions (silently
+  re-introduces the bug the clause kills).
+- **The Spanner write is Python-computed winners + batch `insert_or_update`
+  through injectable clients.** Same guard, one dialect; the fake models the
+  store as a dict and the offline suite proves idempotence and
+  strictly-greater without a service. Rejected: server-side conditional DML —
+  it forks the guard's logic into a second dialect `make test` cannot run.
+- **All Spanner resources live in the count-gated module; the DDL is inlined
+  in its `main.tf` (heredoc), pinned two ways.** `tf-freeze`'s manifest pins
+  `*.tf` only, so a side `.sql` file could drift under the frozen tree; and
+  `tests/test_dbt_sources.py` renders the `dim_user` DDL + federation view
+  from `generator/models.py` and fails when the `.tf` drifts (the
+  `send_schedule` DDL is pinned against `serving/spanner.py::COLUMNS` — a
+  serving contract, like `serving/ddl.sql`, not the generator's).
+  `deletion_protection = false` on the database: the toggle-flip re-apply IS
+  the sanctioned, `$(origin CONFIRM)`-gated destroy path; provider-side
+  protection would turn it into a two-apply dance.
+- **The federation swap is a generated source-identifier var
+  (`dim_user_identifier`, default `dim_user`).** §3.3's "source-config swap,
+  no model changes", made real: the integration run builds with
+  `dim_user_identifier: dim_user_spanner` and must reproduce the three
+  goldens. Rejected: making the `EXTERNAL_QUERY` view the default `bigquery`
+  source — it would chain every free-tier parity run to a trial-clock
+  Spanner stack.
+- **Scoped Spanner teardown = the toggle flipped back; no `MODULE`, no
+  `-target`.** `make tf-apply … CONFIRM=yes VARS='enable_spanner=false'`
+  destroys exactly the module's resources through the count gate, with zero
+  new argv surface through `fix/tf-vars-argv`'s allowlisted runner.
+  `docs/PHASES.md`'s `make tf-destroy MODULE=spanner` wording was corrected
+  (spec reconciliation item 4). Rejected: `-target` (Terraform flags it as
+  exceptional — it bypasses the dependency graph) and a `MODULE` variable
+  (new input surface duplicating what the toggle already does).
+- **`loader/` gained the third landing engine rather than being renamed
+  first.** The `landing/`/`pipeline/` split (BACKLOG) is a separate
+  `fix/landing-package` branch after this phase merges — mechanical churn
+  does not belong in a Spanner diff (reconciliation item 3).
+
 ### fix/tf-vars-argv (after Phase 9b, 2026-08-30)
 
 - **A toggle reaches Terraform only as `VARS='name=value,…'` → argv `-var`;

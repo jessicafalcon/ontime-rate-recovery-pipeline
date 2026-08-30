@@ -388,8 +388,12 @@ gains a Spanner target (`make writeback TARGET=spanner`). Threat model for every
 
 **Done when.** Two write-back runs over the same scores leave `send_schedule`
 unchanged (row hash); an older `model_version` never overwrites a newer one;
-`make tf-destroy MODULE=spanner` prompts unless `CONFIRM=yes` from the command
-line.
+the scoped Spanner teardown — `make tf-apply … VARS='enable_spanner=false'`,
+the toggle flipped back so the count-gated module destroys exactly its own
+resources — prompts unless `CONFIRM=yes` from the command line. *(Corrected at
+reconciliation: the original said `make tf-destroy MODULE=spanner`; no `MODULE`
+variable exists, and `fix/tf-vars-argv` pinned toggles to command-line `VARS`
+→ argv `-var` — spec item 4, DECISIONS Phase 10.)*
 
 ---
 

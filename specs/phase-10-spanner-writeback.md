@@ -316,14 +316,36 @@ re-upserts identical dims (idempotent); `test-int-spanner` twice re-runs
 reads + the writeback (cents); the toggle-flip apply destroys exactly the
 spanner module's resources and nothing else in state.
 
-Existing-target sweep (PHASES names it for Phase 10): every variable-taking
-or destructive target — `seed`, `freeze`, `load`, `dbt-build`, `bq-load`,
-`drop-db`, the five `WRITE=yes` golden/report/simulate/power targets,
-`eval`, `writeback`, `pipeline`, `test-int-airflow`, `test-int-bigquery`,
-the five `tf-*` — is audited row-by-row against
-`tests/test_makefile.py` (the one-literal, `$(origin)`, and no-variable
-pins listed there) during round 1; any target missing a cell's pin gets the
-test in this phase. The audited table lands in this section before DONE.
+Existing-target sweep (PHASES names it for Phase 10) — AUDITED 2026-08-30
+against `tests/test_makefile.py`. Every variable-taking or destructive
+target's five columns are pinned; the shared mechanics (one-line recipe,
+`$(call _Q,$(value VAR))` unexpanded+single-quoted, `unexport`, Python
+validation before any path/client, `$(origin CONFIRM)`) are proven per
+target by:
+
+| Target(s) | Pinned by (`tests/test_makefile.py::`) |
+|---|---|
+| `review-gate` / `mutate` (SPEC, BASE, DELETED) | `test_user_variable_reaches_python_as_one_literal_from_both_origins`, `test_env_exported_spec_reaches_the_recipe_and_is_validated_in_python`, `test_base_defaults_to_main_and_deleted_is_optional` |
+| `seed` (PROFILE) | `test_profile_reaches_python_as_one_literal_from_both_origins` |
+| `freeze` (PROFILE, CONFIRM) | `test_freeze_requires_confirm_from_the_command_line` |
+| `load` (PROFILE, THROUGH) | `test_load_and_dbt_build_pass_profile_and_target_as_one_literal`, `test_load_passes_through_as_one_literal` |
+| `dbt-build` (PROFILE, TARGET, CONFIRM, FULL, THROUGH, PROJECT) | the two above + `test_dbt_build_full_refresh_from_command_line_only`, `test_dbt_build_passes_through_as_one_literal`, `test_bq_targets_pass_project_as_one_literal`, `test_bq_targets_confirm_from_command_line_only` |
+| `bq-load` / `test-int-bigquery` (PROFILE, PROJECT, CONFIRM) | `test_bq_targets_pass_project_as_one_literal`, `test_bq_targets_confirm_from_command_line_only` |
+| `drop-db` (PROFILE, CONFIRM — the deleter) | `test_drop_db_requires_confirm_from_the_command_line` |
+| `attribution-golden` / `eval` / `scores-golden` / `report` / `simulate` (PROFILE, WRITE) | `test_golden_and_eval_pass_profile_as_one_literal`, `test_scores_golden_passes_profile_as_one_literal`, `test_report_passes_profile_as_one_literal`, `test_simulate_passes_profile_as_one_literal` (WRITE takes the literal `yes` only — validated in `eval/cli.py`) |
+| `power` (WRITE) | `test_power_passes_write_as_one_literal` |
+| `writeback` / `pipeline` (PROFILE; Phase 10: TARGET, PROJECT, CONFIRM) | `test_writeback_and_pipeline_pass_profile_as_one_literal`, `test_writeback_target_confirm_from_command_line_only` |
+| `spanner-load` / `test-int-spanner` (PROFILE, PROJECT, CONFIRM) | `test_spanner_targets_pass_variables_as_one_literal` |
+| `test-int-airflow` (takes NO variable) | `test_test_int_airflow_takes_no_variable_and_exports_otr_int` |
+| `tf-validate` (takes NO project) | `test_tf_validate_takes_no_project` |
+| `tf-plan` / `tf-apply` / `tf-destroy` (PROJECT, CONFIRM, VARS) | `test_tf_targets_pass_project_as_one_literal`, `test_tf_targets_pass_vars_as_one_literal`, `test_tf_apply_and_destroy_confirm_from_command_line_only` (+ `tests/test_infra.py`: env-`TF_VAR_*`/`TF_CLI_ARGS*` refusal, env allowlist, auto-tfvars refusal) |
+| `tf-freeze` (CONFIRM — overwrites the pin) | `test_tf_freeze_confirm_from_command_line_only` |
+
+No gap found: every target with a variable, a delete, a cloud call, or a
+confirmation knob has a one-literal pin and (where destructive/cloud) an
+`$(origin CONFIRM)` pin. Stated residual, unchanged since Phase 2:
+`MAKEFLAGS`/`MFLAGS` reach recipes from the environment — mistakes, not a
+user who controls the environment (the threat model's standing carve-out).
 
 ## Review & stack risk
 
