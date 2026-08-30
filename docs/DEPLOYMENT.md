@@ -272,9 +272,11 @@ to the same working session as the apply.
    ~2026-09-29 the soft-deleted `ontime-pipeline` SA id needs the
    undelete + import detour above):
    `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=true'` —
-   adds exactly the spanner module's 9 resources (2 kept-on API enablements,
+   adds exactly the spanner module's 8 resources (2 kept-on API enablements,
    instance, database with the `dim_user` + `send_schedule` DDL, the BigQuery
-   connection + `raw.dim_user_spanner` federation view, 3 scoped grants).
+   connection + `raw.dim_user_spanner` federation view, 2 scoped grants —
+   both to the pipeline SA, which is the principal the federated read runs
+   as; §8).
    **The same session, fill in the dated lines below.**
    **While Spanner is up, EVERY `make tf-apply` carries
    `VARS='enable_spanner=true'`** — the toggle defaults false and the

@@ -119,7 +119,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `tests/test_dbt_sources.py` against the contract renders — `gen-sources`
   never writes a `.tf`; a drift is a paste + `tf-freeze`), `EXTERNAL_QUERY`
   connection + `raw.dim_user_spanner` view (each column cast to the landing
-  schema's type), three database/connection-scoped grants (type + scope
+  schema's type), two database/connection-scoped grants, both to the SA
+  (the federated read runs as the querying principal — §8; type + scope
   pinned; the gated modules have their own exact resource allowlists, no
   data sources); `deletion_protection = false` — the scoped teardown is the
   toggle flipped back (`tf-apply … VARS='enable_spanner=false'`), no
@@ -801,7 +802,7 @@ BigQuery `ontime`, writes Spanner through injectable clients, fakes offline),
 `version_key` numeric order (BACKLOG row 32 struck; contract wording
 unchanged), `loader/spanner.py` dims landing + `make spanner-load`, the
 spanner terraform module body (instance 100 PU, database DDL, EXTERNAL_QUERY
-connection + `raw.dim_user_spanner` view, three scoped grants; count-gated,
+connection + `raw.dim_user_spanner` view, two scoped grants; count-gated,
 default plan still creates nothing), the generated `dim_user_identifier`
 source swap, `make test-int-spanner`, threat-model sweep. **Review round 1
 applied (2026-08-30, 24 findings):** Amendments A (the Spanner guard + upsert

@@ -211,6 +211,17 @@ annotated **Superseded by …** in place and never deleted.
   the generated BigQuery landing schema's type, so the swapped source has
   `raw.dim_user`'s shape by construction (spec item 6's sentence, now true
   in the render).
+- **No service-agent grant on the Spanner federation path (first live
+  apply, Amendment D).** The first `enable_spanner=true` apply created 26 of
+  27 resources and failed on the `databaseReader` grant to
+  `service-<number>@gcp-sa-bigqueryconnection` — the agent does not exist
+  and nothing provisions it. The docs say the federated read runs as the
+  QUERYING principal (`spanner.databaseReader` + `bigquery.connectionUser`
+  on the connection); the delegated-agent model is Cloud SQL's. So the grant
+  set is two, both to the pipeline SA (`databaseUser` ⊇ `databaseReader`;
+  `connectionUser`), and the module's `project_number` input is gone.
+  Rejected: provisioning the agent so the grant applies — read on the
+  database for an identity that never queries it.
 - **The count-gated modules carry their own exact resource allowlists and
   may read no data source (round 1 #11).** The root allowlist exempted
   `modules/{composer,spanner}` entirely, so a `null_resource` + `local-exec`

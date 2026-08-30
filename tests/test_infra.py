@@ -327,10 +327,6 @@ def test_spanner_names_pin_the_python_constants() -> None:
 # type (database- / connection-level, never instance or project) and the
 # argument that names the ONE database / connection.
 SPANNER_GRANT_SCOPES = {
-    '"connection_reader"': (
-        "google_spanner_database_iam_member",
-        r"^\s*database\s*=\s*google_spanner_database\.this\.name",
-    ),
     '"pipeline_user"': (
         "google_spanner_database_iam_member",
         r"^\s*database\s*=\s*google_spanner_database\.this\.name",
@@ -351,7 +347,10 @@ def test_spanner_grants_are_scoped_to_the_one_database_and_connection() -> None:
     grants = _blocks_with_headers(
         text, r'resource "google_[a-z_]+_iam_member"\s+"[^"]+"'
     )
-    assert len(grants) == 3, [g.splitlines()[0] for g in grants]
+    # TWO grants, both to the pipeline SA — the federated read runs as the
+    # querying principal; there is no service-agent identity on the Spanner
+    # path (Amendment D, found live on the first apply)
+    assert len(grants) == 2, [g.splitlines()[0] for g in grants]
     for g in grants:
         header = g.splitlines()[0]
         key = next(k for k in SPANNER_GRANT_SCOPES if k in header)
@@ -370,17 +369,15 @@ def test_spanner_grants_are_scoped_to_the_one_database_and_connection() -> None:
         r'resource\s+"google_spanner_database_iam_(policy|binding)', text
     )
 
-    # #13: the service-agent grant is ordered after the connection that
-    # provisions the agent; the connection after its API enablement.
+    # #13: the connection is ordered after its API enablement; no grant names
+    # the connection service agent (Amendment D).
     def depends_on(block: str) -> str:
         return re.search(r"depends_on\s*=\s*\[([^\]]*)\]", block).group(1)
 
-    reader = _block(
-        text, r'resource "google_spanner_database_iam_member" "connection_reader"'
-    )
-    assert "google_bigquery_connection.spanner_dims" in depends_on(reader)
     conn = _block(text, r'resource "google_bigquery_connection" "spanner_dims"')
     assert "google_project_service.spanner" in depends_on(conn)
+    assert "gcp-sa-bigqueryconnection" not in text
+    assert "project_number" not in _stripped("modules", "spanner", "variables.tf")
 
 
 def test_every_declared_resource_type_is_on_the_allowlist() -> None:
@@ -760,7 +757,8 @@ LEAST_PRIVILEGE_ROLES = {
     "roles/storage.objectAdmin",
     # Phase 10 (spanner module, count-gated): each scoped to the ONE database
     # or connection — never instance/database admin, never project-wide.
-    "roles/spanner.databaseReader",
+    # (databaseReader is not granted: the federated read runs as the SA, whose
+    # databaseUser covers it — Amendment D.)
     "roles/spanner.databaseUser",
     "roles/bigquery.connectionUser",
 }
@@ -772,14 +770,9 @@ ON_SA_ROLES = {
 }
 SA_MEMBER = "serviceAccount:${google_service_account.pipeline.email}"
 # Phase 10: the spanner module's grants, pinned member-for-member — the
-# BigQuery Connection service agent (derived from the project number) reads
-# the one database; the pipeline SA (a var from module.iam) writes it and may
-# use the one connection.
+# pipeline SA (a var from module.iam) reads/writes the one database and may
+# use the one connection; nothing else is granted anything (Amendment D).
 SPANNER_MEMBERS = {
-    '"connection_reader"': (
-        "serviceAccount:service-${var.project_number}"
-        "@gcp-sa-bigqueryconnection.iam.gserviceaccount.com"
-    ),
     '"pipeline_user"': "serviceAccount:${var.sa_email}",
     '"pipeline_connection_user"': "serviceAccount:${var.sa_email}",
 }
@@ -838,7 +831,7 @@ def test_every_grant_member_is_pinned() -> None:
         else:
             assert member == SA_MEMBER, member
         seen += 1
-    assert seen == 9, seen
+    assert seen == 8, seen
 
 
 def test_no_role_can_create_a_dataset() -> None:

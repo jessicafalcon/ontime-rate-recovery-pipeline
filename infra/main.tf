@@ -136,11 +136,10 @@ module "composer" {
 # `VARS='enable_spanner=true'` apply, and the toggle flipped back is the scoped
 # teardown (docs/DEPLOYMENT.md carries the dates).
 module "spanner" {
-  source         = "./modules/spanner"
-  count          = var.enable_spanner ? 1 : 0
-  project_id     = var.project_id
-  region         = var.region
-  project_number = data.google_project.this.number
-  raw_dataset    = module.bigquery.raw_dataset_id
-  sa_email       = module.iam.service_account_email
+  source      = "./modules/spanner"
+  count       = var.enable_spanner ? 1 : 0
+  project_id  = var.project_id
+  region      = var.region
+  raw_dataset = module.bigquery.raw_dataset_id
+  sa_email    = module.iam.service_account_email
 }

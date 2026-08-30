@@ -105,8 +105,9 @@ operator ADC, never the impersonated SA (§8). Positions, numbered as posed:
    BigQuery `EXTERNAL_QUERY` over a `google_bigquery_connection`
    (CLOUD_SPANNER type, `us-central1`) wrapped in a view
    `raw.dim_user_spanner`, both created by the spanner module (count-gated
-   with everything else; the connection's service agent gets a scoped
-   `spanner.databaseReader`). The source swap §3.3 promises is real and
+   with everything else; ~~the connection's service agent gets a scoped
+   `spanner.databaseReader`~~ — Amendment D: the federated read runs as the
+   querying SA, no agent). The source swap §3.3 promises is real and
    proven with no model change: the generated `sources.yml` gives the
    `dim_user` source `identifier: "{{ var('dim_user_identifier',
    'dim_user') }}"` (default = today's landed table, every existing build
@@ -252,12 +253,13 @@ per the TEMPLATE's SQL rule.)
   units)** — satisfies invariant 5. A separate `.sql` file was rejected:
   `tf-freeze`'s manifest pins `*.tf`/`*.tf.json` only, and a file it doesn't
   pin can drift under the frozen tree. The module also owns the BigQuery
-  connection + `raw.dim_user_spanner` view + THREE scoped grants (the
-  connection's service agent → `databaseReader` on the one database; the
-  pipeline SA → `databaseUser` on the one database and
-  `bigquery.connectionUser` on the one connection — querying a view over
-  `EXTERNAL_QUERY` needs use rights on its connection; round 1 finding 19
-  corrected the count from two).
+  connection + `raw.dim_user_spanner` view + TWO scoped grants, both to the
+  pipeline SA: `databaseUser` on the one database (it is also the principal
+  the federated read runs as — `databaseUser ⊇ databaseReader`) and
+  `bigquery.connectionUser` on the one connection (querying a view over
+  `EXTERNAL_QUERY` needs use rights on its connection). Round 1 finding 19
+  counted three; Amendment D removed the service-agent grant on the first
+  live apply — no such identity is on the Spanner federation path.
 - **The federation swap is a generated source-identifier var, default
   unchanged (item 6)** — satisfies invariant 4 and §3.3's "source-config
   swap, no model changes". Making the view the default `bigquery` source was
@@ -370,8 +372,8 @@ user who controls the environment (the threat model's standing carve-out).
   hand-edited, no clock on the write path.
 - **security-reviewer** (mandatory — `infra/`, `serving/`, IAM grants, new
   CONFIRM-gated cloud/destructive targets): scoped grants only
-  (`databaseReader` for the connection agent, `databaseUser` for the SA — no
-  admin), no key material, gating before clients, the toggle-flip destroy
+  (`databaseUser` + `connectionUser` for the SA, nothing for anyone else —
+  no admin), no key material, gating before clients, the toggle-flip destroy
   path.
 - **functionality-tester** (after code-reviewer): DONE command, the fakes'
   negative tests (v10/v2, malformed version, refusal-before-client), mutation
@@ -433,14 +435,42 @@ user who controls the environment (the threat model's standing carve-out).
   `disable_builtin_metrics=True` (finding 8); `region` gains a Terraform
   `validation {}` (finding 9); grant scope + the gated modules' own resource
   allowlists + the `.tf` names pinned to the Python literals (findings 10,
-  11, 14); the service-agent grant ordered after the connection (finding
-  13); the view casts each column to the landing schema's type as this spec
+  11, 14); the connection ordered after its API (finding 13 — its
+  service-agent half was overtaken by Amendment D); the view casts each column to the landing schema's type as this spec
   said (finding 15); the DDL/view are labelled PINNED, not generated
   (finding 16); the transitive set recorded (finding 17); three grants
   (finding 19); `writeback OK: <project>.ontime → spanner` with PROFILE
   optional there (finding 20); `test-int-spanner` refuses a non-tiny PROFILE
   at the CLI (finding 23); the `open_rows` count off `tests/pins.py`
   (finding 22); docstrings (finding 24).
+
+## Amendments (first live apply, 2026-08-30)
+
+- **D — no service-agent grant: the Spanner federated read runs as the
+  querying principal (a design change: who-gets-what).** Restores
+  **invariant 5**'s live half (the toggled apply creates exactly the
+  module's resources) and keeps invariant-4's least-privilege claim honest.
+  Found on the first `enable_spanner=true` apply: 26 of 27 resources
+  created, then `Error 400: Service account
+  service-<number>@gcp-sa-bigqueryconnection.iam.gserviceaccount.com does
+  not exist` on `connection_reader` — even ordered after the connection
+  (finding 13's fix), because nothing on this path ever provisions that
+  agent. The docs (`bigquery/docs/spanner-federated-queries`) say why: for
+  Cloud Spanner connections the USER OR SERVICE ACCOUNT RUNNING THE QUERY
+  needs `roles/spanner.databaseReader` on the database and
+  `roles/bigquery.connectionUser` on the connection — the delegated
+  service-agent model is Cloud SQL's, not Spanner's. Mechanism: the
+  `connection_reader` resource and the module's `project_number` input are
+  deleted; the pipeline SA's existing `databaseUser` (⊇ `databaseReader`)
+  + `connectionUser` are the whole grant set (two, both to the SA).
+  Rejected: provisioning the agent (`gcloud beta services identity create`)
+  to make the grant apply — it would grant a non-participating identity
+  read on the database, the over-broad grant the security review exists to
+  catch. Pinned by `tests/test_infra.py::
+  test_spanner_grants_are_scoped_to_the_one_database_and_connection` (two
+  grants, no `gcp-sa-bigqueryconnection` anywhere in the module) and the
+  member/role pins. ARCHITECTURE §8 carries the gotcha; the apply resumed
+  with the corrected module.
 
 ## Out of scope (deferred, recorded)
 

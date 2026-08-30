@@ -532,10 +532,13 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   for that egress and the SA carries no monitoring grant, so both clients
   pass `disable_builtin_metrics=True`; pinned statically in
   `tests/test_spanner_landing.py`.
-- **The BigQuery Connection service agent exists only after the first
-  connection** (Phase 10, named in the spec's stack risk, coded before the
-  first apply). `service-<number>@gcp-sa-bigqueryconnection.iam.gserviceaccount.com`
-  is provisioned by the connection API on use, so the `databaseReader` grant
-  to it `depends_on` the connection resource (and the connection on the API
-  enablement) — otherwise a first apply can bind a member that does not
-  exist yet.
+- **A Cloud Spanner federated query has no service-agent identity — it runs
+  as the querying principal** (Phase 10, first live apply, 2026-08-30). The
+  spec's stack risk ("the connection's service agent existing before the IAM
+  grant") was the wrong model: `service-<number>@gcp-sa-bigqueryconnection`
+  is Cloud SQL's delegation identity, is never provisioned by a Spanner
+  connection, and the grant to it failed the apply (26/27 created). Per the
+  docs, the principal running `EXTERNAL_QUERY` needs
+  `roles/spanner.databaseReader` on the database and
+  `roles/bigquery.connectionUser` on the connection — the pipeline SA's
+  `databaseUser` + `connectionUser` grants are the whole set (Amendment D).

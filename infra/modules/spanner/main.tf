@@ -11,7 +11,7 @@
 # generator/models.py and pinned by tests/test_dbt_sources.py) and
 # `send_schedule` (the §2.9 nine-column serving table the DuckDB stand-in
 # mirrors), the BigQuery connection + `raw.dim_user_spanner` federation view
-# (EXTERNAL_QUERY — §3.3's source swap), and three scoped grants. DDL is
+# (EXTERNAL_QUERY — §3.3's source swap), and two scoped grants. DDL is
 # inlined here, not a side file: `tf-freeze`'s manifest pins *.tf only, and a
 # file it does not pin could drift under the frozen tree.
 
@@ -122,24 +122,18 @@ resource "google_bigquery_connection" "spanner_dims" {
   depends_on = [google_project_service.spanner]
 }
 
-# The BigQuery Connection service agent executes the federated query against
-# Spanner: databaseReader on the ONE database, nothing project-wide. The
-# agent (service-<number>@gcp-sa-bigqueryconnection) is provisioned by the
-# connection API on first use, so the grant is ordered AFTER the connection —
-# on a first apply the member would otherwise not exist yet (a named live
-# risk in the Phase 10 spec, now coded).
-resource "google_spanner_database_iam_member" "connection_reader" {
-  project  = var.project_id
-  instance = google_spanner_instance.this.name
-  database = google_spanner_database.this.name
-  role     = "roles/spanner.databaseReader"
-  member   = "serviceAccount:service-${var.project_number}@gcp-sa-bigqueryconnection.iam.gserviceaccount.com"
+# There is NO service-agent identity on the Spanner federation path (found
+# live on the first apply, docs checked — ARCHITECTURE §8): EXTERNAL_QUERY over
+# a Cloud Spanner connection runs as the QUERYING principal, which needs
+# spanner.databaseReader on the database and bigquery.connectionUser on the
+# connection. Both are the pipeline SA's grants below (databaseUser ⊇
+# databaseReader). A grant to service-<number>@gcp-sa-bigqueryconnection was
+# a grant to an identity that never participates — and one that does not
+# exist until something else provisions it (the first apply failed on it).
 
-  depends_on = [google_bigquery_connection.spanner_dims]
-}
-
-# The pipeline SA writes send_schedule (the write-back) and lands dim_user:
-# databaseUser on the ONE database — no instance/database admin.
+# The pipeline SA writes send_schedule (the write-back), lands dim_user, and
+# is the principal the federated read runs as: databaseUser on the ONE
+# database — no instance/database admin.
 resource "google_spanner_database_iam_member" "pipeline_user" {
   project  = var.project_id
   instance = google_spanner_instance.this.name
