@@ -126,10 +126,10 @@ def render_bq_schema() -> str:
         out[table] = [
             {
                 "name": name,
-                "type": BQ_TYPES[typ],
+                "type": bigquery_type(model.model_fields[name].annotation),
                 "mode": "NULLABLE" if nullable else "REQUIRED",
             }
-            for name, typ, nullable, _ in columns(model)
+            for name, _typ, nullable, _ in columns(model)
         ]
     return json.dumps(out, indent=2) + "\n"
 

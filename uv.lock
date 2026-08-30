@@ -1043,6 +1043,8 @@ dependencies = [
     { name = "dbt-core" },
     { name = "dbt-duckdb" },
     { name = "duckdb" },
+    { name = "google-cloud-bigquery" },
+    { name = "google-cloud-storage" },
     { name = "pydantic" },
 ]
 
@@ -1059,6 +1061,8 @@ requires-dist = [
     { name = "dbt-core", specifier = ">=1.12.3" },
     { name = "dbt-duckdb", specifier = ">=1.11.0" },
     { name = "duckdb", specifier = ">=1.5.5" },
+    { name = "google-cloud-bigquery", specifier = ">=3.44.0" },
+    { name = "google-cloud-storage", specifier = ">=3.1.1" },
     { name = "pydantic", specifier = ">=2.13.4" },
 ]
 

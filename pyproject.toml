@@ -8,6 +8,8 @@ dependencies = [
     "dbt-core>=1.12.3",
     "dbt-duckdb>=1.11.0",
     "duckdb>=1.5.5",
+    "google-cloud-bigquery>=3.44.0",
+    "google-cloud-storage>=3.1.1",
     "pydantic>=2.13.4",
 ]
 # Runtime packages land with their phase (CLAUDE.md → Conventions allowlist).

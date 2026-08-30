@@ -106,7 +106,9 @@ Toggles are command-line `-var`s only. Terraform would auto-load an
 the manifest, so a plan could differ from the pinned tree with nothing showing
 it — so `tf-plan`/`tf-apply`/`tf-destroy` refuse while one exists (`tf-plan:
 refused — infra/terraform.tfvars auto-loads …`, Amendment T): delete it and
-pass `-var` (or `TF_VAR_*`) in the command you run. Read the `tf-plan` output
+pass `TF_VAR_x=…` inline on the command you run (the argv shows it; an
+EXPORTED `TF_VAR_*` is the one input T does not see — BACKLOG,
+`fix/tf-vars-argv`). Read the `tf-plan` output
 before every `tf-apply`; the plan is the review.
 
 `tf-validate`'s init is `-lockfile=readonly`: `infra/.terraform.lock.hcl` pins
@@ -183,10 +185,12 @@ datasets — so every BigQuery build runs **as the SA** (below), and
 
 ## Building on BigQuery (Phase 9b) — as the SA, ask-first
 
-1. Apply with `operator_principal` set, as a `-var` (never a tfvars — T):
-   `make tf-apply PROJECT=<id> CONFIRM=yes` with
-   `TF_VAR_operator_principal="user:<you>"` in the same command — Terraform
-   grants you `serviceAccountTokenCreator` ON `ontime-pipeline` (Amendment Q).
+1. Apply with `operator_principal` set inline on the SAME command line (never
+   a tfvars — T; `infra/cli.py` has no `-var` passthrough, and an EXPORTED
+   `TF_VAR_*` is outside T's control — BACKLOG, `fix/tf-vars-argv`):
+   `TF_VAR_operator_principal="user:<you>" make tf-apply PROJECT=<id> CONFIRM=yes`
+   — Terraform grants you `serviceAccountTokenCreator` ON `ontime-pipeline`
+   (Amendment Q).
 2. Impersonate it for ADC — the ONE credential the landing's clients, dbt and
    the parity test all use (no `bq`/`gsutil` on the data path, no second
    impersonation setting, no keyfile):
@@ -209,8 +213,8 @@ not double anything. `tf-destroy` still removes it all
 
 **CI leg (deferred — BACKLOG "Cross-warehouse dialect drift…", dated trigger).**
 A CI `test-int-bigquery` needs the opt-in WIF apply, never the default one:
-`make tf-apply PROJECT=<id> CONFIRM=yes` with `TF_VAR_enable_ci_wif=true
-TF_VAR_github_repository=<owner>/<repo>`, then the `workload_identity_provider`
+`TF_VAR_enable_ci_wif=true TF_VAR_github_repository=<owner>/<repo> make tf-apply
+PROJECT=<id> CONFIRM=yes` (inline, same line), then the `workload_identity_provider`
 output and the SA email into a `workflow_dispatch`-only job via
 `google-github-actions/auth`. Not built in 9b: the laptop run above is the
 Done-when, and an unrun job would be a claim.

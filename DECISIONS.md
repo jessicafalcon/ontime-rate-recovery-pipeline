@@ -208,6 +208,30 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
   detour (undelete + `terraform import`); an unrun job is a claim. The BACKLOG
   row carries a dated trigger. Rejected: a `workflow_dispatch` job landed
   unproven.
+- **Review round 1 (20 findings; 2 amendments V, W; approved 2026-08-30).**
+  V — the parity fixture carries `OTR_CONFIRM`/`OTR_CONFIRM_ORIGIN` from the
+  gated `int_bigquery` entry instead of forging them (a bare `pytest` with
+  `OTR_INT=1` ran a billable build); W — an empty selection recreates empty
+  raw tables (parity with the DuckDB landing; BigQuery rejects a load over
+  zero URIs). Fixes: the default client factory resolves at call time so the
+  offline sentinel is a control, not a claim (#1); the duplicate test marks
+  nulls and a planted `""`-vs-`null` pins it, the contract residual a BACKLOG
+  row (#3/#4); MAE/coverage asserted off BigQuery rows (#5); dataset/bucket
+  names pinned to Terraform's defaults (#8). **Dependencies (#10/#11):**
+  `google-cloud-bigquery` / `google-cloud-storage` are declared direct
+  dependencies (they were transitive — an adapter release dropping one would
+  have broken the landing with no lock signal); dbt-bigquery pulls ~45
+  transitive packages (pandas, pyarrow, google-cloud-aiplatform, …) into the
+  venv — none on a pipeline path, the no-pandas rule and truth isolation
+  unaffected; accepted as the adapter's cost. **The one sanctioned edit to
+  merged specs (#15):** Phase 2's and Phase 7's Evidence ids that 9b renamed
+  are updated in place, marked "(renamed in Phase 9b)" — a stale id makes
+  `review-gate SPEC=` un-runnable on that spec, which is worse than a
+  one-word edit; the round-6 rule (no content changes to a merged spec)
+  stands. **`TF_VAR_*` from the environment bypasses Amendment T (#9)** — a
+  9a residual, its own fix PR after 9b merges (BACKLOG); 9b's runbook uses
+  the inline form. The operator address is redacted to `user:<operator>` in
+  tracked records (#13). Wording: #6, #12, #14, #16–#20.
 - Not chosen and noted: BigQuery clustering (tiny; `user_id` is the candidate
   when a profile is large enough to measure); `medium` on BigQuery (109 MB, a
   deliberate later run).

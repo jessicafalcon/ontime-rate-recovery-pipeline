@@ -7,7 +7,15 @@
 -- (Phase 9b; closes the BACKLOG row). The payload is compared key by key
 -- through the json macro — the six keys generator/models.py::PROPERTY_KEYS
 -- allows — because neither dialect can group or cast a whole JSON value
--- portably (BigQuery: JSON is not groupable, not castable to STRING).
+-- portably (BigQuery: JSON is not groupable, not castable to STRING). A null
+-- is marked explicitly ('<null>'), so "" and null differ on both engines
+-- (DuckDB's concat would otherwise skip the null — review round 1 #3).
+-- Residual, by contract: a JSON null and a MISSING key both read as null
+-- (PROPERTY_KEYS fixes the key set per event_type, so the two cannot coexist
+-- for one event_type), and a '|' inside a value could alias (values are
+-- counters and error codes) — BACKLOG, trigger "an optional key or a
+-- free-text value enters the contract".
+{% set keys = ['prompt_id', 'cohort_id', 'window_minutes', 'attempt', 'error_code', 'response_id'] %}
 select
     insert_id
 from {{ source('raw', 'events') }}
@@ -17,10 +25,10 @@ group by
     server_received_time,
     server_upload_time
 having count(distinct concat(
-    coalesce({{ json_extract('event_properties', 'prompt_id') }}, ''), '|',
-    coalesce({{ json_extract('event_properties', 'cohort_id') }}, ''), '|',
-    coalesce({{ json_extract('event_properties', 'window_minutes') }}, ''), '|',
-    coalesce({{ json_extract('event_properties', 'attempt') }}, ''), '|',
-    coalesce({{ json_extract('event_properties', 'error_code') }}, ''), '|',
-    coalesce({{ json_extract('event_properties', 'response_id') }}, '')
+    {%- for key in keys %}
+    case
+        when {{ json_extract('event_properties', key) }} is null then '<null>'
+        else {{ json_extract('event_properties', key) }}
+    end{{ ", '|'," if not loop.last }}
+    {%- endfor %}
 )) > 1

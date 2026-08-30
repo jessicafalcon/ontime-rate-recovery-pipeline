@@ -479,7 +479,10 @@ DECISIONS.md or fix it.
 - Python 3.12 (`.python-version`). Type hints everywhere. No pandas on a
   pipeline path — SQL does the work; Python glues.
 - Dependencies: ask before adding ANY package. Pre-approved allowlist by phase:
-  pydantic (Phase 1); duckdb, dbt-core, dbt-duckdb (Phase 2); dbt-bigquery (Phase 9);
+  pydantic (Phase 1); duckdb, dbt-core, dbt-duckdb (Phase 2); dbt-bigquery +
+  its clients google-cloud-bigquery / google-cloud-storage, declared (Phase 9b;
+  the adapter's ~45 transitive packages incl. pandas/pyarrow sit in the venv on
+  no pipeline path — DECISIONS);
   apache-airflow via Docker only (Phase 8); google-cloud-spanner (Phase 10);
   dev: pytest, ruff, pre-commit. Anything else is a STOP-and-ask.
 - SQL keywords lowercase, one column per line in select lists, every model
@@ -682,7 +685,7 @@ threaded through `orchestration/tasks.py`; the conflicting-duplicate guard as a
 singular dbt test both dialects run; `eval/golden.py`'s one renderer for both
 engines. **Live (2026-08-30, `ontime-rate-recovery`, as the SA):** the SA-id
 detour (undelete + `terraform import`), `Apply complete! 18 added` with
-`operator_principal = user:tukanbuild@gmail.com`, then `dbt-build OK:
+`operator_principal = user:<operator>`, then `dbt-build OK:
 tiny/bigquery` (PASS=126 — the DuckDB count) and `make test-int-bigquery` →
 `3 passed`: the three goldens byte-identical off BigQuery, pins hold, exactly
 two datasets. Two live surprises, both §8: dbt-bigquery admits no custom
@@ -692,10 +695,12 @@ DuckDB-only forms (`::json`, `date_diff`) → portable fixtures. Offline suite
 green, lint clean, mutate 7/7. **Phase 9's Done-when is met.** Next: review
 round 1 (full union), scoped rounds after, coherence-auditor once at exit;
 the applied stack stays up (cents) until `tf-destroy` is asked for.
-Open BACKLOG rows: **11** (9b struck: the two-datasets row, the DAG-landing
-row, the conflicting-duplicate guard, the dialect denylist — pending the live
-build's confirmation; the CI-drift row re-deferred with the trigger "the first
-`enable_ci_wif = true` apply"; THROUGH-calendar, Spanner, argmax-bins
-re-deferred with 9b notes; the SA-id row struck at the first 9b apply).
+Open BACKLOG rows: **12** (9b struck: the two-datasets row, the DAG-landing
+row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
+(first 9b apply 2026-08-30); opened: the guard's contract residual (JSON
+null vs missing key, `|` in a value) and the env-`TF_VAR_*` bypass of
+Amendment T (a 9a residual → `fix/tf-vars-argv` after 9b merges); the
+CI-drift row re-deferred with the trigger "the first `enable_ci_wif = true`
+apply"; THROUGH-calendar, Spanner, argmax-bins re-deferred with 9b notes).
 
 (Update this section at the end of every working day.)

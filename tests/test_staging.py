@@ -226,3 +226,24 @@ def test_conflicting_duplicate_fails_the_dbt_test(tmp_path: Path) -> None:
         )
         con.close()
         assert not dbtRunner().invoke(args).success
+    # round 1 #3: "" vs null on ONE key must differ too (DuckDB's concat skips
+    # a null, so an unmarked null would read as "" — the null marker is the
+    # load-bearing part on this engine)
+    db2 = tmp_path / "planted2.duckdb"
+    loader.load("tiny", db2)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("OTR_DUCKDB_PATH", str(db2))
+        con = duckdb.connect(str(db2))
+        con.execute("delete from raw.events")
+        for payload in (
+            '{"prompt_id": "p-x", "attempt": 1, "error_code": ""}',
+            '{"prompt_id": "p-x", "attempt": 1, "error_code": null}',
+        ):
+            con.execute(
+                "insert into raw.events values ('e-x', 'upload_started', 'u-1', "
+                "'d-1', timestamp '2026-01-05 08:00:00', timestamp "
+                "'2026-01-05 08:00:01', timestamp '2026-01-05 08:01:00', ?::json)",
+                [payload],
+            )
+        con.close()
+        assert not dbtRunner().invoke(args).success

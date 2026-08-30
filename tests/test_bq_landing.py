@@ -7,6 +7,7 @@ offline instead of reaching the network."""
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from loader import bq, cli
 from loader import load as loader
 
 TINY = loader.fixture_dir("tiny")
+ROOT = Path(__file__).parent.parent
 
 
 class Recorder:
@@ -29,6 +31,10 @@ class Recorder:
     def load(self, table_id: str, uris: list[str], config: dict) -> int:
         self.loads.append((table_id, uris, config))
         return {"events": 970, "dim_user": 22}[table_id.rsplit(".", 1)[1]]
+
+    def recreate(self, table_id: str, schema: list[dict]) -> None:
+        self.recreated: list[tuple[str, list[dict]]] = getattr(self, "recreated", [])
+        self.recreated.append((table_id, schema))
 
 
 def _factory() -> tuple[list[Recorder], bq.ClientFactory]:
@@ -85,16 +91,32 @@ def test_uploads_then_loads_with_the_generated_schema() -> None:
     assert bq.load_job_config("events")["write_disposition"] == "WRITE_TRUNCATE"
 
 
+def test_empty_selection_recreates_empty_tables() -> None:
+    """Amendment W (invariant 3): a THROUGH before the first upload lands an
+    EMPTY raw.events (recreated with the contract schema — no load job over
+    zero URIs, which BigQuery rejects) and the dim seed as usual — the same
+    function of (fixture, THROUGH) as the DuckDB landing's exit-0-empty."""
+    made, make = _factory()
+    files, events, dims = bq.bq_load("tiny", "my-project", "2025-01-01", make)
+    assert (files, events, dims) == (0, 0, 22)
+    r = made[0]
+    assert r.recreated == [("my-project.raw.events", bq.schema_fields("events"))]
+    assert [t for t, _, _ in r.loads] == ["my-project.raw.dim_user"]
+    assert all(n.startswith("landing/tiny/dims/") for _, n, _ in r.uploads)
+
+
 def test_no_client_is_built_before_validation(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     """Invariant 7: PROFILE, PROJECT, THROUGH and CONFIRM are checked before the
-    factory is called; the default factory is a sentinel in this suite."""
+    factory is called; the DEFAULT factory (what a caller gets when it passes
+    none — resolved at call time, review round 1 #1) is a sentinel here, so the
+    refusals below are exercised WITHOUT `clients=`."""
 
     def sentinel(project: str) -> bq.Clients:
         raise AssertionError(f"a real client was requested for {project!r}")
 
-    monkeypatch.setattr(bq, "GoogleClients", sentinel)
+    monkeypatch.setattr(bq, "default_clients", lambda: sentinel)
     bad = [
         ("../x", "my-project", "yes", "command line", ""),
         ("tiny", "", "yes", "command line", ""),
@@ -105,9 +127,15 @@ def test_no_client_is_built_before_validation(
     ]
     for profile, project, confirm, origin, through in bad:
         with pytest.raises(SystemExit) as e:
-            cli.bq_load(profile, project, confirm, origin, through, clients=sentinel)
+            cli.bq_load(profile, project, confirm, origin, through)
         assert e.value.code == 2, (profile, project, confirm, origin, through)
     assert "refused" in capsys.readouterr().out
+    # a VALID call with no clients= reaches the (sentinel) default — the control
+    # is real, not a claim
+    with pytest.raises(AssertionError, match="a real client was requested"):
+        cli.bq_load("tiny", "my-project", "yes", "command line")
+    with pytest.raises(AssertionError, match="a real client was requested"):
+        bq.bq_load("tiny", "my-project")
     # the valid call reaches the (fake) factory exactly once
     made, make = _factory()
     assert cli.bq_load("tiny", "my-project", "yes", "command line", clients=make) == 0
@@ -145,3 +173,24 @@ def test_int_bigquery_entry_validates_and_gates_before_pytest(
     assert seen["argv"][-1].endswith("tests/integration/test_int_bigquery.py")
     env = seen["env"]
     assert env["OTR_INT"] == "1" and env["OTR_GCP_PROJECT"] == "my-project"
+    # Amendment V: the gate that ran here is carried to the fixture verbatim
+    assert env["OTR_CONFIRM"] == "yes" and env["OTR_CONFIRM_ORIGIN"] == "command line"
+
+
+def _tf_default(var: str) -> str:
+    text = (ROOT / "infra" / "variables.tf").read_text()
+    block = re.search(r'variable "' + var + r'" \{(.*?)\n\}', text, re.S).group(1)
+    return re.search(r'default\s*=\s*"([^"]*)"', block).group(1)
+
+
+def test_dataset_and_bucket_names_are_the_terraform_defaults() -> None:
+    """Review round 1 #8: the landing's dataset ids and the derived bucket name
+    are Terraform's, pinned like `location` — a default change in `infra/`
+    fails offline, not only in the cloud."""
+    from tests.integration import test_int_bigquery as parity
+
+    assert bq.RAW_DATASET == _tf_default("raw_dataset")
+    assert parity.MODELS_DATASET == _tf_default("models_dataset")
+    main = (ROOT / "infra" / "main.tf").read_text()
+    m = re.search(r'staging_bucket\s*=\s*"\$\{var\.project_id\}(-[a-z0-9-]+)"', main)
+    assert m and bq.bucket_name("p") == "p" + m.group(1)

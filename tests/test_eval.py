@@ -116,7 +116,8 @@ def test_bigquery_rows_render_like_duckdb_rows() -> None:
     """Phase 9b invariant 2: one renderer for both engines. A tz-aware TIMESTAMP
     (what google-cloud-bigquery returns) renders as DuckDB's naive UTC
     timestamp; a DATE, an int, a float, a bool and a NULL render as they do
-    from DuckDB; rows sort by the declared key, not arrival order."""
+    from DuckDB (no NUMERIC/Decimal column exists in any golden — none is
+    handled); rows sort by the declared key, not arrival order."""
     from datetime import UTC, date, datetime, timedelta, timezone
 
     aware = datetime(2026, 1, 12, 0, 47, tzinfo=UTC)

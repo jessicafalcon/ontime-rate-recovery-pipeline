@@ -34,6 +34,11 @@ class Clients(Protocol):
         """Load `uris` into `table_id` under `config`; returns rows loaded."""
         ...
 
+    def recreate(self, table_id: str, schema: list[dict[str, str]]) -> None:
+        """Drop-if-exists and create `table_id` EMPTY with the contract schema —
+        an empty selection's landing (Amendment W: parity with DuckDB)."""
+        ...
+
 
 class GoogleClients:
     """The default: google-cloud-storage + google-cloud-bigquery on ADC."""
@@ -60,8 +65,26 @@ class GoogleClients:
         job.result()
         return int(job.output_rows or 0)
 
+    def recreate(self, table_id: str, schema: list[dict[str, str]]) -> None:
+        self._client.delete_table(table_id, not_found_ok=True)
+        table = self._bq.Table(
+            table_id,
+            schema=[
+                self._bq.SchemaField(f["name"], f["type"], mode=f["mode"])
+                for f in schema
+            ],
+        )
+        self._client.create_table(table)
+
 
 ClientFactory = Callable[[str], Clients]
+
+
+def default_clients() -> ClientFactory:
+    """The factory used when a caller passes none — resolved at CALL time, so
+    the offline suite can replace it with a sentinel (review round 1 #1: a
+    default bound at import could not be)."""
+    return GoogleClients
 
 
 def bucket_name(project: str) -> str:
@@ -106,22 +129,26 @@ def bq_load(
     profile: str,
     project: str,
     through: str | None = None,
-    clients: ClientFactory = GoogleClients,
+    clients: ClientFactory | None = None,
 ) -> tuple[int, int, int]:
     """(event files, event rows, dim rows). Uploads the selected files under
-    `landing/<profile>/`, then one load job per table into `<project>.raw`."""
+    `landing/<profile>/`, then one load job per table into `<project>.raw`; a
+    table with no selected file is recreated empty (Amendment W)."""
     fixture = loader.fixture_dir(profile)
     files = selected_files(fixture, through)
-    c = clients(project)
+    c = (clients or default_clients())(project)
     bucket = bucket_name(project)
     rows: dict[str, int] = {}
     for table, paths in files.items():
+        table_id = f"{project}.{RAW_DATASET}.{table}"
+        if not paths:
+            c.recreate(table_id, schema_fields(table))
+            rows[table] = 0
+            continue
         uris = []
         for path in paths:
             name = object_name(profile, table, path)
             c.upload(bucket, name, path)
             uris.append(f"gs://{bucket}/{name}")
-        rows[table] = c.load(
-            f"{project}.{RAW_DATASET}.{table}", uris, load_job_config(table)
-        )
+        rows[table] = c.load(table_id, uris, load_job_config(table))
     return len(files["events"]), rows["events"], rows["dim_user"]

@@ -43,9 +43,13 @@ def built() -> Iterator[str]:
     """The landing + the build, once; yields the project id."""
     project = _project()
     assert os.environ.get("OTR_PROFILE", "tiny") == "tiny"  # tiny by definition
-    rc = loader_cli.dbt_build(
-        "tiny", "bigquery", "yes", "command line", project=project
-    )
+    # Amendment V: the CONFIRM gate is CARRIED from loader.cli::int_bigquery
+    # (the make target), never forged here — a bare pytest with OTR_INT=1 and
+    # a project in its env still finds no confirmation and is refused.
+    confirm = os.environ.get("OTR_CONFIRM", "")
+    origin = os.environ.get("OTR_CONFIRM_ORIGIN", "")
+    assert confirm and origin, "run via `make test-int-bigquery … CONFIRM=yes`"
+    rc = loader_cli.dbt_build("tiny", "bigquery", confirm, origin, project=project)
     assert rc == 0, "make dbt-build TARGET=bigquery PROFILE=tiny failed"
     yield project
 
@@ -86,6 +90,16 @@ def test_pins_hold_on_bigquery(built: str) -> None:
     assert len(scores) == pins.SCORES_ROWS
     assert {r[1]: int(r[4]) for r in scores} == pins.COHORT_HOUR_TINY
     assert {r[8] for r in scores} == {pins.COMPUTED_AS_OF_TINY}
+    # the send-time pins, off the BigQuery rows with the same eval functions
+    # (served pair → minute of day / 60; the centre column) as `make eval`
+    served = {
+        r[0]: (float(r[5]), int(r[2]) + int(r[3]) / 60.0) for r in scores
+    }  # user_id → (center_hour_local, served hour) — score.built_scores' shape
+    windows = score.truth_windows(FIXTURES / "truth" / "users.jsonl")
+    assert round(score.reachable_center_mae(served, windows), 8) == round(
+        pins.MAE_TINY, 8
+    )
+    assert score.coverage(served, windows) == pins.COVERAGE_TINY
 
 
 def test_exactly_two_datasets_exist(built: str) -> None:

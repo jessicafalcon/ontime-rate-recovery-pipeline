@@ -94,6 +94,9 @@ HOOKS = ("generate_schema_name",)
 
 
 def test_exactly_five_dispatch_macros() -> None:
+    """Exactly five macro files dispatch; the macro dir may also hold dbt HOOK
+    overrides (`generate_schema_name`, Phase 9b) that dispatch nothing — the
+    Evidence id is kept across three specs, so the name stays."""
     files = sorted(p.stem for p in (DBT / "macros").glob("*.sql"))
     assert files == sorted(MACROS + HOOKS)
     for hook in HOOKS:
@@ -141,7 +144,8 @@ def test_bigquery_bodies_are_the_named_forms() -> None:
     json_value (NULL on a JSON null / missing key); timestamp_diff END first,
     both sides cast to timestamp (DATE/DATETIME callers); safe_divide with a
     float64 numerator (integer/integer would truncate); datetime(ts, tz) (the
-    naive wall time); the overwrite is delete-in-set + insert like DuckDB."""
+    naive wall time); the overwrite's BigQuery half is the adapter's native
+    insert_overwrite (Amendment U), so its dispatch body names that and raises."""
     assert re.search(
         r"json_value\(\{\{ col \}\}, '\$\.\{\{ key \}\}'\)",
         _body("json_extract", "bigquery"),

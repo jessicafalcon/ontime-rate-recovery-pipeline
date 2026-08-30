@@ -233,7 +233,8 @@ def test_bigquery_target_needs_a_validated_project(
         raise AssertionError("a landing ran before PROJECT was validated")
 
     monkeypatch.setattr(cli, "land", never)
-    monkeypatch.delenv("OTR_GCP_PROJECT", raising=False)
+    monkeypatch.setitem(os.environ, "OTR_GCP_PROJECT", "sentinel")  # restored
+    os.environ.pop("OTR_GCP_PROJECT")
     for bad in ("", "../x", "Bad Id", "my-proj\n", "x"):
         with pytest.raises(SystemExit) as e:
             cli.dbt_build("tiny", "bigquery", "yes", "command line", project=bad)
@@ -252,7 +253,8 @@ def test_bigquery_build_lands_through_bq_not_duckdb(
     landing is the BigQuery one — the DuckDB load() never runs — with the
     validated PROJECT exported to dbt from inside the process; the duckdb
     build's landing is load() and the fake clients are never built."""
-    monkeypatch.delenv("OTR_GCP_PROJECT", raising=False)
+    monkeypatch.setitem(os.environ, "OTR_GCP_PROJECT", "sentinel")  # restored
+    os.environ.pop("OTR_GCP_PROJECT")
 
     def duckdb_never(*a: object, **k: object) -> int:
         raise AssertionError("the DuckDB load() ran for TARGET=bigquery")

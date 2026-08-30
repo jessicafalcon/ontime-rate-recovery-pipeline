@@ -101,7 +101,7 @@ def bq_load(
     confirm: str = "",
     origin: str = "",
     through: str = "",
-    clients: bq.ClientFactory = bq.GoogleClients,
+    clients: bq.ClientFactory | None = None,
 ) -> int:
     """The BigQuery landing (Phase 9b): PROFILE/PROJECT/THROUGH validated and
     CONFIRM gated before any client exists; recreates raw.events/raw.dim_user."""
@@ -137,7 +137,7 @@ def land(
     through: str,
     confirm: str,
     origin: str,
-    clients: bq.ClientFactory = bq.GoogleClients,
+    clients: bq.ClientFactory | None = None,
 ) -> int:
     """The TARGET's landing and only that one (Phase 9b, closes the 8b BACKLOG
     row): the DuckDB file for duckdb, GCS → BigQuery for bigquery."""
@@ -165,7 +165,7 @@ def dbt_build(
     full_origin: str = "",
     through: str = "",
     project: str = "",
-    clients: bq.ClientFactory = bq.GoogleClients,
+    clients: bq.ClientFactory | None = None,
 ) -> int:
     validate_name("PROFILE", profile)
     if full and full != "yes":
@@ -234,11 +234,15 @@ def int_bigquery(profile: str, project: str, confirm: str, origin: str) -> int:
     validate_name("PROFILE", profile)
     validate_project(project)
     require_confirm("test-int-bigquery", confirm, origin)
+    # Amendment V: the gate that ran HERE is carried to the fixture, never
+    # re-derived there (a bare pytest with OTR_INT=1 must not forge it).
     env = {
         **os.environ,
         "OTR_INT": "1",
         "OTR_GCP_PROJECT": project,
         "OTR_PROFILE": profile,
+        "OTR_CONFIRM": confirm,
+        "OTR_CONFIRM_ORIGIN": origin,
     }
     return subprocess.run(
         [sys.executable, "-m", "pytest", "tests/integration/test_int_bigquery.py"],
