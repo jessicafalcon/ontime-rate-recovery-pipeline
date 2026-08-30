@@ -260,7 +260,10 @@ divergences behind exactly five dispatch macros: JSON extraction,
 `timestamp_diff`, `safe_divide`, `to_local_time` (UTC → local wall time; added
 in Phase 2, DECISIONS), partition overwrite. Each has a DuckDB body and a
 BigQuery body (Phase 9b — they raised until then) — no `default__` an unknown
-adapter could fall into. Where a model lands is a `generate_schema_name` hook
+adapter could fall into. The partition-overwrite seam's BigQuery half is the
+adapter's native `insert_overwrite` strategy, selected in the incremental
+models' config on `target.type` (dbt-bigquery admits no custom strategy —
+§8), so its dispatch body raises by design. Where a model lands is a `generate_schema_name` hook
 (not a sixth macro): on `target.type == 'bigquery'` every model resolves to the
 `ontime` dataset Terraform created (two datasets is 9a's pin); every other
 target keeps dbt's per-folder default (`main_<folder>` on DuckDB). CI runs
@@ -441,6 +444,25 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   and set the native dict only under `target.type == 'bigquery'` inside
   `config()`; pinned by `tests/test_dbt_conventions.py::
   test_incremental_models_partition_config_is_dialect_safe`.
+- **dbt-bigquery admits no custom incremental strategy** (Phase 9b, the first
+  live build — Amendment U). Its own `incremental` materialization validates
+  `incremental_strategy` against `merge | insert_overwrite | microbatch`
+  (`dbt/include/bigquery/macros/materializations/incremental.sql`) and never
+  looks up a `get_incremental_<name>_sql` macro, so Phase 7's custom
+  `partition_overwrite` strategy — and the fifth seam's BigQuery body — is
+  unreachable there. The incremental models select the adapter's native
+  `insert_overwrite` on `target.type == 'bigquery'` (dynamic mode: delete the
+  batch's partitions, insert — the DuckDB body's semantics), and
+  `bigquery__partition_overwrite` raises by design. `dbt parse` does not catch
+  it (the check runs at materialization) — only a build does.
+- **Unit-test `format: sql` fixtures are Jinja-rendered, but project macros
+  are out of scope there** (Phase 9b). `{{ json_literal(...) }}` in a fixture
+  → `'json_literal' is undefined`, while `{% if target.type == 'bigquery' %}`
+  renders fine — so a dialect-dependent literal (`json '…'` vs `'…'::json`)
+  is an inline `target.type` conditional, and fixture arithmetic
+  (`date_diff('second', …)`, DuckDB-only) is written as the literal it
+  evaluates to. The models' dialect denylist never covered `schema.yml`; the
+  BigQuery build is what caught both.
 - **`generate_schema_name_for_env` is not dbt's default** (Phase 9b, first
   DuckDB build after the override). The obvious "else keep the default" call
   collapses EVERY non-`prod` target to `target.schema` — the first build landed

@@ -451,7 +451,10 @@ DECISIONS.md or fix it.
   fifth was added in Phase 2 with a DECISIONS entry). Each has a DuckDB body
   and a BigQuery body (Phase 9b: `json_value`, end-first `timestamp_diff` with
   both sides cast to `timestamp`, `safe_divide` on a `float64` numerator,
-  `datetime(ts, tz)`, the same delete-in-set + insert) — never a `default__`.
+  `datetime(ts, tz)`; the partition-overwrite seam's BigQuery half is the
+  adapter's native `insert_overwrite`, selected in the models' config on
+  `target.type` — dbt-bigquery admits no custom strategy, so that dispatch
+  body raises by design, Amendment U) — never a `default__`.
   A sixth needs a DECISIONS entry. `generate_schema_name` is a hook override
   keyed on `target.type`, not a dispatch macro.
 - Airflow contains no logic: a task is a `make` target or a dbt command.
@@ -658,7 +661,7 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 
 ## Current status
 
-**Phase 9b implemented offline, live proof pending (`phase-9b-bigquery-dialect`).**
+**Phase 9b implemented and live-proven, in review (`phase-9b-bigquery-dialect`).**
 Phases 0–8 merged (PRs #1–#11); **9a merged as PR #12** (2026-08-29, amendments
 A–T, 8 review rounds) — the Terraform foundation, meter off by default, plan-clean
 and destroy-empty proven live. **9b** owns Phase 9's two warehouse clauses: `make
@@ -677,13 +680,18 @@ by target (Amendment S lifted; `OTR_GCP_PROJECT` from the validated `PROJECT`;
 `location: us-central1`); `make bq-load` / `make test-int-bigquery`; `TARGET`
 threaded through `orchestration/tasks.py`; the conflicting-duplicate guard as a
 singular dbt test both dialects run; `eval/golden.py`'s one renderer for both
-engines. Offline suite 426 green, `make lint` clean. **Not yet run:** the
-ask-first live half — undelete + import the reserved `ontime-pipeline` SA (or
-wait for 2026-09-28), `tf-plan`/`tf-apply`, then `make dbt-build
-TARGET=bigquery PROFILE=tiny PROJECT=ontime-rate-recovery CONFIRM=yes` as the
-SA and `make test-int-bigquery` — `to_local_time` across the Tokyo→London users
-is the first thing to check. Then review round 1 (full union), scoped rounds
-after, coherence-auditor once at exit.
+engines. **Live (2026-08-30, `ontime-rate-recovery`, as the SA):** the SA-id
+detour (undelete + `terraform import`), `Apply complete! 18 added` with
+`operator_principal = user:tukanbuild@gmail.com`, then `dbt-build OK:
+tiny/bigquery` (PASS=126 — the DuckDB count) and `make test-int-bigquery` →
+`3 passed`: the three goldens byte-identical off BigQuery, pins hold, exactly
+two datasets. Two live surprises, both §8: dbt-bigquery admits no custom
+incremental strategy → **Amendment U** (native `insert_overwrite` selected on
+`target.type`; the dispatch body raises by design), and unit fixtures had
+DuckDB-only forms (`::json`, `date_diff`) → portable fixtures. Offline suite
+green, lint clean, mutate 7/7. **Phase 9's Done-when is met.** Next: review
+round 1 (full union), scoped rounds after, coherence-auditor once at exit;
+the applied stack stays up (cents) until `tf-destroy` is asked for.
 Open BACKLOG rows: **11** (9b struck: the two-datasets row, the DAG-landing
 row, the conflicting-duplicate guard, the dialect denylist — pending the live
 build's confirmation; the CI-drift row re-deferred with the trigger "the first

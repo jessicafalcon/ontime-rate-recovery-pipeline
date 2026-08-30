@@ -146,10 +146,24 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
   function is TIMESTAMP-only; `safe_divide(cast(num as float64), den)` —
   integer/integer would truncate where DuckDB's `/` is a float divide;
   `datetime(ts, tz)` — DATETIME is BigQuery's naive type, the shape DuckDB's
-  `timestamp` has; the overwrite is the same delete-in-set + insert as one
-  two-statement script. Rejected: dbt-bigquery's `insert_overwrite` (a second
-  mechanism for one seam whose semantics the goldens already pin); a
-  `default__` (the rule).
+  `timestamp` has; the overwrite seam's BigQuery half is the adapter's native
+  `insert_overwrite` (below, U). Rejected: a `default__` (the rule).
+- **Amendment U (first live build, approved 2026-08-30) — dbt-bigquery admits
+  no custom incremental strategy.** The adapter's own materialization
+  validates `incremental_strategy` against `merge | insert_overwrite |
+  microbatch` and never looks up `get_incremental_<name>_sql`, so the Phase 7
+  custom strategy — and a two-statement BigQuery body for the fifth seam — was
+  unreachable. The incremental models select
+  `('insert_overwrite' if target.type == 'bigquery' else 'partition_overwrite')`;
+  with the guarded `partition_by` dict and no `partitions` list the native
+  strategy is dynamic — delete the batch's partitions, insert — the DuckDB
+  body's semantics, and the goldens prove it. `bigquery__partition_overwrite`
+  raises by design (an unreachable path fails loudly). Rejected: vendoring the
+  adapter materialization (~150 copied lines, version-fragile); `merge` on
+  `insert_id` (never deletes a row that left a reprocessed partition —
+  backfill ≢ union). Test-only beside it: unit fixtures made portable (an
+  inline `target.type` json literal — project macros are out of scope in
+  fixture rendering; `date_diff` constants → literal seconds).
 - **`meta.overwrite_partition_col` names the overwrite column; the native
   `partition_by` dict is dialect-guarded.** Found reading main: `partition_by`
   is parsed by dbt-bigquery as its partitioning dict (a string errors) AND read

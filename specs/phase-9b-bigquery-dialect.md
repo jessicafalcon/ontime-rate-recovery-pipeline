@@ -204,6 +204,41 @@ Implementation order after approval: offline first (items 1, 2, 3, 7, the
 macro bodies, the generated schema, the fakes), then the first ask-first live
 build at tiny as the SA, `to_local_time` across the tz-change users first.
 
+## Amendments (first live build, approved 2026-08-30)
+
+- **U — dbt-bigquery admits no custom incremental strategy; the BigQuery
+  half of the fifth seam is the adapter's native `insert_overwrite`.**
+  Restores **invariant 2** (same rows, both dialects) and Phase 7's
+  partition-replace semantics on the second engine. Found on the first live
+  build: dbt-bigquery ships its own `incremental` materialization and
+  validates `incremental_strategy` against `merge | insert_overwrite |
+  microbatch` (`dbt/include/bigquery/macros/materializations/incremental.sql:1-11`)
+  — a custom `get_incremental_<name>_sql` is never looked up, so
+  `bigquery__partition_overwrite` cannot be reached through the materialization.
+  Mechanism: the three incremental models set `incremental_strategy=
+  ('insert_overwrite' if target.type == 'bigquery' else 'partition_overwrite')`
+  in `config()`; with the dialect-guarded `partition_by` dict and no
+  `partitions` list, dbt-bigquery's *dynamic* insert_overwrite deletes exactly
+  the partitions present in the batch, then inserts — the DuckDB body's
+  semantics. `bigquery__partition_overwrite` **raises by design** (the
+  Amendment U message): an unreachable path fails loudly instead of emitting
+  SQL nobody runs. Done-when 2 / invariant 5 read "four real BigQuery bodies;
+  the fifth's BigQuery half is the native strategy, dialect-selected in
+  config"; `tests/test_dbt_conventions.py::test_each_macro_has_duckdb_and_bigquery_bodies`
+  carries the `UNREACHABLE_ON_BIGQUERY` allowlist and
+  `::test_incremental_models_use_the_partition_overwrite_strategy` pins the
+  selector. The pinned decision's "rejected: `insert_overwrite`" is reversed
+  by fact. Rejected: vendoring the adapter's materialization to admit a
+  custom strategy (~150 copied lines, fragile across versions); `merge` on
+  `insert_id` (row-level upsert never deletes a row that vanished from a
+  reprocessed partition — backfill ≢ union).
+- **Test-only, no amendment — portable unit fixtures.** `format: sql` rows are
+  Jinja-rendered but project macros are NOT in scope there (`'json_literal'
+  is undefined`), so the json column is typed inline by
+  `{% if target.type == 'bigquery' %}json '…'{% else %}'…'::json{% endif %}`,
+  and the 42 `date_diff('second', …)` fixture constants became literal
+  seconds. Both §8.
+
 ---
 
 ## Why
@@ -260,10 +295,12 @@ make test && make lint && make review-gate SPEC=specs/phase-9b-bigquery-dialect.
    the `ontime` dataset (`generate_schema_name`); on DuckDB every relation keeps
    its `main_<folder>` name, so no DuckDB reader or golden changes. *Evidence:
    row 1.*
-2. **Five bodies, no default, no sixth.** Each dispatch macro has a DuckDB body
-   and a BigQuery body; no `default__`; `adapter.dispatch` appears in exactly
-   five macros; `make dbt-build TARGET=bigquery PROFILE=tiny` is green. *Evidence:
-   row 2.*
+2. **Five seams, no default, no sixth.** Each dispatch macro has a DuckDB body
+   and a BigQuery body — four real; `partition_overwrite`'s BigQuery half is
+   the adapter's native `insert_overwrite`, dialect-selected in the models'
+   config, and its dispatch body raises by design (Amendment U); no
+   `default__`; `adapter.dispatch` appears in exactly five macros; `make
+   dbt-build TARGET=bigquery PROFILE=tiny` is green. *Evidence: row 2.*
 3. **Pin parity.** The three goldens rendered from the BigQuery tables through
    the same `Golden` specs and `render` are byte-identical to
    `fixtures/tiny/expected/{attribution,ontime_rate_daily,scores_send_time}.csv`;
@@ -294,9 +331,9 @@ make test && make lint && make review-gate SPEC=specs/phase-9b-bigquery-dialect.
 | Done-when | Proof (test file / `make` target / command output) |
 |---|---|
 | 1 | `tests/test_dbt_conventions.py::test_generate_schema_name_collapses_only_on_bigquery` (the macro text: `target.type == 'bigquery'` → `target.schema`, else dbt's default; no `adapter.dispatch`), `::test_exactly_five_dispatch_macros` (unchanged: dispatch in five files only); the in-process DuckDB build's existing relation names (`tests/test_incremental.py` `main_staging.…`, `tests/test_scores.py` `main_scores.…` — green means no collapse); live: after the build `bq ls --project_id=<id>` = `ontime`, `raw` and `bq ls ontime` lists the twelve models |
-| 2 | `tests/test_dbt_conventions.py::test_each_macro_has_duckdb_and_bigquery_bodies` (the 9b form of `…_and_bigquery_stub_that_raises`: both bodies non-empty, neither raises), `::test_no_default_dispatch_body`, `::test_bigquery_bodies_are_the_named_forms` (`json_value(col, '$.key')`; `timestamp_diff(cast(end as timestamp), cast(start as timestamp), UNIT)` — end first; `safe_divide(cast(num as float64), den)`; `datetime(ts, tz)`; the overwrite is delete-in-set + insert like DuckDB); `::test_partition_overwrite_renders_delete_and_insert_on_duckdb` (unchanged); live: `make dbt-build TARGET=bigquery PROFILE=tiny PROJECT=<id> CONFIRM=yes` → `dbt-build OK: tiny/bigquery` with the test counts the DuckDB build reports |
-| 3 | `tests/integration/test_int_bigquery.py::test_goldens_match_frozen` (three `Golden`s, 0 differ, via `eval.golden.diff_rows`), `::test_pins_hold_on_bigquery` (`ONTIME_RATE`, `LABEL_ACCURACY` via `eval.score.label_accuracy` over the BigQuery labels + `truth/prompts.jsonl`, `MAE_TINY`/`COVERAGE_TINY` via `eval.score`'s reachable-centre functions over the BigQuery rows, `COHORT_HOUR_TINY`, `COMPUTED_AS_OF_TINY`); offline `tests/test_eval.py::test_bigquery_rows_render_like_duckdb_rows` (a tz-aware `datetime`, a `date`, a `Decimal`/float and a `None` from a fake BigQuery row render to the same cells DuckDB's do); the pins are `tests/pins.py` unchanged (a diff in the branch is a FAIL of the central constraint) |
-| 4 | `tests/test_bq_landing.py::test_selects_the_same_files_as_the_duckdb_loader` (`THROUGH` → `loader.load.event_files`), `::test_uploads_then_loads_with_the_generated_schema` (fake clients: object names under `landing/<profile>/`, `load_table_from_uri` per table with `schema` = `bq_schema.json`'s fields, `WRITE_TRUNCATE`, `source_format` NEWLINE_DELIMITED_JSON / CSV with `skip_leading_rows=1`, `null_marker` for `valid_to`), `::test_no_client_is_built_before_validation`; `tests/test_dbt_sources.py::test_bq_schema_is_generated_from_the_contract` (`make gen-sources --check` covers `loader/bq_schema.json`; a hand edit → red); `dbt/tests/assert_no_conflicting_duplicates.sql` (a unit-style pin: `tests/test_staging.py::test_conflicting_duplicate_fails_the_dbt_test` plants one in a scratch landing → the singular test fails on DuckDB); live: `bq-load OK: tiny — 10 files, 970 event rows, 22 dim rows` |
+| 2 | `tests/test_dbt_conventions.py::test_each_macro_has_duckdb_and_bigquery_bodies` (the 9b form of `…_and_bigquery_stub_that_raises`: both bodies non-empty, neither raises), `::test_no_default_dispatch_body`, `::test_bigquery_bodies_are_the_named_forms` (`json_value(col, '$.key')`; `timestamp_diff(cast(end as timestamp), cast(start as timestamp), UNIT)` — end first; `safe_divide(cast(num as float64), den)`; `datetime(ts, tz)`; the overwrite is delete-in-set + insert like DuckDB); `::test_partition_overwrite_renders_delete_and_insert_on_duckdb` (unchanged); live **2026-08-30 on `ontime-rate-recovery`, as the SA (impersonated ADC), after the undelete + import detour and `Apply complete! Resources: 18 added`** (`operator_principal = user:tukanbuild@gmail.com`): `make dbt-build TARGET=bigquery PROFILE=tiny PROJECT=ontime-rate-recovery CONFIRM=yes` → `bq-load OK: tiny — 10 files, 970 event rows, 22 dim rows`, `Done. PASS=126 WARN=0 ERROR=0 SKIP=0`, `dbt-build OK: tiny/bigquery` — the same 126 the DuckDB build reports (three attempts first: the custom-strategy rejection → U; `::json` and `date_diff` in unit fixtures → portable fixtures) |
+| 3 | `tests/integration/test_int_bigquery.py::test_goldens_match_frozen` (three `Golden`s, 0 differ, via `eval.golden.diff_rows`), `::test_pins_hold_on_bigquery` (`ONTIME_RATE`, `LABEL_ACCURACY` via `eval.score.label_accuracy` over the BigQuery labels + `truth/prompts.jsonl`, `MAE_TINY`/`COVERAGE_TINY` via `eval.score`'s reachable-centre functions over the BigQuery rows, `COHORT_HOUR_TINY`, `COMPUTED_AS_OF_TINY`); offline `tests/test_eval.py::test_bigquery_rows_render_like_duckdb_rows` (a tz-aware `datetime`, a `date`, a `Decimal`/float and a `None` from a fake BigQuery row render to the same cells DuckDB's do); the pins are `tests/pins.py` unchanged (a diff in the branch is a FAIL of the central constraint); live 2026-08-30: `make test-int-bigquery PROJECT=ontime-rate-recovery CONFIRM=yes` → `3 passed in 256.95s` — `test_goldens_match_frozen` (attribution, ontime_rate_daily, scores_send_time: 0 differ, `render` == the frozen bytes), `test_pins_hold_on_bigquery`, `test_exactly_two_datasets_exist` (`ontime`, `raw`) — so `to_local_time` agreed with DuckDB on every row, the tz-change users included |
+| 4 | `tests/test_bq_landing.py::test_selects_the_same_files_as_the_duckdb_loader` (`THROUGH` → `loader.load.event_files`), `::test_uploads_then_loads_with_the_generated_schema` (fake clients: object names under `landing/<profile>/`, `load_table_from_uri` per table with `schema` = `bq_schema.json`'s fields, `WRITE_TRUNCATE`, `source_format` NEWLINE_DELIMITED_JSON / CSV with `skip_leading_rows=1`, `null_marker` for `valid_to`), `::test_no_client_is_built_before_validation`; `tests/test_dbt_sources.py::test_bq_schema_is_generated_from_the_contract` (`make gen-sources --check` covers `loader/bq_schema.json`; a hand edit → red); `dbt/tests/assert_no_conflicting_duplicates.sql` (a unit-style pin: `tests/test_staging.py::test_conflicting_duplicate_fails_the_dbt_test` plants one in a scratch landing → the singular test fails on DuckDB); live 2026-08-30: `bq-load: source=fixtures/tiny → ontime-rate-recovery.raw`, `bq-load OK: tiny — 10 files, 970 event rows, 22 dim rows` (re-run three times across the build attempts — byte-identical landings, `WRITE_TRUNCATE`) |
 | 5 | `tests/test_loader.py::test_bigquery_build_lands_through_bq_not_duckdb` (injected landings: the DuckDB `load` fake raises if called, the bq fake records `(profile, project, through)`, `OTR_GCP_PROJECT` equals the validated id inside the process and is absent before), `::test_bigquery_target_needs_a_validated_project` (the 9b form of `test_bigquery_target_is_refused_before_9b`: empty / `../x` / `Bad Id` → exit 2, no landing, no dbt), `tests/test_infra.py::test_bigquery_profile_location_is_the_datasets` (`location` == `variables.tf` `region` default), `::test_bigquery_profile_project_has_no_default` (kept), `tests/test_dag_structure.py::test_dag_tasks_are_the_pipeline_writing_steps_in_order` (the `TARGET=duckdb` literal), `tests/test_dbt_conventions.py::test_incremental_models_partition_config_is_dialect_safe` (`overwrite_partition_col` on the three models; the native `partition_by` guarded by `target.type == 'bigquery'`; `config.require('overwrite_partition_col')` in the strategy) |
 | 6 | `tests/test_makefile.py::test_bq_targets_confirm_from_command_line_only` (`bq-load`, `test-int-bigquery`; `dbt-build` keeps `test_cloud_target_requires_confirm_from_the_command_line`), `::test_bq_targets_pass_project_as_one_literal` (`PROJECT` and `PROFILE` `_Q`-quoted, both origins, `"; echo pwned; "` / `$(shell …)` / `../x` / `''`), `tests/test_bq_landing.py::test_no_client_is_built_before_validation` (the client factory is injectable; the default factory is never called in the suite — a sentinel factory raises), `tests/test_infra.py::test_auth_is_adc_or_wif_never_keyfile` (kept; `profiles.yml` still `method: oauth`, no `keyfile`), `tests/test_truth_isolation.py` (`loader/bq.py` is pipeline code — guarded); mutations below all KILLED |
 
@@ -308,7 +345,7 @@ make test && make lint && make review-gate SPEC=specs/phase-9b-bigquery-dialect.
 | 2. **Same rows, both dialects.** For all three frozen goldens, the rows read from BigQuery, rendered by the same `Golden` spec (columns, sort key, `render`), equal the frozen file byte-for-byte; every `tests/pins.py` number holds off the BigQuery rows. | `tests/integration/test_int_bigquery.py::test_goldens_match_frozen`, `::test_pins_hold_on_bigquery` (a `to_local_time` body off by a zone rule, a `timestamp_diff` argument order swapped, a `safe_divide` integer-dividing → a differing row); offline `tests/test_eval.py::test_bigquery_rows_render_like_duckdb_rows` (the tz-aware/`Decimal` normalisation) |
 | 3. **The landing is a function of the fixture and `THROUGH`.** For all `(profile, through)`, the BigQuery landing loads exactly the files `loader.load.event_files` selects, into tables whose schema is the generated contract, recreating both (a second landing is byte-identical, never appended). | `tests/test_bq_landing.py::test_selects_the_same_files_as_the_duckdb_loader`, `::test_uploads_then_loads_with_the_generated_schema` (`WRITE_APPEND` → red; a hand-typed schema → red via `tests/test_dbt_sources.py::test_bq_schema_is_generated_from_the_contract`) |
 | 4. **The build's landing matches its target.** For all `dbt_build(profile, target)`, the landing that runs is the target's — the DuckDB `load()` on `duckdb`, `bq_load()` on `bigquery`, never both, never the other — and `OTR_GCP_PROJECT` reaches dbt only as the validated `PROJECT`. | `tests/test_loader.py::test_bigquery_build_lands_through_bq_not_duckdb`, `::test_bigquery_target_needs_a_validated_project`, `::test_cloud_target_requires_confirm_from_the_command_line` (kept) |
-| 5. **Five dispatch macros, two bodies each, no default, no sixth.** For all macro files, `adapter.dispatch` appears in exactly the five; each has non-empty `duckdb__` and `bigquery__` bodies and no `default__`; `generate_schema_name` and the strategy macro dispatch nothing. | `tests/test_dbt_conventions.py::test_exactly_five_dispatch_macros`, `::test_each_macro_has_duckdb_and_bigquery_bodies`, `::test_no_default_dispatch_body`, `::test_bigquery_bodies_are_the_named_forms` |
+| 5. **Five dispatch macros, two bodies each, no default, no sixth.** For all macro files, `adapter.dispatch` appears in exactly the five; each has non-empty `duckdb__` and `bigquery__` bodies and no `default__` — `bigquery__partition_overwrite` raises by design because the adapter's native `insert_overwrite`, selected in config on `target.type`, is that seam's BigQuery half (U); `generate_schema_name` and the strategy macro dispatch nothing. | `tests/test_dbt_conventions.py::test_exactly_five_dispatch_macros`, `::test_each_macro_has_duckdb_and_bigquery_bodies`, `::test_no_default_dispatch_body`, `::test_bigquery_bodies_are_the_named_forms` |
 | 6. **A conflicting duplicate never lands silently on either dialect.** For all landings where one `insert_id` + clock triple carries two payloads, `dbt build` fails (a singular test over the source) — the loader's Python predicate, restated in SQL both dialects run. | `tests/test_staging.py::test_conflicting_duplicate_fails_the_dbt_test` (a planted conflict in a scratch DuckDB landing → the singular test red; the DuckDB loader's own refusal is bypassed by inserting after `load()`) |
 | 7. **Cloud targets are gated and validated before any client exists; nothing offline reaches the network.** For all of `bq-load`, `dbt-build TARGET≠duckdb`, `test-int-bigquery`: `CONFIRM=yes` must have command-line origin and `PROJECT` must match `PROJECT_RE` before a storage/BigQuery client is constructed; the client factory is injectable and the offline suite injects fakes only. | `tests/test_makefile.py::test_bq_targets_confirm_from_command_line_only`, `::test_bq_targets_pass_project_as_one_literal`, `tests/test_bq_landing.py::test_no_client_is_built_before_validation` |
 | 8. **The incremental partition config is dialect-safe.** For all three incremental models, the overwrite column is named under `overwrite_partition_col` (a key no adapter reads), the native `partition_by` dict exists only under `target.type == 'bigquery'`, and the strategy reads the neutral key — so DuckDB's build and goldens are unchanged and BigQuery partitions on the overwrite column. | `tests/test_dbt_conventions.py::test_incremental_models_partition_config_is_dialect_safe` (a bare `partition_by='…'` string → red; an unguarded dict → red); the DuckDB in-process build (unchanged goldens) |
@@ -365,11 +402,12 @@ scratch copy:
   truncating, matching DuckDB's `/`); `datetime(ts_utc, tz)` (a naive local
   wall time — the `DATETIME` type is BigQuery's naive timestamp, so
   `client_event_time_local` casts to `date`/`extract(hour …)` as on DuckDB);
-  `partition_overwrite` = the same delete-in-set + insert as DuckDB, in one
-  BigQuery script (two DML statements), so the strategy macro is untouched.
-  Rejected: BigQuery's `insert_overwrite` strategy (a second mechanism for the
-  same seam; the DuckDB form already exists and the goldens pin its
-  semantics); a `default__` fallback (the rule).
+  `partition_overwrite` on BigQuery = the adapter's native `insert_overwrite`
+  (dynamic mode — delete the batch's partitions, insert), selected in the
+  models' `config()` on `target.type`, its dispatch body raising by design
+  (**Amendment U** — the first draft's two-statement script was unreachable:
+  dbt-bigquery rejects any custom strategy). Rejected: a `default__` fallback
+  (the rule); vendoring the adapter materialization.
 - **`overwrite_partition_col` names the overwrite column; the native
   `partition_by` dict is dialect-guarded (item 7)** — satisfies invariant 8.
   Rejected: either single value (one adapter raises — the finding).

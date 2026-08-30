@@ -349,8 +349,8 @@ by the manual cloud runs in the spec's Evidence (ask-first).
 pin-parity run — Phase 9's two warehouse clauses. The five `bigquery__` macro
 bodies (`json_value`; end-first `timestamp_diff` with both sides cast to
 `timestamp`; native `safe_divide` on a `float64` numerator; `datetime(ts, tz)`;
-the same delete-in-set + insert overwrite) replace the Phase 2–8 raises — still
-five, no `default__`. `generate_schema_name` (a hook override, not a sixth
+the overwrite seam's BigQuery half as the native strategy) replace the Phase
+2–8 raises — still five, no `default__`. `generate_schema_name` (a hook override, not a sixth
 macro) lands every model in the `ontime` dataset on `target.type == 'bigquery'`
 only; DuckDB keeps `main_<folder>` and no reader changed — two datasets stays
 9a's pin. The three incremental models name their overwrite column under
@@ -369,10 +369,12 @@ both dialects run. `make test-int-bigquery PROJECT=<id> CONFIRM=yes` (behind
 `Golden` specs and one renderer and diffs them byte-for-byte against the
 read-only `fixtures/tiny/expected/`, re-asserts the pins, and asserts exactly
 two datasets exist. The CI leg (opt-in WIF apply) is a runbook step and a
-dated BACKLOG row, not a job. **Live status:** offline suite green; the
-ask-first BigQuery build and parity run are recorded in the spec's Evidence
-when they run (the SA-id reservation until ~2026-09-28 needs the undelete +
-import detour first — `docs/DEPLOYMENT.md`).
+dated BACKLOG row, not a job. The partition-overwrite seam's BigQuery half is
+the adapter's native `insert_overwrite` (dbt-bigquery admits no custom
+strategy — Amendment U, §8). **Live 2026-08-30** on `ontime-rate-recovery`,
+as the SA, after the undelete + import detour: `dbt-build OK: tiny/bigquery`
+(PASS=126, the DuckDB count) and `test-int-bigquery` `3 passed` — the three
+goldens byte-identical, pins hold, two datasets. Phase 9's Done-when is met.
 
 ---
 
