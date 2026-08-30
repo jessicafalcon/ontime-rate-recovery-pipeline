@@ -137,6 +137,28 @@ annotated **Superseded by …** in place and never deleted.
   not edited — this entry is the pointer) and 9b's inline-`TF_VAR` runbook.
   Rejected: allowing `TF_VAR_*` when also echoed (the file/env, not the
   value, is the smuggling path — T's own argument).
+- **Review of the fix (code-reviewer, security-reviewer, functionality-tester;
+  11 findings, applied 2026-08-30).** Design change: the terraform child gets
+  an **allowlisted environment** (`ENV_ALLOW`: `PATH`, `HOME`, `CLOUDSDK_*`,
+  locale/proxy) — `TF_CLI_ARGS*` (which Terraform splices into the argv,
+  `-var-file` included — the same hole, worse), `GOOGLE_*CREDENTIALS*` (a
+  keyfile despite "ADC only"), `TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*` cannot
+  reach it; the loud refusal covers `TF_VAR_*`/`TF_CLI_ARGS*` on every
+  command (validate evaluates variable validations). `VARS` is gated on
+  `$(origin VARS)` like `CONFIRM` (an exported `VARS` toggled a typed apply
+  with nothing in the typed line — the struck row's shape). A bracketed
+  numeric list is one item (`budget_alert_thresholds=[50,150]` was otherwise
+  unsettable). The argv → `tf()` seam is pinned by driving `cli.main()` with
+  `tf` spied (three hand-mutations survived without it, one breaking every
+  real `tf-*`); the suite scrubs `TF_VAR_*`/`TF_CLI_ARGS*` so a developer's
+  export cannot redden it. Hand-mutation record (the tester, in a throwaway
+  worktree — a fix branch has no spec block): delete `refuse_env_tf_vars`,
+  `parse_vars → []`, drop the `project_id` check, widen `VAR_RE`, drop
+  `--vars` from `tf-destroy`, wrong env prefix — all killed; the three
+  `main()` survivors are now killed by `test_cli_main_forwards_vars_and_origin_to_tf`.
+  Records: the DEPLOYMENT fence repaired (the cost table rendered as code);
+  "nothing changed" → "no resource and no state file changed". Residual:
+  none named — the allowlist is a whitelist, not a denylist.
 - **Gotcha recorded (§8): the impersonated-SA ADC cannot run Terraform.** The
   first post-9b `tf-destroy` failed at refresh (`Permission denied to list
   services`) because ADC still impersonated `ontime-pipeline`; nothing was

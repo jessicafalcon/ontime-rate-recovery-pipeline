@@ -202,17 +202,19 @@ test-int-bigquery:
 tf-validate:
 	uv run python -m infra.cli validate
 
-# Toggles reach Terraform ONLY as VARS='name=value,…' → argv `-var` (fix/tf-vars-argv):
-# an auto-loaded tfvars (Amendment T) or a TF_VAR_* in the environment is refused
-# before terraform runs — the argv is the whole input.
+# Toggles reach Terraform ONLY as VARS='name=value,…' from the COMMAND LINE
+# ($(origin VARS), like CONFIRM) → argv `-var` (fix/tf-vars-argv); an auto-loaded
+# tfvars (Amendment T) or a TF_VAR_*/TF_CLI_ARGS* in the environment is refused
+# before terraform runs, and the child gets an allowlisted environment — the
+# argv is the whole input by construction.
 tf-plan:
-	uv run python -m infra.cli plan --project $(call _Q,$(value PROJECT)) --vars $(call _Q,$(value VARS))
+	uv run python -m infra.cli plan --project $(call _Q,$(value PROJECT)) --vars $(call _Q,$(value VARS)) --vars-origin '$(origin VARS)'
 
 tf-apply:
-	uv run python -m infra.cli apply --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --vars $(call _Q,$(value VARS))
+	uv run python -m infra.cli apply --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --vars $(call _Q,$(value VARS)) --vars-origin '$(origin VARS)'
 
 tf-destroy:
-	uv run python -m infra.cli destroy --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --vars $(call _Q,$(value VARS))
+	uv run python -m infra.cli destroy --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --vars $(call _Q,$(value VARS)) --vars-origin '$(origin VARS)'
 
 # The ONLY writer of infra/MANIFEST.sha256 — the content pin over every file
 # Terraform loads (*.tf, *.tf.json) and the provider lock (Amendments P/R): any

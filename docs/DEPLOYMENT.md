@@ -101,19 +101,24 @@ make tf-freeze  CONFIRM=yes                   # after ANY .tf / .tf.json / lock 
 line (`$(origin CONFIRM)`); an environment `CONFIRM=yes` is refused. `PROJECT` is
 validated as a GCP project-id before any terraform runs.
 
-Toggles reach Terraform ONLY as `VARS='name=value,…'` on the make command
-line (`fix/tf-vars-argv`): `infra/cli.py` parses each item into an argv
-`-var`, refuses a malformed item, whitespace, or `project_id` (PROJECT's),
-and refuses to run while ANY `TF_VAR_*` is in its environment or an
+Toggles reach Terraform ONLY as `VARS='name=value,…'` from the make COMMAND
+LINE (`$(origin VARS)`, like `CONFIRM` — an exported `VARS` is refused;
+`fix/tf-vars-argv`): `infra/cli.py` parses each item into an argv `-var`
+(a bracketed numeric list is one item: `budget_alert_thresholds=[50,150]`),
+refuses a malformed item, whitespace, or `project_id` (PROJECT's), refuses
+to run while ANY `TF_VAR_*` / `TF_CLI_ARGS*` is in its environment or an
 auto-loaded `infra/terraform.tfvars` / `*.auto.tfvars{,.json}` exists
-(Amendment T) — so the argv is the whole input and the `tf-plan` you read
-is the `tf-apply` you get:
+(Amendment T), and gives the terraform child an ALLOWLISTED environment
+(`PATH`, `HOME`, `CLOUDSDK_*`, locale/proxy — never `GOOGLE_*CREDENTIALS*`,
+`TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*`), so the argv is the whole input by
+construction and the `tf-plan` you read is the `tf-apply` you get:
 
 ```
 make tf-plan  PROJECT=<id> VARS='operator_principal=user:<you>'
 make tf-apply PROJECT=<id> VARS='operator_principal=user:<you>' CONFIRM=yes
-``` Read the `tf-plan` output
-before every `tf-apply`; the plan is the review.
+```
+
+Read the `tf-plan` output before every `tf-apply`; the plan is the review.
 
 `tf-validate`'s init is `-lockfile=readonly`: `infra/.terraform.lock.hcl` pins
 one platform hash (`h1:`, darwin/arm64). On another platform the init FAILs
@@ -211,8 +216,9 @@ datasets — so every BigQuery build runs **as the SA** (below), and
    login` (no `--impersonate-service-account`). The impersonated SA has no
    `serviceusage` permission, so `tf-plan`/`tf-apply`/`tf-destroy` fail at
    refresh with `Permission denied to list services for consumer container`
-   — found live on the first `tf-destroy` after 9b (ARCHITECTURE §8). Nothing
-   is changed by that failure; re-auth and re-run.
+   — found live on the first `tf-destroy` after 9b (ARCHITECTURE §8). No
+   resource and no state file is changed by that failure (refresh runs before
+   any plan); re-auth and re-run.
 
 Cost of a tiny run: ~1 MB of storage in `raw` + `ontime`, load jobs free,
 ~10 MB queried (inside the 1 TB/month free tier) — cents at most; every step

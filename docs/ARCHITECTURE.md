@@ -439,17 +439,22 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   (`gcloud auth application-default login --impersonate-service-account=…`);
   that credential stays in ADC, and the next `tf-*` fails at refresh —
   `Permission denied to list services for consumer container` (the SA holds
-  no `serviceusage` role by design, invariant 4 of 9a). Harmless (refresh
-  fails before any change); the runbook's step 5 is to re-login as yourself
-  before any `tf-*`.
+  no `serviceusage` role by design, invariant 4 of 9a). Harmless — no
+  resource and no state file changed (refresh fails before any plan); the
+  runbook's step 5 is to re-login as yourself before any `tf-*`.
 - **`TF_VAR_*` from the environment reaches Terraform unseen**
   (`fix/tf-vars-argv`, after Phase 9b). Amendment T refused auto-loaded
   tfvars but 9a's runbook still said "or `TF_VAR_*`": an exported
   `TF_VAR_enable_composer=true` would let a plain `make tf-apply … CONFIRM=yes`
-  create billable resources with nothing in the argv. `infra/cli.py` now
-  refuses to run while any `TF_VAR_*` is in its environment, and a toggle
-  reaches Terraform only as `VARS='name=value,…'` → argv `-var` (validated,
-  `project_id` excluded) — the argv is the whole input.
+  create billable resources with nothing in the argv — and `TF_CLI_ARGS` /
+  `TF_CLI_ARGS_<cmd>` are strictly worse (Terraform splices them into the
+  argv, `-var-file` included). `infra/cli.py` now refuses to run while any
+  `TF_VAR_*` / `TF_CLI_ARGS*` is in its environment, gives the child an
+  ALLOWLISTED environment (so `GOOGLE_*CREDENTIALS*` — a keyfile despite
+  "ADC only" — `TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*` cannot reach it
+  either), and a toggle reaches Terraform only as `VARS='name=value,…'` from
+  the command line (`$(origin VARS)`) → argv `-var` (validated, `project_id`
+  excluded) — the argv is the whole input by construction.
 - **`partition_by` is a model config BOTH adapters interpret** (Phase 9b, found
   reading main for the reconciliation). Phase 7's custom strategy read the
   overwrite column from `config.require('partition_by')` as a plain string.

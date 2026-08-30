@@ -937,14 +937,18 @@ def test_tf_freeze_requires_confirm_origin_and_writes_the_manifest(
 
 
 class _FakeRunner:
-    """A subprocess.run stand-in: records argv, never spawns terraform."""
+    """A subprocess.run stand-in: records argv and env, never spawns terraform."""
 
     def __init__(self, rc: int = 0) -> None:
         self.rc = rc
         self.calls: list[list[str]] = []
+        self.envs: list[dict[str, str]] = []
 
-    def __call__(self, argv: list[str]) -> subprocess.CompletedProcess:
+    def __call__(
+        self, argv: list[str], env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess:
         self.calls.append(argv)
+        self.envs.append(env or {})
         return subprocess.CompletedProcess(argv, self.rc)
 
 
@@ -1024,15 +1028,20 @@ def test_cli_vars_are_the_only_toggle_path(
     scratch_infra: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     """fix/tf-vars-argv (BACKLOG "TF_VAR_* from the environment bypasses
-    Amendment T"): a toggle reaches Terraform ONLY as `VARS='name=value,…'` →
-    argv `-var` items; `project_id` in VARS, a malformed item, whitespace or a
-    metacharacter is refused; any `TF_VAR_*` in the environment refuses
-    plan/apply/destroy before the runner (validate is ungated)."""
+    Amendment T"): a toggle reaches Terraform ONLY as `VARS='name=value,…'`
+    from the COMMAND LINE → argv `-var` items (a bracketed numeric list is one
+    item — `budget_alert_thresholds`); `project_id` in VARS, a malformed item,
+    whitespace, a metacharacter, or an env-origin VARS is refused; any
+    `TF_VAR_*` / `TF_CLI_ARGS*` in the environment refuses EVERY command
+    (validate evaluates variable validations) before the runner."""
     fake = _FakeRunner()
     assert cli.tf("plan", "my-proj", runner=fake, vars_="") == 0
     assert fake.calls[0].count("-var") == 1
     fake = _FakeRunner()
-    vars_ = "enable_ci_wif=true,github_repository=o/r,operator_principal=user:a@b.c"
+    vars_ = (
+        "enable_ci_wif=true,github_repository=o/r,"
+        "operator_principal=user:a@b.c,budget_alert_thresholds=[50,150]"
+    )
     assert cli.tf("apply", "my-proj", "yes", "command line", fake, vars_) == 0
     argv = fake.calls[0]
     assert argv[argv.index("project_id=my-proj") + 1 :] == [
@@ -1042,31 +1051,97 @@ def test_cli_vars_are_the_only_toggle_path(
         "github_repository=o/r",
         "-var",
         "operator_principal=user:a@b.c",
+        "-var",
+        "budget_alert_thresholds=[50,150]",
     ]
-    for bad in (
+    bad = (
         "enable_ci_wif",
         "x=1 2",
         "Enable=1",
         'x="; rm',
         "x=1,,",
         "project_id=p",
-    ):
+        "x=[1,a]",
+        "x=[1",
+    )
+    for item in bad:
         fake = _FakeRunner()
         with pytest.raises(SystemExit) as e:
-            cli.tf("plan", "my-proj", runner=fake, vars_=bad)
-        assert e.value.code == 2 and fake.calls == [], bad
+            cli.tf("plan", "my-proj", runner=fake, vars_=item)
+        assert e.value.code == 2 and fake.calls == [], item
         assert "VARS: refused" in capsys.readouterr().out
-    monkeypatch.setenv("TF_VAR_enable_composer", "true")
-    assert cli.env_tf_vars() == ["TF_VAR_enable_composer"]
-    for cmd in ("plan", "apply", "destroy"):
-        fake = _FakeRunner()
-        with pytest.raises(SystemExit) as e:
-            cli.tf(cmd, "my-proj", "yes", "command line", runner=fake)
-        assert e.value.code == 2 and fake.calls == [], cmd
-        assert f"tf-{cmd}: refused — TF_VAR_enable_composer" in capsys.readouterr().out
-    assert cli.tf("validate", runner=_FakeRunner()) == 0
-    monkeypatch.delenv("TF_VAR_enable_composer")
+    fake = _FakeRunner()  # an exported VARS is refused, like an exported CONFIRM
+    with pytest.raises(SystemExit) as e:
+        cli.tf("plan", "my-proj", runner=fake, vars_="x=1", vars_origin="environment")
+    assert e.value.code == 2 and fake.calls == []
+    assert "VARS: refused — set on the command line" in capsys.readouterr().out
+    for name in ("TF_VAR_enable_composer", "TF_CLI_ARGS_apply", "TF_CLI_ARGS"):
+        monkeypatch.setenv(name, "x")
+        assert cli.env_tf_vars() == [name]
+        for cmd in ("plan", "apply", "destroy", "validate"):
+            fake = _FakeRunner()
+            with pytest.raises(SystemExit) as e:
+                cli.tf(cmd, "my-proj", "yes", "command line", runner=fake)
+            assert e.value.code == 2 and fake.calls == [], (cmd, name)
+            assert f"tf-{cmd}: refused — {name}" in capsys.readouterr().out
+        monkeypatch.delenv(name)
     assert cli.tf("plan", "my-proj", runner=_FakeRunner()) == 0
+
+
+def test_cli_child_env_is_an_allowlist(
+    scratch_infra: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The terraform child sees ONLY `ENV_ALLOW` (fix/tf-vars-argv): a keyfile
+    env var, TF_WORKSPACE, TF_DATA_DIR, TF_LOG_PATH never reach it — the argv
+    is the whole input by construction, not by a denylist."""
+    for k, v in {
+        "GOOGLE_CREDENTIALS": "{}",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/key.json",
+        "GOOGLE_OAUTH_ACCESS_TOKEN": "t",
+        "TF_WORKSPACE": "other",
+        "TF_DATA_DIR": "/tmp/x",
+        "TF_LOG": "TRACE",
+        "TF_LOG_PATH": "/tmp/l",
+        "HOME": "/tmp/h",
+    }.items():
+        monkeypatch.setenv(k, v)
+    fake = _FakeRunner()
+    assert cli.tf("plan", "my-proj", runner=fake) == 0
+    env = fake.envs[0]
+    assert set(env) <= set(cli.ENV_ALLOW)
+    assert env["HOME"] == "/tmp/h" and "PATH" in env
+    assert not any(k.startswith(("GOOGLE_", "TF_")) for k in env)
+
+
+def test_cli_main_forwards_vars_and_origin_to_tf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The argv → tf() seam (the tester's three surviving mutations): main()
+    forwards --vars and --vars-origin for plan, apply and destroy — so the plan
+    you read is the apply you get."""
+    seen: list[dict[str, object]] = []
+
+    def spy(
+        cmd: str,
+        project: str = "",
+        confirm: str = "",
+        origin: str = "",
+        runner=None,
+        vars_: str = "",
+        vars_origin: str = "command line",
+    ) -> int:  # noqa: E501
+        seen.append({"cmd": cmd, "vars_": vars_, "vars_origin": vars_origin})
+        return 0
+
+    monkeypatch.setattr(cli, "tf", spy)
+    gate = ["--confirm", "yes", "--confirm-origin", "command line"]
+    v = ["--vars", "enable_composer=true", "--vars-origin", "environment"]
+    assert cli.main(["plan", "--project", "my-proj", *v]) == 0
+    assert cli.main(["apply", "--project", "my-proj", *gate, *v]) == 0
+    assert cli.main(["destroy", "--project", "my-proj", *gate, *v]) == 0
+    assert [s["cmd"] for s in seen] == ["plan", "apply", "destroy"]
+    assert all(s["vars_"] == "enable_composer=true" for s in seen)
+    assert all(s["vars_origin"] == "environment" for s in seen)
 
 
 def test_cli_validate_argv_is_offline(scratch_infra: Path) -> None:
@@ -1136,7 +1211,7 @@ def test_cli_missing_terraform_is_a_clean_fail(
     """No traceback when terraform is not on PATH; a real exit 127 still FAILs
     (None sentinel, not 127) (review round 1 #22 / round 2 #16)."""
 
-    def missing(argv: list[str]) -> subprocess.CompletedProcess:
+    def missing(argv: list[str], **kw: object) -> subprocess.CompletedProcess:
         raise FileNotFoundError(2, "No such file or directory", "terraform")
 
     assert cli.tf("validate", runner=missing) == 1

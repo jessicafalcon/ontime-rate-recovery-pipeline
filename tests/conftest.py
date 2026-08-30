@@ -49,4 +49,8 @@ def _scrub_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "VARS",
     ):
         monkeypatch.delenv(var, raising=False)
+    for var in [k for k in os.environ if k.startswith(("TF_VAR_", "TF_CLI_ARGS"))]:
+        monkeypatch.delenv(
+            var
+        )  # infra.cli refuses them; a developer's export must not redden the suite
     yield

@@ -30,7 +30,11 @@ SCRUB = (
 
 
 def _make_n(target: str, cmdline: dict[str, str], env: dict[str, str]) -> str:
-    base = {k: v for k, v in os.environ.items() if k not in SCRUB}
+    base = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in SCRUB and not k.startswith(("TF_VAR_", "TF_CLI_ARGS"))
+    }
     res = subprocess.run(
         ["make", "-n", target, *(f"{k}={v}" for k, v in cmdline.items())],
         cwd=ROOT,
@@ -444,8 +448,12 @@ def test_tf_targets_pass_vars_as_one_literal(value: str) -> None:
                 target, kv if origin == "cmdline" else {}, kv if origin == "env" else {}
             )
             assert f"--vars {quoted}" in out, (target, origin, out)
+            expected = "command line" if origin == "cmdline" else "environment"
+            assert f"--vars-origin '{expected}'" in out, (target, origin, out)
             assert "pwned" not in out.replace(value, "")
     assert "--vars" not in _make_n("tf-validate", {}, {})
+    out = _make_n("tf-plan", {"PROJECT": "p"}, {})
+    assert "--vars '' --vars-origin 'file'" in out  # unset: unexport → `file`
 
 
 def test_tf_validate_takes_no_project() -> None:
@@ -481,7 +489,7 @@ def test_tf_apply_and_destroy_confirm_from_command_line_only() -> None:
 
     # Inject a fake runner so a mutated-away guard (require_confirm delete-call)
     # can never spawn a real `terraform apply` from the suite.
-    def _fake(argv: list[str]) -> subprocess.CompletedProcess:
+    def _fake(argv: list[str], **kw: object) -> subprocess.CompletedProcess:
         return subprocess.CompletedProcess(argv, 0)
 
     for confirm, origin in (
