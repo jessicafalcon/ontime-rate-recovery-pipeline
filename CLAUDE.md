@@ -809,7 +809,8 @@ in ONE read-write transaction), B (the version parses before the insert
 shortcut — the BLOCKER), C (the build's one validated var seam +
 manifest-proven swap); fakes that execute the SQL on DuckDB; grant scope /
 gated-module allowlists / name literals / `region` validation pinned;
-`disable_builtin_metrics`; the view casts; records. PENDING (ask-first, cloud): the
+`disable_builtin_metrics`; the view casts; records; suite 474, mutate 5/5,
+review-gate 6/6, tf-validate/tf-freeze clean. PENDING (ask-first, cloud): the
 `enable_spanner=true` apply (undelete+import detour while the SA id is
 reserved), `spanner-load`, `test-int-spanner`, the same-day
 `enable_spanner=false` teardown with the dated DEPLOYMENT lines — then the

@@ -88,7 +88,9 @@ def test_build_read_dims_through_the_federation_view(built: str) -> None:
     manifest for the swapped build), not the landed table."""
     identifier, relation = _dim_user_source_relation().split("|")
     assert identifier == SWAP
-    assert relation == f"`{built}`.`raw`.`{SWAP}`", relation
+    # adapter quoting aside (`x`.`y` on BigQuery, "x"."y" on DuckDB — checked
+    # offline with `dbt parse`), the resolved relation is raw.<view> in the project
+    assert relation.replace("`", "") == f"{built}.raw.{SWAP}", relation
 
 
 def _bq(project: str):  # noqa: ANN202 — the google type is a runtime import
