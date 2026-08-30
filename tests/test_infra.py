@@ -1020,6 +1020,55 @@ def test_cli_builds_the_expected_argv(scratch_infra: Path) -> None:
         )
 
 
+def test_cli_vars_are_the_only_toggle_path(
+    scratch_infra: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """fix/tf-vars-argv (BACKLOG "TF_VAR_* from the environment bypasses
+    Amendment T"): a toggle reaches Terraform ONLY as `VARS='name=value,…'` →
+    argv `-var` items; `project_id` in VARS, a malformed item, whitespace or a
+    metacharacter is refused; any `TF_VAR_*` in the environment refuses
+    plan/apply/destroy before the runner (validate is ungated)."""
+    fake = _FakeRunner()
+    assert cli.tf("plan", "my-proj", runner=fake, vars_="") == 0
+    assert fake.calls[0].count("-var") == 1
+    fake = _FakeRunner()
+    vars_ = "enable_ci_wif=true,github_repository=o/r,operator_principal=user:a@b.c"
+    assert cli.tf("apply", "my-proj", "yes", "command line", fake, vars_) == 0
+    argv = fake.calls[0]
+    assert argv[argv.index("project_id=my-proj") + 1 :] == [
+        "-var",
+        "enable_ci_wif=true",
+        "-var",
+        "github_repository=o/r",
+        "-var",
+        "operator_principal=user:a@b.c",
+    ]
+    for bad in (
+        "enable_ci_wif",
+        "x=1 2",
+        "Enable=1",
+        'x="; rm',
+        "x=1,,",
+        "project_id=p",
+    ):
+        fake = _FakeRunner()
+        with pytest.raises(SystemExit) as e:
+            cli.tf("plan", "my-proj", runner=fake, vars_=bad)
+        assert e.value.code == 2 and fake.calls == [], bad
+        assert "VARS: refused" in capsys.readouterr().out
+    monkeypatch.setenv("TF_VAR_enable_composer", "true")
+    assert cli.env_tf_vars() == ["TF_VAR_enable_composer"]
+    for cmd in ("plan", "apply", "destroy"):
+        fake = _FakeRunner()
+        with pytest.raises(SystemExit) as e:
+            cli.tf(cmd, "my-proj", "yes", "command line", runner=fake)
+        assert e.value.code == 2 and fake.calls == [], cmd
+        assert f"tf-{cmd}: refused — TF_VAR_enable_composer" in capsys.readouterr().out
+    assert cli.tf("validate", runner=_FakeRunner()) == 0
+    monkeypatch.delenv("TF_VAR_enable_composer")
+    assert cli.tf("plan", "my-proj", runner=_FakeRunner()) == 0
+
+
 def test_cli_validate_argv_is_offline(scratch_infra: Path) -> None:
     """Round 3 #5 (round 2 #9's live survivor): `tf-validate` runs init with
     `-backend=false` (no state backend touched, no auth) and `-lockfile=readonly`

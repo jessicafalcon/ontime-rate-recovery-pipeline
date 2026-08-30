@@ -23,6 +23,7 @@ SCRUB = (
     "THROUGH",
     "FULL",
     "PROJECT",
+    "VARS",
     "MAKEFLAGS",
     "MFLAGS",
 )
@@ -427,6 +428,24 @@ def test_bq_targets_confirm_from_command_line_only() -> None:
         assert "--confirm 'yes' --confirm-origin 'command line'" in out, target
         out = _make_n(target, {"PROJECT": "p"}, {})
         assert "--confirm '' --confirm-origin 'file'" in out, target
+
+
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", "", "k=v,k2=v2"]
+)
+def test_tf_targets_pass_vars_as_one_literal(value: str) -> None:
+    """fix/tf-vars-argv: VARS reaches infra.cli as one single-quoted token from
+    either origin; Python parses it into `-var` items or refuses."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for target in ("tf-plan", "tf-apply", "tf-destroy"):
+        for origin in ("cmdline", "env"):
+            kv = {"PROJECT": "p", "VARS": value}
+            out = _make_n(
+                target, kv if origin == "cmdline" else {}, kv if origin == "env" else {}
+            )
+            assert f"--vars {quoted}" in out, (target, origin, out)
+            assert "pwned" not in out.replace(value, "")
+    assert "--vars" not in _make_n("tf-validate", {}, {})
 
 
 def test_tf_validate_takes_no_project() -> None:

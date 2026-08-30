@@ -122,6 +122,26 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/tf-vars-argv (after Phase 9b, 2026-08-30)
+
+- **A toggle reaches Terraform only as `VARS='name=value,…'` → argv `-var`;
+  any `TF_VAR_*` in the environment refuses `tf-*`.** Closes the BACKLOG row
+  the 9b review opened (round 1 #9): Amendment T refused auto-loaded tfvars,
+  but 9a's runbook still allowed `TF_VAR_*`, which reaches Terraform with
+  nothing in the argv — an exported toggle could make a plain
+  `make tf-apply … CONFIRM=yes` billable. `infra/cli.py::parse_vars`
+  validates each item (`^[a-z][a-z0-9_]*=[^,\s]+$`; `project_id` is
+  PROJECT's), `refuse_env_tf_vars` runs before the runner; `VARS` is
+  `_Q`-quoted and `unexport`ed like every user variable. Supersedes the 9a
+  threat model's "`TF_VAR_*` remain the operator's own shell" (a merged spec,
+  not edited — this entry is the pointer) and 9b's inline-`TF_VAR` runbook.
+  Rejected: allowing `TF_VAR_*` when also echoed (the file/env, not the
+  value, is the smuggling path — T's own argument).
+- **Gotcha recorded (§8): the impersonated-SA ADC cannot run Terraform.** The
+  first post-9b `tf-destroy` failed at refresh (`Permission denied to list
+  services`) because ADC still impersonated `ontime-pipeline`; nothing was
+  changed. DEPLOYMENT step 5: re-login as yourself before any `tf-*`.
+
 ### Phase 9b
 
 *BigQuery dialect, landing, pin parity (`phase-9b-bigquery-dialect`).* The

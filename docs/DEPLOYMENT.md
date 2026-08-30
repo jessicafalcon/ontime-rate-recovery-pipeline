@@ -101,15 +101,18 @@ make tf-freeze  CONFIRM=yes                   # after ANY .tf / .tf.json / lock 
 line (`$(origin CONFIRM)`); an environment `CONFIRM=yes` is refused. `PROJECT` is
 validated as a GCP project-id before any terraform runs.
 
-Toggles are command-line `-var`s only. Terraform would auto-load an
-`infra/terraform.tfvars` or `*.auto.tfvars{,.json}` — gitignored and outside
-the manifest, so a plan could differ from the pinned tree with nothing showing
-it — so `tf-plan`/`tf-apply`/`tf-destroy` refuse while one exists (`tf-plan:
-refused — infra/terraform.tfvars auto-loads …`, Amendment T): delete it and
-pass `TF_VAR_x=…` inline on the command you run — the shell line you typed
-shows it, though it is an env assignment, not terraform's argv, so the
-difference from an EXPORTED `TF_VAR_*` is presentational until the BACKLOG
-fix PR (`fix/tf-vars-argv`) turns toggles into argv `-var`s. Read the `tf-plan` output
+Toggles reach Terraform ONLY as `VARS='name=value,…'` on the make command
+line (`fix/tf-vars-argv`): `infra/cli.py` parses each item into an argv
+`-var`, refuses a malformed item, whitespace, or `project_id` (PROJECT's),
+and refuses to run while ANY `TF_VAR_*` is in its environment or an
+auto-loaded `infra/terraform.tfvars` / `*.auto.tfvars{,.json}` exists
+(Amendment T) — so the argv is the whole input and the `tf-plan` you read
+is the `tf-apply` you get:
+
+```
+make tf-plan  PROJECT=<id> VARS='operator_principal=user:<you>'
+make tf-apply PROJECT=<id> VARS='operator_principal=user:<you>' CONFIRM=yes
+``` Read the `tf-plan` output
 before every `tf-apply`; the plan is the review.
 
 `tf-validate`'s init is `-lockfile=readonly`: `infra/.terraform.lock.hcl` pins
@@ -186,11 +189,9 @@ datasets — so every BigQuery build runs **as the SA** (below), and
 
 ## Building on BigQuery (Phase 9b) — as the SA, ask-first
 
-1. Apply with `operator_principal` set inline on the SAME command line (never
-   a tfvars — T; `infra/cli.py` has no `-var` passthrough; the inline form is
-   an env assignment the typed line shows, not argv — BACKLOG,
-   `fix/tf-vars-argv`):
-   `TF_VAR_operator_principal="user:<you>" make tf-apply PROJECT=<id> CONFIRM=yes`
+1. Apply with `operator_principal` as a `VARS` item (the only toggle path;
+   never a tfvars or a `TF_VAR_*`):
+   `make tf-apply PROJECT=<id> VARS='operator_principal=user:<you>' CONFIRM=yes`
    — Terraform grants you `serviceAccountTokenCreator` ON `ontime-pipeline`
    (Amendment Q).
 2. Impersonate it for ADC — the ONE credential the landing's clients, dbt and
@@ -206,6 +207,12 @@ datasets — so every BigQuery build runs **as the SA** (below), and
 4. Parity: `make test-int-bigquery PROJECT=<id> CONFIRM=yes` — the three goldens
    off the BigQuery tables byte-for-byte against `fixtures/tiny/expected/`, the
    pins, and `bq ls` = exactly `raw`, `ontime`.
+5. **Switch ADC back before any `tf-*`:** `gcloud auth application-default
+   login` (no `--impersonate-service-account`). The impersonated SA has no
+   `serviceusage` permission, so `tf-plan`/`tf-apply`/`tf-destroy` fail at
+   refresh with `Permission denied to list services for consumer container`
+   — found live on the first `tf-destroy` after 9b (ARCHITECTURE §8). Nothing
+   is changed by that failure; re-auth and re-run.
 
 Cost of a tiny run: ~1 MB of storage in `raw` + `ontime`, load jobs free,
 ~10 MB queried (inside the 1 TB/month free tier) — cents at most; every step
@@ -215,8 +222,8 @@ not double anything. `tf-destroy` still removes it all
 
 **CI leg (deferred — BACKLOG "Cross-warehouse dialect drift…", dated trigger).**
 A CI `test-int-bigquery` needs the opt-in WIF apply, never the default one:
-`TF_VAR_enable_ci_wif=true TF_VAR_github_repository=<owner>/<repo> make tf-apply
-PROJECT=<id> CONFIRM=yes` (inline, same line), then the `workload_identity_provider`
+`make tf-apply PROJECT=<id> VARS='enable_ci_wif=true,github_repository=<owner>/<repo>'
+CONFIRM=yes`, then the `workload_identity_provider`
 output and the SA email into a `workflow_dispatch`-only job via
 `google-github-actions/auth`. Not built in 9b: the laptop run above is the
 Done-when, and an unrun job would be a claim.

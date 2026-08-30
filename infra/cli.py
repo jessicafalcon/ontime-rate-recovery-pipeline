@@ -26,6 +26,7 @@ tests exercise the guards against a fake — a real terraform is never spawned b
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -127,12 +128,46 @@ def auto_tfvars() -> list[str]:
     return sorted(p.name for p in INFRA_DIR.iterdir() if AUTO_TFVARS.match(p.name))
 
 
+VAR_RE = re.compile(r"^([a-z][a-z0-9_]*)=([^,\s]+)\Z")
+
+
+def parse_vars(vars_: str) -> list[str]:
+    """`VARS='k=v,k2=v2'` → `['-var', 'k=v', '-var', 'k2=v2']` (fix/tf-vars-argv).
+    The ONLY way a toggle reaches Terraform: each item is `name=value` with no
+    whitespace or comma in the value (so one item is one `-var`), and
+    `project_id` is PROJECT's alone. Empty → no `-var` beyond project_id."""
+    out: list[str] = []
+    for item in (s for s in vars_.split(",") if vars_):
+        m = VAR_RE.match(item)
+        if not m:
+            die(f"VARS: refused — want name=value items joined by ',', got {item!r}")
+        if m.group(1) == "project_id":
+            die("VARS: refused — project_id comes from PROJECT, not VARS")
+        out += ["-var", item]
+    return out
+
+
+def env_tf_vars() -> list[str]:
+    """`TF_VAR_*` names in this process's environment — Terraform reads them
+    unasked, with nothing in the argv showing it (the gap Amendment T left)."""
+    return sorted(k for k in os.environ if k.startswith("TF_VAR_"))
+
+
+def refuse_env_tf_vars(cmd: str) -> None:
+    found = env_tf_vars()
+    if found:
+        die(
+            f"tf-{cmd}: refused — {', '.join(found)} in the environment would reach "
+            "Terraform unseen; unset it and pass VARS='name=value,…' instead"
+        )
+
+
 def refuse_auto_tfvars(cmd: str) -> None:
     found = auto_tfvars()
     if found:
         die(
             f"tf-{cmd}: refused — infra/{', infra/'.join(found)} auto-loads; "
-            "delete it and pass -var on the command line (Amendment T)"
+            "delete it and pass VARS='name=value,…' on the command line (Amendment T)"
         )
 
 
@@ -156,6 +191,7 @@ def tf(
     confirm: str = "",
     origin: str = "",
     runner: Runner = subprocess.run,
+    vars_: str = "",
 ) -> int:
     if cmd in CLOUD_MUTATING:
         require_confirm(cmd, confirm, origin)
@@ -175,7 +211,8 @@ def tf(
         return 0
     validate_project(project)
     refuse_auto_tfvars(cmd)
-    var = ["-var", f"project_id={project}"]
+    refuse_env_tf_vars(cmd)
+    var = ["-var", f"project_id={project}", *parse_vars(vars_)]
     argv = {
         "plan": _TF + ["plan", "-input=false", *var],
         "apply": _TF + ["apply", "-input=false", "-auto-approve", *var],
@@ -199,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         p = sub.add_parser(name)
         if name != "freeze":
             p.add_argument("--project", default="")
+            p.add_argument("--vars", default="")
         if name in CONFIRM_GATED:
             p.add_argument("--confirm", default="")
             p.add_argument("--confirm-origin", default="")
@@ -208,8 +246,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "freeze":
         return freeze(a.confirm, a.confirm_origin)
     if a.cmd == "plan":
-        return tf("plan", a.project)
-    return tf(a.cmd, a.project, a.confirm, a.confirm_origin)
+        return tf("plan", a.project, vars_=a.vars)
+    return tf(a.cmd, a.project, a.confirm, a.confirm_origin, vars_=a.vars)
 
 
 if __name__ == "__main__":
