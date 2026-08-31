@@ -388,8 +388,47 @@ gains a Spanner target (`make writeback TARGET=spanner`). Threat model for every
 
 **Done when.** Two write-back runs over the same scores leave `send_schedule`
 unchanged (row hash); an older `model_version` never overwrites a newer one;
-`make tf-destroy MODULE=spanner` prompts unless `CONFIRM=yes` from the command
-line.
+the scoped Spanner teardown — `make tf-apply … VARS='enable_spanner=false'`,
+the toggle flipped back so the count-gated module destroys exactly its own
+resources — prompts unless `CONFIRM=yes` from the command line. *(Corrected at
+reconciliation: the original said `make tf-destroy MODULE=spanner`; no `MODULE`
+variable exists, and `fix/tf-vars-argv` pinned toggles to command-line `VARS`
+→ argv `-var` — spec item 4, DECISIONS Phase 10.)*
+
+**Delivered** (`phase-10-spanner-writeback`, spec
+`specs/phase-10-spanner-writeback.md`): as planned, plus ten amendments.
+`serving/spanner.py` — `TARGET=spanner` reads BigQuery `ontime` through the
+one `candidates_sql` relation seam and writes the Spanner `send_schedule`
+inside ONE read-write transaction (Amendment A; the DuckDB stand-in is one
+transaction too, H); `version_key` orders `model_version` numerically and
+parses BEFORE the insert shortcut (B); `COLUMNS`/`row_of`/`candidate_of` map
+by field name on both the write and the read (I). `loader/spanner.py` — the
+dims landing (contract types, refusing what the contract does not admit, J)
++ `make spanner-load`. The spanner Terraform module — instance (100 PU),
+database DDL pinned to the contract renders, the `EXTERNAL_QUERY` connection
++ `raw.dim_user_spanner` view (each column cast to the landing schema's
+type), the custom data-plane role `ontimeSpannerDataUser` (no DDL — E) and
+two grants both to the SA (the federated read runs as the querying
+principal — D); `region` validated wherever declared; the gated modules'
+own exact allowlists. `dbt_build`'s one validated var seam
+(`dim_user_identifier`) + the manifest-proven swap (C). Every cloud command
+refuses a credential in the environment (G); `tf-apply` plans first and
+refuses a destroying plan without `ALLOW_DESTROY=yes` (F). Live
+2026-08-30 on `ontime-rate-recovery`: toggled apply, `spanner-load OK: tiny
+— 22 dim rows`, `make test-int-spanner` `4 passed` (view ≡ seed, manifest
+resolved the source to the view, three goldens byte-identical, write-back
+idempotent with the DuckDB hash), `writeback OK: ontime-rate-recovery.ontime
+→ spanner, 20 users, 0 written`, then the same-day toggle-flip teardown
+(`8 destroyed`, `Listed 0 items.`, default plan `No changes`); no trial
+clock — the instance is `PROVISIONED` and bills from creation, so it is
+never left up (DEPLOYMENT, Amendment M). Amendments E and F verified live
+2026-08-31: an apply omitting an applied toggle refused with the address
+printed (F); the re-apply created the custom role with the module's exact
+permission set and `test-int-spanner` passed `4 passed` under it (E); the
+`ALLOW_DESTROY=yes` toggle-flip destroyed exactly the module's 9. Round 4
+(the cap: Amendments N1–N3, denylist → allowlist / the library's call)
+re-proven live 2026-08-31 06:07–06:42 UTC: `9 added`, `4 passed in
+248.70s`, `0 written`, `9 destroyed`, `Listed 0 items.`.
 
 ---
 

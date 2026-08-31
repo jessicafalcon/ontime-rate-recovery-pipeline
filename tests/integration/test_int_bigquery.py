@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from eval import golden, score
-from infra.cli import PROJECT_RE
+from infra.cli import PROJECT_RE, confirmed
 from loader import cli as loader_cli
 from tests import pins
 
@@ -47,7 +47,9 @@ def carried_gate() -> tuple[str, str]:
     test_parity_fixture_refuses_without_the_carried_gate."""
     confirm = os.environ.get("OTR_CONFIRM", "")
     origin = os.environ.get("OTR_CONFIRM_ORIGIN", "")
-    if not (confirm and origin):
+    # The pair is CARRIED, and re-checked with the make target's own predicate
+    # (round 2 #7) — never a literal forged here.
+    if not confirmed(confirm, origin):
         raise RuntimeError("refused: run via `make test-int-bigquery … CONFIRM=yes`")
     return confirm, origin
 

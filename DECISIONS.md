@@ -119,8 +119,430 @@ annotated **Superseded by …** in place and never deleted.
   (round 6's re-implementation of the round-4/5 key scan) pins that nothing
   under `.claude/` but agent/command prose and hook scripts is tracked, and no
   `.mcp.json`.
+- **Boundary guards are allowlists; a fix replaces the mechanism's kind, not
+  its list; one correctness fix per commit (2026-08-31, Phase 10 round 4).**
+  Rounds 2→3→4 each reported correctness findings inside the previous
+  round's fixes, and every one of those fixes had been a longer denylist at
+  an input the repo does not own (F→K: one more plan-JSON shape; G→L: one
+  more credential spelling; I→#3: one more by-name mapping of ours). A
+  denylist at an open-world boundary has no last fix — the reviewer who
+  reads it can always name the next case — so the round-4 cap re-implemented
+  the three boundaries once against a closed set or the real type
+  (Amendments N1–N3) and the rule is now a contract: CLAUDE.md Engineering
+  contracts "Boundary contract", "Credential standard" (a vendor-namespace
+  variable that is not a listed setting IS a credential, whenever
+  introduced), "Adapter contract" (fakes under the adapter; adapters tested
+  on the real type built offline); Workflow rules "Fix the class, not the
+  case" and "Fix commits"; DONE checklist item 8; the code-reviewer,
+  security-reviewer and functionality-tester checklists carry the check.
+  The bulk fix commits (24/21/15 findings each) were the process half of the
+  cause: with twenty patches in one commit nobody re-derives the invariant,
+  so a correctness fix is now one commit with its invariant in the message.
+  Rejected: a lint that rejects regexes/denylists (cannot tell a boundary
+  guard from a validator of our own shapes — the judgment belongs in review,
+  where the checklist now asks the question); a generic secret-shape
+  denylist over the whole environment (`*_TOKEN`, `*_KEY` — false refusals
+  on unrelated tools' variables, and still a denylist).
 
 ## Appendix — by phase
+
+### Phase 10 — Spanner: dims and write-back (2026-08-30)
+
+- **One `TARGET` knob, two named configurations — no read×write matrix.**
+  `writeback TARGET=duckdb` (default) reads and writes the local DuckDB;
+  `TARGET=spanner` reads BigQuery `ontime` and writes Spanner. The read seam
+  is `serving/writeback.py::candidates_sql(scores, dims)` — the Golden-style
+  relation override; `Candidate`/`should_replace`/`winners_of` are shared
+  verbatim. Rejected: independent read and write flags — no configuration in
+  that matrix serves anything (a Spanner write off a DuckDB read crosses a
+  laptop and a cloud stack for no consumer).
+- **`version_key` parses `v<int>`; any other shape refuses loudly.** Phase
+  10's Done-when ("an older `model_version` never overwrites a newer one") is
+  a for-all claim lexical tuple order falsifies at `v10` vs `v2`, so the
+  comparator was fixed before a Spanner table could hold a mis-ordered
+  version — closing the Phase 8a BACKLOG row with no contract change.
+  Rejected: a lexical fallback for unparseable versions (silently
+  re-introduces the bug the clause kills).
+- **The Spanner write is Python-computed winners + batch `insert_or_update`
+  through injectable clients.** Same guard, one dialect; the fake models the
+  store as a dict and the offline suite proves idempotence and
+  strictly-greater without a service. Rejected: server-side conditional DML —
+  it forks the guard's logic into a second dialect `make test` cannot run.
+- **All Spanner resources live in the count-gated module; the DDL is inlined
+  in its `main.tf` (heredoc), pinned two ways.** `tf-freeze`'s manifest pins
+  `*.tf` only, so a side `.sql` file could drift under the frozen tree; and
+  `tests/test_dbt_sources.py` renders the `dim_user` DDL + federation view
+  from `generator/models.py` and fails when the `.tf` drifts (the
+  `send_schedule` DDL is pinned against `serving/spanner.py::COLUMNS` — a
+  serving contract, like `serving/ddl.sql`, not the generator's).
+  `deletion_protection = false` on the database: the toggle-flip re-apply IS
+  the sanctioned, `$(origin CONFIRM)`-gated destroy path; provider-side
+  protection would turn it into a two-apply dance.
+- **The federation swap is a generated source-identifier var
+  (`dim_user_identifier`, default `dim_user`).** §3.3's "source-config swap,
+  no model changes", made real: the integration run builds with
+  `dim_user_identifier: dim_user_spanner` and must reproduce the three
+  goldens. Rejected: making the `EXTERNAL_QUERY` view the default `bigquery`
+  source — it would chain every free-tier parity run to a billing
+  Spanner stack.
+- **Scoped Spanner teardown = the toggle flipped back; no `MODULE`, no
+  `-target`.** `make tf-apply … CONFIRM=yes VARS='enable_spanner=false'`
+  destroys exactly the module's resources through the count gate, with zero
+  new argv surface through `fix/tf-vars-argv`'s allowlisted runner.
+  `docs/PHASES.md`'s `make tf-destroy MODULE=spanner` wording was corrected
+  (spec reconciliation item 4). Rejected: `-target` (Terraform flags it as
+  exceptional — it bypasses the dependency graph) and a `MODULE` variable
+  (new input surface duplicating what the toggle already does).
+- **`loader/` gained the third landing engine rather than being renamed
+  first.** The `landing/`/`pipeline/` split (BACKLOG) is a separate
+  `fix/landing-package` branch after this phase merges — mechanical churn
+  does not belong in a Spanner diff (reconciliation item 3).
+- **The Spanner guard and upsert run in ONE read-write transaction
+  (review round 1, Amendment A).** `run_in_transaction(fn)`: the stored
+  pairs are read on the transaction, the winners computed by the shared
+  guard, and upserted in the same commit; Spanner aborts and re-runs `fn`
+  when a pair it read has moved, so replace-iff-greater holds across
+  concurrent write-backs. A snapshot read + a separate batch commit (the
+  first cut) held only within one run — two overlapping runs could lose an
+  update. Rejected: server-side conditional DML (still a second dialect the
+  offline suite can't run); relying on the DAG's `max_active_runs=1` (the
+  guard's contract must not depend on its caller). Scaling note, not code:
+  one commit carries every winner (tiny: 20; Spanner's per-commit mutation
+  cap is 80,000 cells) — a profile past that chunks the winners by
+  `user_id` range, each chunk its own transaction, the guard unchanged.
+- **`disable_builtin_metrics=True` on every Spanner client (round 1 #8).**
+  google-cloud-spanner ≥ 3.50 exports client metrics to Cloud Monitoring by
+  default (an exporter thread, `google-cloud-monitoring` in the lock). The
+  pipeline never asked for that egress and the SA has no monitoring grant
+  (the exports would only fail, loudly), so it is off — the same reason
+  dbt's telemetry is off. Pinned by
+  `tests/test_spanner_landing.py::test_spanner_clients_disable_the_builtin_metrics_exporter`.
+- **google-cloud-spanner's transitive set, recorded like 9b's (round 1
+  #17).** Beyond what dbt-bigquery already brought: `google-cloud-monitoring`
+  (the exporter above, disabled), `grpc-interceptor`, `mmh3`,
+  `opentelemetry-{api,sdk,semantic-conventions,resourcedetector-gcp}`,
+  `sqlparse`, `grpc-google-iam-v1`. All sit in the venv (CI's `uv sync
+  --locked`) on no pipeline path — the only Spanner imports are inside the
+  two `Google*Client` constructors the offline suite never calls.
+- **The Spanner DDL and the federation view are PINNED renders, not
+  generated files (round 1 #16).** `make gen-sources` writes `ddl.sql`,
+  `bq_schema.json` and `sources.yml`; it does NOT write into
+  `infra/modules/spanner/main.tf` (the `.tf` tree is the manifest's, and
+  `tf-freeze` is its only writer). `tests/test_dbt_sources.py` renders both
+  from the contract and fails on drift; the repair is a paste + `tf-freeze`.
+  The comments in the `.tf` and the script say "PINNED" — "GENERATED"
+  overclaimed a writer that does not exist. The view casts every column to
+  the generated BigQuery landing schema's type, so the swapped source has
+  `raw.dim_user`'s shape by construction (spec item 6's sentence, now true
+  in the render).
+- **No service-agent grant on the Spanner federation path (first live
+  apply, Amendment D).** The first `enable_spanner=true` apply created 26 of
+  27 resources and failed on the `databaseReader` grant to
+  `service-<number>@gcp-sa-bigqueryconnection` — the agent does not exist
+  and nothing provisions it. The docs say the federated read runs as the
+  QUERYING principal (`spanner.databaseReader` + `bigquery.connectionUser`
+  on the connection); the delegated-agent model is Cloud SQL's. So the grant
+  set is two, both to the pipeline SA (`databaseUser` ⊇ `databaseReader`;
+  `connectionUser`), and the module's `project_number` input is gone.
+  Rejected: provisioning the agent so the grant applies — read on the
+  database for an identity that never queries it.
+- **The SA's Spanner grant is a custom data-plane role, in the module
+  (round 2 #1, Amendment E).** `roles/spanner.databaseUser` — the only
+  predefined role that writes — carries `spanner.databases.updateDdl`;
+  `ontimeSpannerDataUser` holds exactly read/select/write/the two
+  transaction kinds/sessions/two metadata reads, pinned as an exact set with
+  a control-plane denylist. In the module (its API must be enabled for the
+  permissions to be valid — docs), so it shares the toggle's lifecycle and a
+  7-day id reservation on delete (runbook detour: `gcloud iam roles
+  undelete` + `terraform import`). Rejected: FGAC database roles (a second
+  access model named on every client call); recording the residual.
+- **`tf-apply` plans first and refuses a destroying plan without
+  `ALLOW_DESTROY=yes` from the command line (round 2 #3, Amendment F).**
+  The saved plan is what gets applied (`plan -out` → `show -json` → apply
+  the file; `-auto-approve` gone from apply). An apply that omits a
+  currently-applied toggle used to be a silent teardown; now it prints the
+  addresses it would destroy and stops. `ALLOW_DESTROY` is the one new make
+  variable (`$(origin)`-gated, unexported, literal `yes`). Rejected:
+  `prevent_destroy` (blocks the toggle-flip too); guessing intent from the
+  VARS text. Scaling note: `show -json` of a large plan is a few MB of
+  stdout, parsed once — fine at any size this stack reaches.
+- **A credential in the environment refuses every cloud command, loudly
+  (round 2 #2, Amendment G). Mechanism superseded by Amendment N2 (round 4,
+  below) — the rule stands, the name-shape match does not.** One policy (`infra.cli.KEYFILE_ENV_RE`, <!-- historical -->
+  name-shape matched), one gate (`loader.cli.require_confirm`, which the
+  cloud `dbt-build` now uses too) plus `tf()`. The env allowlist alone
+  dropped the key SILENTLY from terraform — an operator who set it believed
+  it was in use. `tests/conftest.py` scrubs the names so the suite never
+  reddens on a developer's export. Rejected: honouring the key when set (the
+  repo's rule is ADC/WIF, never a key at rest).
+- **The DuckDB write-back is one transaction; the file is single-writer
+  (round 2 #8, Amendment H).** `begin`/`commit` around read → guard →
+  delete+insert, rollback on exception; a subprocess probe pins that a
+  second process cannot open the file while one holds it — the stand-in's
+  cross-process serialization is DuckDB's lock, stated and tested rather
+  than assumed.
+- **The read maps by column name (round 2 #9, Amendment I).** The select
+  list is generated from `Candidate`'s fields and rows are built by name
+  from BigQuery's `Row.items()` / DuckDB's cursor description; a swapped
+  pair of same-typed columns can no longer land in the wrong field on the
+  read side either. Rejected: keeping the golden hash as the only guard
+  (it catches tiny's data, not the mechanism).
+- **The dims landing refuses instead of coercing (round 2 #10/#11,
+  Amendment J).** Empty REQUIRED cell, offset-bearing timestamp, wrong cell
+  count: `ValueError` with the line. The contract is naive UTC wall times
+  (generator/writer.py) and REQUIRED means present; `replace(tzinfo=UTC)`
+  on an offset value discarded the offset silently.
+- **`planned_deletes` fails CLOSED (round 3 #1, Amendment K). Superseded by <!-- historical -->
+  Amendment N1 (round 4, below): the gate is an action allowlist —
+  `planned_changes` / `unsafe_changes` / `require_safe_plan`.** Amendment F
+  parsed `show -json` with `json.loads(show_json or "{}")` and
+  `.get("resource_changes", [])`, so an empty or shape-changed body counted
+  as "no deletes" and the gate was skipped. Now an empty, non-JSON,
+  non-object or `resource_changes`-less body is a refusal (exit 2, the
+  reason named, the plan file removed); only a parsed list yields `[]`.
+  Rejected: falling back to requiring `ALLOW_DESTROY` on an unreadable plan
+  (a gate firing for the wrong reason teaches the operator to pass the flag).
+- **The keyfile-env policy is matched by FAMILY (round 3 #2, Amendment L).
+  Superseded by Amendment N2 (round 4, below): the Google namespace is
+  allowlisted; `KEYFILE_ENV_RE` is deleted.** <!-- historical -->
+  `KEYFILE_ENV_RE` now also matches `(GOOGLE|GCLOUD)_*KEYFILE*` (the <!-- historical -->
+  provider's `GOOGLE_CLOUD_KEYFILE_JSON` / `GCLOUD_KEYFILE_JSON`) and
+  `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`; still one pattern, read by the
+  gate and by `tests/conftest.py`'s scrub. Rejected: `CLOUDSDK_AUTH_*`
+  wholesale (`…_IMPERSONATE_SERVICE_ACCOUNT` is a setting on the runbook's
+  own path, not a credential).
+- **The Spanner instance is `PROVISIONED`; it bills from creation and there
+  is no trial clock (round 3, Amendment M — records).** The "90-day trial"
+  premise carried from the architecture review was wrong: a free-trial
+  instance is a separate, console/gcloud-created kind, never what the
+  module makes (live listing + official docs, 2026-08-31). Cost model:
+  ~$0.09/h while up; the operating rule is apply → prove → tear down in one
+  session. Rejected: switching the module to a free-trial instance (not a
+  provider-creatable shape, and a one-per-project resource the demo should
+  not consume for a test run).
+- **ONE `confirmed` predicate, in `infra.cli` (round 3 #4).** `drop_db`,
+  `infra.cli.require_confirm`, `loader.cli.require_confirm` and both
+  integration fixtures call it; it lives beside the keyfile policy because
+  `loader.cli` already imports from `infra.cli` (the reverse would cycle).
+  The Spanner stored-pair read maps by column name like the candidate read
+  (#3, `EXISTING_COLUMNS` → `existing_sql` / `existing_of`), and the explicit
+  rollback is pinned through a still-open injected connection (#5).
+- **The plan-first apply gate is an ACTION ALLOWLIST (round 4 #3–#5,
+  Amendment N1).** K validated the envelope of `show -json`; round 4 found
+  an entry without `actions` read as "no delete" (fail-open), a malformed
+  entry tracebacked, and `forget` (a state drop — the instance keeps
+  billing with no teardown path) passed. The fix is not a fourth branch:
+  `planned_changes` parses strictly (any unreadable envelope or entry
+  refuses), and a plan applies only if every action is in `SAFE_ACTIONS =
+  {no-op, read, create, update}`; `delete` needs `ALLOW_DESTROY=yes` through
+  the one `confirmed` predicate; anything else refuses always. A verb we do
+  not know is not safe by definition, so the next Terraform verb is a
+  refusal, not a finding. Rejected: enumerating the unsafe verbs (the
+  denylist that produced F → K → N1); `prevent_destroy` (blocks the
+  sanctioned toggle-flip).
+- **The Google environment namespace is an ALLOWLIST (round 4 #7/#8,
+  Amendment N2; its DOMAIN closed by O1 and its SET trimmed to three by O3
+  (round 5), widened over literal reads by P1 and narrowed — the redirection
+  class added, the scan demoted — by Q (round 6), all below; the five settings
+  named here are O3's three today).** G refused two names, L a family regex; round 4 found
+  `CLOUDSDK_AUTH_ACCESS_TOKEN_FILE` outside the family and nothing pinning
+  that conftest's scrub read the same pattern. Now every `GOOGLE_*`,
+  `GCLOUD_*`, `CLOUDSDK_*` name not in `CLOUD_ENV_ALLOW` (five settings the
+  runbook uses: `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT`,
+  `CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT`, `CLOUDSDK_PYTHON`,
+  `GOOGLE_CLOUD_PROJECT`) refuses every cloud command, names only; the
+  terraform child's `ENV_ALLOW` may carry a vendor name only if that set
+  admits it (pinned); conftest scrubs with the gate's own
+  `unlisted_cloud_env` (pinned). The standard from here: a credential is
+  whatever is NOT a listed setting — no spelling, present or future, has to
+  be anticipated; a new vendor is its prefix plus its settings. A false
+  refusal on a benign new variable is loud and one line to fix — the
+  intended direction. Rejected: a generic secret-shape denylist over the
+  whole environment (`*_TOKEN`, `*_KEY`, `*SECRET*` — false refusals on
+  unrelated tools' variables no google client reads, and still a denylist);
+  scrubbing instead of refusing (an operator who set a key believed it was
+  in use — G's own argument).
+- **The Spanner adapter is the library's own by-name call, tested on the
+  real type (round 4 #1/#2/#6/#27, Amendment N3).** `_rows_by_name` <!-- historical -->
+  re-implemented `StreamedResultSet.to_dict_list()` and ran nowhere: the
+  DuckDB-backed fakes mapped rows themselves and the last live run predated
+  it — reversing its zip survived 540 tests. Now `_GoogleTxn.read` and
+  `GoogleSpannerClient.read` return `execute_sql(sql).to_dict_list()`, and
+  the test builds real `StreamedResultSet`s offline from `PartialResultSet`
+  protos (empty table, shuffled columns, zero-response stream) through the
+  real adapter classes into `existing_of` — which now refuses a non-`str`
+  cell instead of `str()`-coercing it. The DuckDB-side mapping is one
+  `rows_by_name` the readers and both fakes share. The lesson, recorded as a
+  rule: a fake belongs UNDER the thinnest adapter over a vendor type, never
+  in its place; an adapter that is more than one library call is tested on
+  the real type, built offline. Rejected: a hand-written fake
+  `StreamedResultSet` (the seam under test would again be ours).
+- **The tfstate row re-deferred at round 4's live re-proof (2026-08-31,
+  developer's call).** Its trigger read "before the next
+  `enable_spanner=true` apply" and was written expecting that apply to be
+  Phase 12's; N3's re-proof was a 35-minute apply → prove → teardown session
+  — exactly what the row's acceptance rationale covers — so the trigger now
+  reads "the first apply NOT torn down in the same session (the Phase 12
+  demo)". Rejected: bootstrapping the GCS backend mid-phase (a design change
+  to `infra/` and a new round-5 surface, for a session the risk statement
+  already covers).
+- **Round 5 — the cap's scoped re-review: the sets were not yet closed;
+  Amendment O closes each by construction (2026-08-31; O1's closure widened
+  over literal env reads in round 6, Amendment P1 — the round-6 entry
+  below).** O1: N2's three
+  prefixes were still a hand-picked domain — `SPANNER_EMULATOR_HOST` (the
+  client then uses anonymous credentials against a named host),
+  `BIGQUERY_`/`STORAGE_EMULATOR_HOST`, `GCE_METADATA_HOST`/`_ROOT`/`_IP`
+  and `NO_GCE_CHECK` passed. Now the domain is `in_cloud_namespace` —
+  prefixes (+ `GCE_METADATA_`), the `_EMULATOR_HOST` suffix, the prefix-less
+  names the libraries read — and its CLOSURE is a test that imports
+  `google.auth.environment_vars`, `google.cloud.environment_vars` and the
+  spanner / bigquery / storage client constants and demands every declared
+  name is classified exactly once (refused / admitted / `CLOUD_ENV_IGNORED`
+  = the five `AWS_*` inputs read only for an AWS external-account ADC this
+  project has no path to); a library upgrade that adds an input reddens
+  the suite. Rejected: adding `GCE_` and the emulator names by hand (the
+  fourth list at this boundary). O2: an empty action set is not evidence —
+  `planned_changes` refuses it (`frozenset() <= allowed` was vacuously
+  true). O3: `CLOUD_ENV_ALLOW` is the three runbook settings — the
+  impersonation SETTING (an identity selector; the runbook uses the login
+  flag) and `CLOUDSDK_PYTHON` (nothing spawns gcloud) dropped. O4: the
+  Adapter contract applied to the second client and the second read —
+  `candidate_of` checks each cell against `Candidate`'s declared type;
+  `GoogleQueryClient.query` runs in a test over real
+  `google.cloud.bigquery.table.Row`s built offline. O5: `full_refresh_args`
+  through `confirmed` (the last inlined copy of the origin rule). O6: the
+  conftest scrub pinned by a child pytest (the source-grep pin was
+  satisfiable by a dead call) and reading `ENV_REFUSE_PREFIXES`. Process:
+  one correctness finding per commit, as the round-4 rule says — eight
+  commits, each with its pin; the amendment first, alone.
+- **Round 6 — security findings fixed on the architect's "only fix security
+  related issues"; Amendment P (2026-08-31).** P1: O1's closure harvested
+  five hand-picked declaration modules, so vendor inputs read as string
+  literals escaped the gate — `SPANNER_ENABLE_EXTENDED_TRACING` /
+  `SPANNER_ENABLE_END_TO_END_TRACING` (literal `os.getenv` in the installed
+  `spanner_v1`) and `GEMINI_API_KEY` (an API key `google-genai` reads — a
+  LOCKED dbt-bigquery transitive via `google-cloud-aiplatform`) — while one
+  member of the same class had been hand-appended to the test. The closure
+  test now also SCANS the installed `google/` tree for literal
+  `os.environ`/`os.getenv` reads (97 names today, floors pinned) and every
+  name classifies exactly once; `SPANNER_` is a refused prefix (its four
+  hand-listed names retired into it), the API key and the `SSL_CERT_FILE`/
+  `SSL_CERT_DIR` trust-anchor overrides are refused names, and the ignored
+  set is recorded classes with reasons (`AWS_`/`AIP_`/`CLOUD_ML_`/`VERTEX_`
+  — external-account ADC and Vertex managed-container inputs with no path
+  here — plus eleven names read by vendored test helpers, the aiplatform
+  prediction server and protobuf's runtime switches). Rejected: narrowing
+  the claim to "declarations" (leaves the gate open to the very names the
+  round found); appending the two spanner names (the cap's forbidden
+  shape). P2: `ENV_ALLOW` drops `SSL_CERT_FILE`/`NO_PROXY`/`HTTPS_PROXY` —
+  an operator-suppliable proxy endpoint plus trust-anchor override on the
+  provider's API calls is the endpoint-redirection class the Credential
+  standard names a secret; seven names remain, and the child test exports
+  the trio and sees none reach the child. Rejected: keeping them for a
+  proxied network nobody here runs (a deliberate one-line widening later
+  beats a standing hole). P3: the child-env vendor pin applies
+  `in_cloud_namespace` and runs every `ENV_ALLOW` name through
+  `unlisted_cloud_env` — the old `startswith(CLOUD_ENV_PREFIXES)` was a
+  hand-picked subset of the domain. P4: `CLOUDSDK_CONFIG` IS
+  identity-bearing (it selects which ADC file acts — a stronger selector
+  than the impersonation setting O3 dropped); accepted, with the reason,
+  because ADC must live somewhere and `HOME` (outside the domain, in
+  `ENV_ALLOW`) redirects it identically — the "none an identity" comment
+  corrected in place. The round's OTHER findings — the vacuous
+  `unlisted_cloud_env({})` pin (a SURVIVED hand-mutation, #2), the cell-type
+  rule implemented twice (#10), the origin defaults (#4), the conftest and
+  control-arm test seams (#12/#13) and the record/wording rows — were fixed
+  in the security re-review batch alongside Amendment Q (B2, B4, B10, B12,
+  B13 + records).
+- **Round 6's security re-review — the cloud-env closure narrowed to a
+  DECLARED CLOSED SET; the redirection class refused on every path; Amendment
+  Q (2026-08-31).** The cap fired a THIRD time on the cloud-env domain: P1's
+  scan-proves-closure is itself open-world — it left the transport-redirection
+  class open on the IN-PROCESS cloud paths (A1) and missed constant-keyed
+  reads (A3). Q makes the refuse domain an enumerated, pinned closed set and
+  adds `REDIRECTION_NAMES` — `HTTP(S)_PROXY` / `ALL_PROXY` (upper- and
+  lower-case), `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`,
+  `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH`, `SSLKEYLOGFILE`,
+  `OAUTHLIB_INSECURE_TRANSPORT`, `SSL_CERT_FILE` / `_DIR` — so the
+  endpoint / trust-anchor / key-logging class refuses on `bq-load`,
+  `test-int-bigquery` and `writeback TARGET=spanner`, not only the terraform
+  child. `APPDATA` (the Windows ADC config root) joins the identity names.
+  The scan is demoted from a closure PROOF to a coverage aid; the residual it
+  cannot see (constant-keyed reads) is recorded here: `APPDATA` (refused) and
+  `ENABLE_GCS_PYTHON_CLIENT_OTEL_TRACES` (a benign storage tracing switch —
+  accepted if present, not a credential). Rejected: broadening the scan's ROOT
+  to the transports (`requests` / `urllib3` / `grpc`) — the same open-world
+  mechanism one package deeper, the next transitive the next finding.
+  Operational note: a machine with a proxy variable exported now has its cloud
+  commands refuse until it is unset; a proxied path to GCP is a deliberate
+  one-line widening (drop the name from `REDIRECTION_NAMES` + a DECISIONS
+  entry), not a default — P2's stance for the terraform child, now on every
+  path. **Scoped re-review residual (accepted, BACKLOG):** the proxy sub-class
+  is enumerated by spelling, which is open-world — `grpc_proxy` (grpc's own, on
+  the Spanner path) is added so that concrete redirect is closed now, but
+  mixed-case `<scheme>_proxy` variants `requests` honors still pass, and
+  `REDIRECTION_NAMES`/`CLOUD_ENV_NAMES` carry no exact `==` membership pin.
+  Deferred (one BACKLOG row): upgrade the proxy half to the
+  casefold-`_proxy` predicate the libraries themselves use, add the membership
+  pins, and add an in-process-entry-point refusal test. Accepted because the
+  gate REFUSES (does not scrub — the standard's stance) and the residual is
+  exotic proxy spellings on a local operator env, not a remote path. Also
+  recorded: `APPDATA` is refused as an identity name though P4 accepts its
+  siblings `CLOUDSDK_CONFIG`/`HOME` — inert on the macOS-only runbook, a
+  BACKLOG row if a Windows runbook is ever supported.
+- **Scaling bounds the Spanner paths carry (round 2 #20).** (1) The dims
+  landing is one `insert_or_update` batch of the whole seed (tiny: 22 rows;
+  Spanner's per-commit cap is 80,000 mutation cells — a profile past it
+  chunks by `(user_id, valid_from)` ranges, each chunk its own batch, the
+  landing unchanged otherwise). (2) Amendment A's transaction reads ALL of
+  `send_schedule` (`EXISTING_SQL` has no predicate), which takes shared
+  locks on the whole table and so serializes concurrent write-backs
+  entirely — correct by construction, and the intended behaviour for one
+  scheduler; a sharded write-back would read only its candidates'
+  `user_id`s (`where user_id in unnest(@ids)`), the guard unchanged. Neither
+  is code today; both are the DECISIONS note the scaling rule asks for.
+- **Records name the project id, the SA email, the project number and the
+  SA's numeric unique id shape — never the id itself (round 2 #4).** The
+  unique id is an account identifier, not a credential, but it is read from
+  the local gitignored state backup at detour time and is redacted to
+  `<sa-unique-id>` in the spec; the BACKLOG note's wording now lists what
+  records may carry.
+- **The count-gated modules carry their own exact resource allowlists and
+  may read no data source (round 1 #11).** The root allowlist exempted
+  `modules/{composer,spanner}` entirely, so a `null_resource` + `local-exec`
+  (runs on the operator's machine during the ask-first apply) or a second
+  billable type could land there unseen. `tests/test_infra.py::
+  GATED_ALLOWED_RESOURCE_TYPES` is exact per module (composer: none yet).
+  With it: every grant's TYPE and scoping argument pinned (an instance-wide
+  `google_spanner_instance_iam_member` reddens), the `.tf` names pinned to
+  `loader/spanner.py::INSTANCE/DATABASE` and `serving/spanner.py::
+  MODELS_DATASET`, and `region` gains the same `validation {}` the other
+  interpolated variables carry (it lands inside the view's SQL literal).
+- **`dbt_build` admits exactly one var override, by name (round 1 #5,
+  Amendment C).** The Spanner run needs `dim_user_identifier:
+  dim_user_spanner`; a free-text `--vars` seam would have admitted any var
+  (`model_version: x1` included) from an internal caller. The seam is a
+  validated relation name rendered into the one var. Rejected: a make
+  variable for it (no user needs it; the integration launcher is its only
+  caller).
+- **On `TARGET=spanner`, PROFILE is optional and the OK line names the
+  warehouse read (round 1 #20).** The Spanner write-back reads BigQuery
+  `ontime` — whatever build landed it — so `writeback OK: tiny, …` attributed
+  the write to a build it never read. It prints `writeback OK:
+  <project>.ontime → spanner, N users, M written`; a PROFILE given anyway is
+  still validated (never an unvalidated value on the command line).
+- **The omitted-`VARS` apply IS the Spanner teardown — a runbook rule, not a
+  guard (round 1 #12). Superseded by Amendment F (round 2 #3, above): `tf-apply`
+  plans first and refuses a destroying plan without `ALLOW_DESTROY=yes`.** While Spanner is up, any `make tf-apply …
+  CONFIRM=yes` without `VARS='enable_spanner=true'` plans the module for
+  destruction (toggle default false, `deletion_protection = false`,
+  `-auto-approve`). `docs/DEPLOYMENT.md`'s runbook now says: every apply in
+  the window carries the toggle, and `tf-plan` with the same `VARS` comes
+  first. Rejected: `prevent_destroy` (it blocks the sanctioned toggle-flip
+  teardown too — the two-apply dance the design avoided); a state-reading
+  guard in `infra/cli.py` (it would need a live plan parse before every
+  apply — the plan-first step is that, done by the operator who reads it).
 
 ### fix/tf-vars-argv (after Phase 9b, 2026-08-30)
 
@@ -139,8 +561,9 @@ annotated **Superseded by …** in place and never deleted.
   value, is the smuggling path — T's own argument).
 - **Review of the fix (code-reviewer, security-reviewer, functionality-tester;
   11 findings, applied 2026-08-30).** Design change: the terraform child gets
-  an **allowlisted environment** (`ENV_ALLOW`: `PATH`, `HOME`, `CLOUDSDK_*`,
-  locale/proxy) — `TF_CLI_ARGS*` (which Terraform splices into the argv,
+  an **allowlisted environment** (`ENV_ALLOW`: `PATH`, `HOME`, two `CLOUDSDK_*`
+  settings — `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT` — locale/proxy; the
+  proxy/trust-anchor trio dropped in Phase 10 round 6, Amendment P2) — `TF_CLI_ARGS*` (which Terraform splices into the argv,
   `-var-file` included — the same hole, worse), `GOOGLE_*CREDENTIALS*` (a
   keyfile despite "ADC only"), `TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*` cannot
   reach it; the loud refusal covers `TF_VAR_*`/`TF_CLI_ARGS*` on every
@@ -365,8 +788,8 @@ allowlist (M); the root `workload_identity_provider` output (J); two datasets,
   false.** `main.tf` wires `modules/{bigquery,gcs,iam,budget}` unconditionally
   (all free/near-free — ARCHITECTURE §6) and `modules/{composer,spanner}` behind
   `count = var.enable_* ? 1 : 0`, so a default plan creates zero of them
-  (Composer is Phase 11, Spanner Phase 10; the Spanner trial clock only starts on
-  an apply, so the BACKLOG row re-defers). Rejected: a flat `main.tf` (a concern
+  (Composer is Phase 11, Spanner Phase 10; Spanner bills only while applied, so
+  the BACKLOG row re-defers). Rejected: a flat `main.tf` (a concern
   can't be toggled or destroyed alone).
 - **`project_id` is the only required var; the budget's billing account is
   derived.** Every other input defaults (`region` `us-central1`, the toggles, the

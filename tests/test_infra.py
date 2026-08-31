@@ -180,6 +180,8 @@ def test_input_shape_validations_exist() -> None:
         "github_ref": 'regex("^refs/(heads|tags)/',
         "budget_alert_thresholds": "alltrue(",
         "operator_principal": 'regex("^(user|serviceAccount):',
+        # Phase 10 round 1 #9: interpolated into the spanner view's SQL literal
+        "region": 'regex("^[a-z]+-[a-z]+[0-9]{1,2}$"',
     }
     for var, needle in expect.items():
         conds = _validation_conditions(_block(text, rf'variable "{var}"'))
@@ -208,21 +210,47 @@ ALLOWED_RESOURCE_TYPES = {
 }
 
 
+# The count-gated modules are NOT exempt (Phase 10 round 1 #11): each has its
+# own exact allowlist, so a `null_resource` + local-exec (runs on the
+# operator's machine during the ask-first apply) or a second billable type
+# dropped into a module is caught the same way. composer is still a stub.
+GATED_ALLOWED_RESOURCE_TYPES = {
+    INFRA / "modules" / "composer": set(),
+    INFRA / "modules" / "spanner": {
+        "google_project_service",
+        "google_project_iam_custom_role",
+        "google_spanner_instance",
+        "google_spanner_database",
+        "google_bigquery_connection",
+        "google_spanner_database_iam_member",
+        "google_bigquery_connection_iam_member",
+        "google_bigquery_table",
+    },
+}
+assert set(GATED_ALLOWED_RESOURCE_TYPES) == GATED_MODULE_DIRS
+
+
 # Every `data` source type the tree may read (round 4 #7): a data source is a
-# live API call at plan/apply, so a new one is a conscious addition too.
+# live API call at plan/apply, so a new one is a conscious addition too. The
+# gated modules read none — the root passes them what they need (#11).
 ALLOWED_DATA_SOURCE_TYPES = {"google_project", "google_billing_account"}
+
+
+def _declared_types(f: Path, kind: str) -> set[str]:
+    return set(
+        re.findall(
+            rf'\b{kind}\s+"([a-z0-9_]+)"\s+"', _strip_hcl_comments(f.read_text())
+        )
+    )
 
 
 def test_every_data_source_type_is_on_the_allowlist() -> None:
     declared: set[str] = set()
     for f in _tf_files():
         if f.parent in GATED_MODULE_DIRS:
+            assert _declared_types(f, "data") == set(), f
             continue
-        declared |= set(
-            re.findall(
-                r'\bdata\s+"([a-z0-9_]+)"\s+"', _strip_hcl_comments(f.read_text())
-            )
-        )
+        declared |= _declared_types(f, "data")
     assert declared == ALLOWED_DATA_SOURCE_TYPES, declared ^ ALLOWED_DATA_SOURCE_TYPES
 
 
@@ -246,21 +274,201 @@ def test_optional_modules_are_count_gated() -> None:
         ), mod
 
 
+def test_spanner_module_is_count_gated_and_default_off() -> None:
+    """Phase 10 (spec invariant 5): every Spanner-family resource sits inside
+    the count-gated module (test_optional_modules_are_count_gated pins the gate,
+    test_enable_toggles_default_false the default), the database carries
+    deletion_protection = false (the toggle-flip re-apply is the sanctioned,
+    CONFIRM-gated destroy path), the instance is the smallest size, and the two
+    APIs are kept on at destroy like the root set."""
+    module_dir = INFRA / "modules" / "spanner"
+    for f in _tf_files():
+        if f.parent == module_dir:
+            continue
+        text = _strip_hcl_comments(f.read_text())
+        assert not re.search(r'resource\s+"google_spanner_', text), f
+        assert not re.search(r'resource\s+"google_bigquery_connection', text), f
+    text = _stripped("modules", "spanner", "main.tf")
+    db = _block(text, r'resource "google_spanner_database" "this"')
+    assert re.search(r"^\s*deletion_protection\s*=\s*false", db, re.M)
+    inst = _block(text, r'resource "google_spanner_instance" "this"')
+    assert re.search(r"^\s*processing_units\s*=\s*100", inst, re.M)
+    api = _block(text, r'resource "google_project_service" "spanner"')
+    assert re.search(r"^\s*disable_on_destroy\s*=\s*false", api, re.M)
+
+
+SPANNER_INSTANCE_NAME_RE = r'^\s*name\s*=\s*"([a-z0-9-]+)"'
+
+
+def test_spanner_names_pin_the_python_constants() -> None:
+    """Round 1 #14: the instance/database names and the models dataset the
+    Python clients open are literals in loader/spanner.py + serving/spanner.py;
+    they are pinned to the `.tf` here so an infra rename reddens offline."""
+    from loader import spanner as dims
+    from serving import spanner as wb_sp
+
+    text = _stripped("modules", "spanner", "main.tf")
+    inst = _block(text, r'resource "google_spanner_instance" "this"')
+    db = _block(text, r'resource "google_spanner_database" "this"')
+    assert re.search(SPANNER_INSTANCE_NAME_RE, inst, re.M).group(1) == dims.INSTANCE
+    assert re.search(SPANNER_INSTANCE_NAME_RE, db, re.M).group(1) == dims.DATABASE
+    assert (wb_sp.INSTANCE, wb_sp.DATABASE) == (dims.INSTANCE, dims.DATABASE)
+    models = _block(_read("variables.tf"), r'variable "models_dataset"')
+    assert (
+        re.search(r'default\s*=\s*"([a-z_]+)"', models).group(1) == wb_sp.MODELS_DATASET
+    )
+    assert (
+        re.search(r'connection_id\s*=\s*"([a-z_]+)"', text).group(1) == "spanner_dims"
+    )
+    view = _block(text, r'resource "google_bigquery_table" "dim_user_spanner"')
+    assert re.search(r'table_id\s*=\s*"dim_user_spanner"', view)
+
+
+# Phase 10 round 1 #10: the member AND the scope of each grant — the resource
+# type (database- / connection-level, never instance or project) and the
+# argument that names the ONE database / connection.
+SPANNER_GRANT_SCOPES = {
+    '"pipeline_user"': (
+        "google_spanner_database_iam_member",
+        r"^\s*database\s*=\s*google_spanner_database\.this\.name",
+    ),
+    '"pipeline_connection_user"': (
+        "google_bigquery_connection_iam_member",
+        r"^\s*connection_id\s*=\s*google_bigquery_connection\.spanner_dims\.connection_id",
+    ),
+}
+
+
+# The custom role's permission set — exact (round 2 #1, Amendment E): the
+# data plane the write-back and the landing use, nothing that changes schema,
+# IAM, instances or operations. A new permission is a conscious edit here.
+SPANNER_DATA_PERMISSIONS = {
+    "spanner.databases.beginOrRollbackReadWriteTransaction",
+    "spanner.databases.beginReadOnlyTransaction",
+    "spanner.databases.get",
+    "spanner.databases.read",
+    "spanner.databases.select",
+    "spanner.databases.write",
+    "spanner.instances.get",
+    "spanner.sessions.create",
+    "spanner.sessions.delete",
+    "spanner.sessions.get",
+    "spanner.sessions.list",
+}
+# Anything matching this is control-plane and must never appear in the role.
+CONTROL_PLANE_RE = re.compile(
+    r"(Ddl|updateDdl|\.create$|\.delete$|\.drop|IamPolicy|Operations|"
+    r"backups|instances\.(update|create|delete)|databases\.(create|drop|update))"
+)
+
+
+def test_spanner_custom_role_is_the_exact_data_plane_set() -> None:
+    """Amendment E: the pipeline SA's database grant is a custom role whose
+    permissions are EXACTLY the data-plane set — no `updateDdl` (every
+    predefined writing role carries it), no IAM, no operations. The role is
+    in the count-gated module (its API must be enabled for the permissions to
+    be valid), and no predefined Spanner role is granted anywhere."""
+    text = _stripped("modules", "spanner", "main.tf")
+    role = _block(text, r'resource "google_project_iam_custom_role" "data_user"')
+    assert re.search(r'^\s*role_id\s*=\s*"ontimeSpannerDataUser"', role, re.M)
+    assert re.search(r"^\s*project\s*=\s*var\.project_id", role, re.M)
+    listed = re.search(r"permissions\s*=\s*\[([^\]]*)\]", role).group(1)
+    perms = set(re.findall(r'"([a-zA-Z.]+)"', listed))
+    assert perms == SPANNER_DATA_PERMISSIONS, perms ^ SPANNER_DATA_PERMISSIONS
+    for perm in perms:
+        assert not CONTROL_PLANE_RE.search(perm) or perm.startswith(
+            "spanner.sessions."
+        ), perm
+    assert "google_project_service.spanner" in re.search(
+        r"depends_on\s*=\s*\[([^\]]*)\]", role
+    ).group(1)
+    for f, body in _stripped_files().items():
+        assert "roles/spanner." not in body, f  # no predefined Spanner role anywhere
+        if f.parent != INFRA / "modules" / "spanner":
+            assert 'resource "google_project_iam_custom_role"' not in body, f
+
+
+def test_region_is_validated_wherever_it_is_declared() -> None:
+    """Round 2 #6: every `variables.tf` that declares `region` carries the SAME
+    validation regex as the root — the check sits at each interpolation
+    site's own module, and a new module cannot declare `region` unvalidated."""
+    root = _validation_conditions(_block(_read("variables.tf"), r'variable "region"'))
+    assert len(root) == 1
+    regex = re.search(r'regex\("([^"]+)"', root[0]).group(1)
+    assert regex == "^[a-z]+-[a-z]+[0-9]{1,2}$"
+    declared = 0
+    for f in _tf_files():
+        body = _strip_hcl_comments(f.read_text())
+        if not re.search(r'variable "region"', body):
+            continue
+        declared += 1
+        conds = _validation_conditions(_block(body, r'variable "region"'))
+        assert conds and any(f'regex("{regex}"' in c for c in conds), f
+    assert declared == 5, declared  # root + bigquery, gcs, composer, spanner
+
+
+def test_spanner_grants_are_scoped_to_the_one_database_and_connection() -> None:
+    """Switching `pipeline_user` to an instance-wide
+    `google_spanner_instance_iam_member` (or any grant to a project-level one)
+    reddens: the type and the scoping argument are pinned per grant, and the
+    module declares no other grant type."""
+    text = _stripped("modules", "spanner", "main.tf")
+    grants = _blocks_with_headers(
+        text, r'resource "google_[a-z_]+_iam_member"\s+"[^"]+"'
+    )
+    # TWO grants, both to the pipeline SA — the federated read runs as the
+    # querying principal; there is no service-agent identity on the Spanner
+    # path (Amendment D, found live on the first apply)
+    assert len(grants) == 2, [g.splitlines()[0] for g in grants]
+    for g in grants:
+        header = g.splitlines()[0]
+        key = next(k for k in SPANNER_GRANT_SCOPES if k in header)
+        rtype, scope = SPANNER_GRANT_SCOPES[key]
+        assert header.startswith(f'resource "{rtype}"'), header
+        assert re.search(scope, g, re.M), header
+        assert re.search(
+            r"^\s*instance\s*=\s*google_spanner_instance\.this\.name", g, re.M
+        ) or (rtype == "google_bigquery_connection_iam_member"), header
+    assert not re.search(r'resource\s+"google_spanner_instance_iam', text)
+    assert not re.search(
+        r'resource\s+"google_project_iam_(member|binding|policy)', text
+    )
+    assert not re.search(
+        r'resource\s+"google_bigquery_connection_iam_(policy|binding)', text
+    )
+    assert not re.search(
+        r'resource\s+"google_spanner_database_iam_(policy|binding)', text
+    )
+
+    # #13: the connection is ordered after its API enablement; no grant names
+    # the connection service agent (Amendment D).
+    def depends_on(block: str) -> str:
+        return re.search(r"depends_on\s*=\s*\[([^\]]*)\]", block).group(1)
+
+    conn = _block(text, r'resource "google_bigquery_connection" "spanner_dims"')
+    assert "google_project_service.spanner" in depends_on(conn)
+    assert "gcp-sa-bigqueryconnection" not in text
+    assert "project_number" not in _stripped("modules", "spanner", "variables.tf")
+
+
 def test_every_declared_resource_type_is_on_the_allowlist() -> None:
     """Invariant 2's teeth as an allowlist: no resource type outside the
     count-gated modules but the expected set — a `google_spanner_instance` /
     `google_cloud_run_v2_service` / `google_dataflow_job` at root is caught."""
     declared: set[str] = set()
+    gated: dict[Path, set[str]] = {d: set() for d in GATED_MODULE_DIRS}
     for f in _tf_files():
-        if f.parent in GATED_MODULE_DIRS:
-            continue
         # ANY provider's resource type (round 3 #6): a `null_resource` running a
         # local-exec, or a `random_*`, is off-allowlist too.
-        declared |= set(
-            re.findall(r'resource\s+"([a-z0-9_]+)"', _strip_hcl_comments(f.read_text()))
-        )
+        types = _declared_types(f, "resource")
+        if f.parent in GATED_MODULE_DIRS:
+            gated[f.parent] |= types
+        else:
+            declared |= types
     assert declared, "no resources declared"
     assert declared <= ALLOWED_RESOURCE_TYPES, declared - ALLOWED_RESOURCE_TYPES
+    for d, types in gated.items():  # exact per module (#11): nothing extra
+        assert types == GATED_ALLOWED_RESOURCE_TYPES[d], (d.name, types)
 
 
 def test_module_sources_are_local_paths_only() -> None:
@@ -618,6 +826,11 @@ LEAST_PRIVILEGE_ROLES = {
     "roles/bigquery.jobUser",
     "roles/bigquery.dataEditor",
     "roles/storage.objectAdmin",
+    # Phase 10 (spanner module, count-gated): connectionUser on the ONE
+    # connection; the database grant is the custom data-plane role
+    # (SPANNER_DATA_PERMISSIONS below — round 2 #1, Amendment E), never a
+    # predefined Spanner role: every writing one carries updateDdl.
+    "roles/bigquery.connectionUser",
 }
 # … and ON the SA (who may act as it): CI's WIF binding, the operator's
 # impersonation (Amendment Q). Both are `google_service_account_iam_member`.
@@ -626,6 +839,13 @@ ON_SA_ROLES = {
     "roles/iam.serviceAccountTokenCreator",
 }
 SA_MEMBER = "serviceAccount:${google_service_account.pipeline.email}"
+# Phase 10: the spanner module's grants, pinned member-for-member — the
+# pipeline SA (a var from module.iam) reads/writes the one database and may
+# use the one connection; nothing else is granted anything (Amendment D).
+SPANNER_MEMBERS = {
+    '"pipeline_user"': "serviceAccount:${var.sa_email}",
+    '"pipeline_connection_user"': "serviceAccount:${var.sa_email}",
+}
 
 
 def _grant_blocks() -> list[str]:
@@ -652,7 +872,18 @@ def test_sa_roles_are_least_privilege() -> None:
     )
     assert "roles/owner" not in roles and "roles/editor" not in roles
     for b in _grant_blocks():
-        role = re.search(r'^\s*role\s*=\s*"(roles/[^"]+)"', b, re.M).group(1)
+        m = re.search(r'^\s*role\s*=\s*"(roles/[^"]+)"', b, re.M)
+        if m is None:  # the ONE custom-role grant (round 2 #1), by reference
+            assert b.startswith(
+                'resource "google_spanner_database_iam_member" "pipeline_user"'
+            ), b.splitlines()[0]
+            assert re.search(
+                r"^\s*role\s*=\s*google_project_iam_custom_role\.data_user\.name\s*$",
+                b,
+                re.M,
+            ), b
+            continue
+        role = m.group(1)
         on_sa = b.startswith('resource "google_service_account_iam_member"')
         assert (role in ON_SA_ROLES) == on_sa, b.splitlines()[0]
 
@@ -674,10 +905,14 @@ def test_every_grant_member_is_pinned() -> None:
             )
         elif b.startswith('resource "google_service_account_iam_member"'):
             assert member.startswith("principalSet://iam.googleapis.com/"), member
+        elif any(key in b.splitlines()[0] for key in SPANNER_MEMBERS):
+            key = next(k for k in SPANNER_MEMBERS if k in b.splitlines()[0])
+            assert member == SPANNER_MEMBERS[key], member
+            assert b.startswith(f'resource "{SPANNER_GRANT_SCOPES[key][0]}"'), key
         else:
             assert member == SA_MEMBER, member
         seen += 1
-    assert seen == 6, seen
+    assert seen == 8, seen
 
 
 def test_no_role_can_create_a_dataset() -> None:
@@ -937,19 +1172,27 @@ def test_tf_freeze_requires_confirm_origin_and_writes_the_manifest(
 
 
 class _FakeRunner:
-    """A subprocess.run stand-in: records argv and env, never spawns terraform."""
+    """A subprocess.run stand-in: records argv and env, never spawns terraform.
+    `show -json` answers with `plan_json` (default: a plan with no destroys),
+    so the plan-first apply can be exercised end to end offline."""
 
-    def __init__(self, rc: int = 0) -> None:
+    NO_DESTROY = (
+        '{"resource_changes": [{"address": "a.b", "change": {"actions": ["create"]}}]}'
+    )
+
+    def __init__(self, rc: int = 0, plan_json: str = NO_DESTROY) -> None:
         self.rc = rc
+        self.plan_json = plan_json
         self.calls: list[list[str]] = []
         self.envs: list[dict[str, str]] = []
 
     def __call__(
-        self, argv: list[str], env: dict[str, str] | None = None
+        self, argv: list[str], env: dict[str, str] | None = None, **kw: object
     ) -> subprocess.CompletedProcess:
         self.calls.append(argv)
         self.envs.append(env or {})
-        return subprocess.CompletedProcess(argv, self.rc)
+        stdout = self.plan_json if "show" in argv else ""
+        return subprocess.CompletedProcess(argv, self.rc, stdout=stdout, stderr="")
 
 
 @pytest.fixture
@@ -991,7 +1234,7 @@ def test_cli_requires_confirm_origin(scratch_infra: Path) -> None:
             assert fake.calls == [], "runner spawned on a refusal"
     fake = _FakeRunner()
     assert cli.tf("apply", "my-proj", "yes", "command line", runner=fake) == 0
-    assert len(fake.calls) == 1 and "apply" in fake.calls[0]
+    assert [c[2] for c in fake.calls] == ["plan", "show", "apply"]  # plan-first
 
 
 def test_cli_validates_before_running(scratch_infra: Path) -> None:
@@ -1006,22 +1249,31 @@ def test_cli_validates_before_running(scratch_infra: Path) -> None:
 
 def test_cli_builds_the_expected_argv(scratch_infra: Path) -> None:
     """Round 2 #11: the argv reaching the runner carries the validated
-    `-var project_id=…` and `-input=false` (no interactive prompt), and the
-    mutating commands `-auto-approve` — dropping any reddens."""
+    `-var project_id=…` and `-input=false` (no interactive prompt); `destroy`
+    carries `-auto-approve` and `apply` does NOT (it applies the saved plan,
+    Amendment F) — dropping any reddens."""
     fake = _FakeRunner()
     assert cli.tf("plan", "my-proj", runner=fake) == 0
     plan = fake.calls[0]
     assert "-var" in plan and "project_id=my-proj" in plan and "-input=false" in plan
     assert "-auto-approve" not in plan
-    for cmd in ("apply", "destroy"):
-        fake = _FakeRunner()
-        assert cli.tf(cmd, "my-proj", "yes", "command line", runner=fake) == 0
-        argv = fake.calls[0]
-        assert (
-            "project_id=my-proj" in argv
-            and "-input=false" in argv
-            and "-auto-approve" in argv
-        )
+    fake = _FakeRunner()
+    assert cli.tf("destroy", "my-proj", "yes", "command line", runner=fake) == 0
+    argv = fake.calls[0]
+    assert "project_id=my-proj" in argv and "-input=false" in argv
+    assert "-auto-approve" in argv
+    # apply (round 2 #3): the vars go to the PLAN; the apply takes the saved
+    # plan file and nothing else — no -auto-approve, no -var (the plan you
+    # were shown is the apply you get)
+    fake = _FakeRunner()
+    assert cli.tf("apply", "my-proj", "yes", "command line", runner=fake) == 0
+    plan_call, show_call, apply_call = fake.calls
+    assert "project_id=my-proj" in plan_call and "-input=false" in plan_call
+    out = next(a for a in plan_call if a.startswith("-out="))[len("-out=") :]
+    assert show_call[2:] == ["show", "-json", out]
+    assert apply_call[2:] == ["apply", "-input=false", out]
+    assert "-auto-approve" not in apply_call and "-var" not in apply_call
+    assert not Path(out).exists()  # the plan file (holds var values) is removed
 
 
 def test_cli_vars_are_the_only_toggle_path(
@@ -1042,7 +1294,10 @@ def test_cli_vars_are_the_only_toggle_path(
         "enable_ci_wif=true,github_repository=o/r,"
         "operator_principal=user:a@b.c,budget_alert_thresholds=[50,150]"
     )
-    assert cli.tf("apply", "my-proj", "yes", "command line", fake, vars_) == 0
+    assert (
+        cli.tf("apply", "my-proj", "yes", "command line", fake, vars_, "command line")
+        == 0
+    )
     argv = fake.calls[0]
     assert argv[argv.index("project_id=my-proj") + 1 :] == [
         "-var",
@@ -1067,7 +1322,9 @@ def test_cli_vars_are_the_only_toggle_path(
     for item in bad:
         fake = _FakeRunner()
         with pytest.raises(SystemExit) as e:
-            cli.tf("plan", "my-proj", runner=fake, vars_=item)
+            cli.tf(
+                "plan", "my-proj", runner=fake, vars_=item, vars_origin="command line"
+            )
         assert e.value.code == 2 and fake.calls == [], item
         assert "VARS: refused" in capsys.readouterr().out
     fake = _FakeRunner()  # an exported VARS is refused, like an exported CONFIRM
@@ -1075,6 +1332,10 @@ def test_cli_vars_are_the_only_toggle_path(
         cli.tf("plan", "my-proj", runner=fake, vars_="x=1", vars_origin="environment")
     assert e.value.code == 2 and fake.calls == []
     assert "VARS: refused — set on the command line" in capsys.readouterr().out
+    fake = _FakeRunner()  # round 6 #4: the vars_origin default REFUSES, not admits
+    with pytest.raises(SystemExit) as e:
+        cli.tf("plan", "my-proj", runner=fake, vars_="x=1")
+    assert e.value.code == 2 and fake.calls == []
     for name in ("TF_VAR_enable_composer", "TF_CLI_ARGS_apply", "TF_CLI_ARGS"):
         monkeypatch.setenv(name, "x")
         assert cli.env_tf_vars() == [name]
@@ -1091,18 +1352,22 @@ def test_cli_vars_are_the_only_toggle_path(
 def test_cli_child_env_is_an_allowlist(
     scratch_infra: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The terraform child sees ONLY `ENV_ALLOW` (fix/tf-vars-argv): a keyfile
-    env var, TF_WORKSPACE, TF_DATA_DIR, TF_LOG_PATH never reach it — the argv
-    is the whole input by construction, not by a denylist."""
+    """The terraform child sees ONLY `ENV_ALLOW` (fix/tf-vars-argv):
+    TF_WORKSPACE, TF_DATA_DIR, TF_LOG_PATH never reach it — the argv is the
+    whole input by construction, not by a denylist."""
     for k, v in {
-        "GOOGLE_CREDENTIALS": "{}",
-        "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/key.json",
-        "GOOGLE_OAUTH_ACCESS_TOKEN": "t",
         "TF_WORKSPACE": "other",
         "TF_DATA_DIR": "/tmp/x",
         "TF_LOG": "TRACE",
         "TF_LOG_PATH": "/tmp/l",
         "HOME": "/tmp/h",
+        # NO_PROXY is out of ENV_ALLOW and passes the gate (a de-restriction,
+        # not a redirect — not in REDIRECTION_NAMES) yet must not reach the
+        # child. The redirect proxy names ARE refused by the gate now
+        # (Amendment Q, A1: HTTPS_PROXY etc. are the redirection class), so
+        # they never reach this far — that path is
+        # test_cli_refuses_a_credential_in_the_env_loudly.
+        "NO_PROXY": "*",
     }.items():
         monkeypatch.setenv(k, v)
     fake = _FakeRunner()
@@ -1111,6 +1376,315 @@ def test_cli_child_env_is_an_allowlist(
     assert set(env) <= set(cli.ENV_ALLOW)
     assert env["HOME"] == "/tmp/h" and "PATH" in env
     assert not any(k.startswith(("GOOGLE_", "TF_")) for k in env)
+    assert "NO_PROXY" not in env
+    assert "SSL_CERT_FILE" not in cli.ENV_ALLOW
+    # Amendment N2 → P3 (round 6 #5): a name the child may see is never one
+    # the gate refuses — checked with the domain function itself, not a
+    # prefix subset of it (a prefix-less domain name added to ENV_ALLOW
+    # would have passed the old startswith check unexamined)
+    vendor = {k for k in cli.ENV_ALLOW if cli.in_cloud_namespace(k)}
+    assert vendor and vendor <= cli.CLOUD_ENV_ALLOW
+    assert cli.unlisted_cloud_env(dict.fromkeys(cli.ENV_ALLOW, "x")) == []
+
+
+# Google-namespace names that are NOT settings the runbook uses: every one is
+# refused by construction — the list is illustrative, the policy is the
+# allowlist (Amendment N2). Rounds 2–3's denylist missed a new one each round.
+UNLISTED_CLOUD_ENV = (
+    "GOOGLE_CREDENTIALS",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GOOGLE_BACKUP_CREDENTIALS_JSON",
+    "GOOGLE_OAUTH_ACCESS_TOKEN",
+    "CLOUDSDK_AUTH_ACCESS_TOKEN",
+    "GOOGLE_CLOUD_KEYFILE_JSON",
+    "GCLOUD_KEYFILE_JSON",
+    "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
+    "CLOUDSDK_AUTH_ACCESS_TOKEN_FILE",  # round 4 #7: outside L's family
+    "GOOGLE_GHA_CREDS_PATH",
+    "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES",
+    "GCLOUD_A_SPELLING_NOBODY_HAS_SEEN_YET",
+    "CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT",  # O3: an identity selector
+    "CLOUDSDK_PYTHON",
+    "SPANNER_EMULATOR_HOST",  # round 5 #1 (O1): endpoint redirection → anonymous creds
+    "BIGQUERY_EMULATOR_HOST",
+    "STORAGE_EMULATOR_HOST",
+    "GCE_METADATA_HOST",  # the metadata server that would issue the token
+    "NO_GCE_CHECK",
+    "API_ENDPOINT_OVERRIDE",
+    "HTTPS_PROXY",  # Amendment Q: the transport-redirection class, refused too
+    "SSLKEYLOGFILE",
+)
+
+
+def test_cli_refuses_a_credential_in_the_env_loudly(
+    scratch_infra: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Round 2 #2 → round 4 Amendment N2: any Google-namespace variable the
+    allowlist does not admit is a loud refusal (exit 2, names only, no
+    terraform child) on every project-taking command — the child's allowlist
+    alone would have DROPPED a key silently, applying as whoever ADC is while
+    the operator believed the key was in use. The listed settings pass."""
+    assert cli.CLOUD_ENV_PREFIXES == (
+        "GOOGLE_",
+        "GCLOUD_",
+        "CLOUDSDK_",
+        "GCE_METADATA_",
+        "SPANNER_",  # P1: the spanner client's own settings namespace
+    )
+    assert cli.CLOUD_ENV_SUFFIXES == ("_EMULATOR_HOST",)
+    assert cli.CLOUD_ENV_ALLOW == {  # O3: the three runbook settings, exactly
+        "CLOUDSDK_CONFIG",
+        "CLOUDSDK_CORE_PROJECT",
+        "GOOGLE_CLOUD_PROJECT",
+    }
+    for name in UNLISTED_CLOUD_ENV:
+        monkeypatch.setenv(name, "x")
+        assert cli.unlisted_cloud_env() == [name]
+        for cmd in ("plan", "apply", "destroy"):
+            fake = _FakeRunner()
+            with pytest.raises(SystemExit) as e:
+                cli.tf(cmd, "my-proj", "yes", "command line", runner=fake)
+            assert e.value.code == 2 and fake.calls == [], (cmd, name)
+            out = capsys.readouterr().out
+            assert f"tf-{cmd}: refused — {name} in the environment" in out
+            assert "x\n" not in out  # names, never values
+        monkeypatch.delenv(name)
+    for name in sorted(cli.CLOUD_ENV_ALLOW):
+        monkeypatch.setenv(name, "x")
+    assert cli.unlisted_cloud_env() == []
+    assert cli.tf("plan", "my-proj", runner=_FakeRunner()) == 0
+    assert cli.unlisted_cloud_env(
+        {"GOOGLE_X": "1", "CLOUDSDK_CONFIG": "2", "PATH": "3"}
+    ) == ["GOOGLE_X"]
+    # {} is the empty mapping, never a fallback to os.environ (round 5 #7). The
+    # old `== []` was vacuous — the conftest scrub had already emptied the
+    # process env, so a fallback mutation passed too (round 6 #2, a SURVIVED
+    # hand-mutation). Pollute the env with an unlisted name and prove the
+    # explicit {} still returns [] while None (the default) DOES surface it.
+    monkeypatch.setenv("GOOGLE_POLLUTE", "1")
+    assert cli.unlisted_cloud_env({}) == []
+    assert "GOOGLE_POLLUTE" in cli.unlisted_cloud_env()
+    monkeypatch.delenv("GOOGLE_POLLUTE")
+
+
+def test_cloud_env_domain_is_a_declared_closed_set() -> None:
+    """Amendment Q narrows the closure (O1/P1) to a DECLARED CLOSED SET. The
+    security proof is the ENUMERATED refuse domain — the vendor prefixes, the
+    _EMULATOR_HOST suffix, CLOUD_ENV_NAMES and the REDIRECTION_NAMES transport
+    class — pinned exactly here; every name the vendor DECLARATION modules name
+    classifies exactly once. The scan of the installed google/ tree for literal
+    env reads is a COVERAGE AID: it flags a newly-read name against the recorded
+    ignored classes, but does not claim to close the domain over everything the
+    libraries read — a constant-keyed read escapes any scan (Q A3, recorded:
+    APPDATA is refused, ENABLE_GCS_PYTHON_CLIENT_OTEL_TRACES is a benign
+    tracing switch). Imports and file reads only; no client, no network."""
+    import re
+
+    import google
+    from google.auth import environment_vars as auth_env
+    from google.cloud import environment_vars as cloud_env
+    from google.cloud.bigquery import _helpers as bq_helpers
+    from google.cloud.spanner_v1 import client as spanner_client
+    from google.cloud.storage import _helpers as storage_helpers
+
+    declared: set[str] = set()
+    for mod in (auth_env, cloud_env):
+        declared |= {
+            v
+            for k, v in vars(mod).items()
+            if not k.startswith("_")
+            and isinstance(v, str)
+            and re.fullmatch(r"[A-Z][A-Z0-9_]+", v)
+        }
+    declared |= {
+        spanner_client.EMULATOR_ENV_VAR,
+        spanner_client.LOG_CLIENT_OPTIONS_ENV_VAR,
+        spanner_client.OPTIMIZER_VERSION_ENV_VAR,
+        spanner_client.OPTIMIZER_STATISITCS_PACKAGE_ENV_VAR,
+        spanner_client.SPANNER_DISABLE_BUILTIN_METRICS_ENV_VAR,
+        bq_helpers.BIGQUERY_EMULATOR_HOST,
+        bq_helpers._UNIVERSE_DOMAIN_ENV,
+        storage_helpers.STORAGE_EMULATOR_ENV_VAR,
+        storage_helpers._API_ENDPOINT_OVERRIDE_ENV_VAR,
+        storage_helpers._API_VERSION_OVERRIDE_ENV_VAR,
+    }
+    assert len(declared) >= 39, sorted(declared)
+    # P1: what the installed code READS — every literal env access in the
+    # google namespace tree, whether or not a declaration module names it.
+    read_re = re.compile(
+        r"(?:os\.environ\.get|os\.getenv|os\.environ)\s*[\(\[]\s*[\"']([A-Z][A-Z0-9_]+)[\"']"
+    )
+    scanned: set[str] = set()
+    for base in google.__path__:
+        for p in Path(base).rglob("*.py"):
+            scanned |= set(read_re.findall(p.read_text(errors="ignore")))
+    assert len(scanned) >= 60, sorted(scanned)  # a vacuous scan is a failure
+    domain = declared | scanned
+    assert len(domain) >= 90, sorted(domain)
+    unclassified = []
+    for name in sorted(domain):
+        refused = cli.unlisted_cloud_env({name: "x"}) == [name]
+        admitted = name in cli.CLOUD_ENV_ALLOW
+        ignored = name.startswith(cli.CLOUD_ENV_IGNORED_PREFIXES) or (
+            name in cli.CLOUD_ENV_IGNORED
+        )
+        if refused + admitted + ignored != 1:
+            unclassified.append(name)
+    assert unclassified == []
+    # the two literal-read spanner tracing switches round 6 found are refused
+    # via the SPANNER_ prefix, and the round-5 hand-appended name still is
+    for name in (
+        "SPANNER_ENABLE_EXTENDED_TRACING",
+        "SPANNER_ENABLE_END_TO_END_TRACING",
+        "SPANNER_DISABLE_AFE_SERVER_TIMING",
+        "GEMINI_API_KEY",
+    ):
+        assert name in domain and cli.unlisted_cloud_env({name: "x"}) == [name]
+    # the transport-redirection class refuses on EVERY path (Amendment Q, A1),
+    # pinned exactly — a proxy endpoint, a TLS trust-anchor override, a gRPC
+    # roots override, a session-key log, an OAuth downgrade; APPDATA (the
+    # Windows ADC root, the identity class) is refused too.
+    assert cli.REDIRECTION_NAMES  # non-empty
+    for name in cli.REDIRECTION_NAMES | {"APPDATA"}:
+        assert cli.unlisted_cloud_env({name: "x"}) == [name], name
+    assert not (cli.REDIRECTION_NAMES & cli.CLOUD_ENV_ALLOW)
+    assert not (cli.REDIRECTION_NAMES & cli.CLOUD_ENV_IGNORED)
+    # every ignored entry is a name the vendors actually read (no stale rows),
+    # every ignored prefix matches at least one, and nothing ignored is admitted
+    assert cli.CLOUD_ENV_IGNORED <= domain
+    for prefix in cli.CLOUD_ENV_IGNORED_PREFIXES:
+        assert any(n.startswith(prefix) for n in domain), prefix
+        assert not any(n.startswith(prefix) for n in cli.CLOUD_ENV_ALLOW), prefix
+    assert not (cli.CLOUD_ENV_ALLOW & cli.CLOUD_ENV_IGNORED)
+
+
+DESTROYING_PLAN = (
+    '{"resource_changes": ['
+    '{"address": "module.spanner[0].google_spanner_instance.this", '
+    '"change": {"actions": ["delete"]}}, '
+    '{"address": "module.bigquery.google_bigquery_dataset.raw", '
+    '"change": {"actions": ["no-op"]}}, '
+    '{"address": "module.gcs.google_storage_bucket.this", '
+    '"change": {"actions": ["delete", "create"]}}]}'
+)
+
+
+def test_apply_plans_first_and_refuses_destroys_without_allow_destroy(
+    scratch_infra: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Round 2 #3 (Amendment F) → round 4 Amendment N1: tf-apply reads its own
+    saved plan back and applies it only if every action is in SAFE_ACTIONS;
+    `delete` (a replace counts) needs ALLOW_DESTROY=yes from the command line
+    — so an apply that omitted `enable_spanner=true` while Spanner is up
+    cannot tear it down; the toggle-flip teardown passes the flag and
+    proceeds. A plan that cannot be read back — envelope OR entry — refuses."""
+    assert cli.SAFE_ACTIONS == {"no-op", "read", "create", "update"}  # the exact set
+    changes = cli.planned_changes(DESTROYING_PLAN)
+    assert cli.unsafe_changes(changes, cli.SAFE_ACTIONS) == [
+        "module.gcs.google_storage_bucket.this",
+        "module.spanner[0].google_spanner_instance.this",
+    ]
+    assert cli.unsafe_changes(changes, cli.SAFE_ACTIONS | {"delete"}) == []
+    safe = cli.planned_changes(_FakeRunner.NO_DESTROY)
+    assert safe == [("a.b", frozenset({"create"}))]
+    assert cli.unsafe_changes(safe, cli.SAFE_ACTIONS) == []
+    assert cli.planned_changes('{"resource_changes": []}') == []
+    # K (round 3 #1) + N1 (round 4 #3/#4): a plan that cannot be read back is
+    # a refusal, never "no deletes" — the envelope AND every entry.
+    for bad in (
+        "",
+        "not json",
+        "[]",
+        '{"format_version": "1.2"}',
+        '{"resource_changes": {}}',
+        '{"resource_changes": [{"address": "a.b", "change": {}}]}',  # no actions
+        '{"resource_changes": [{"address": "a.b", "change": null}]}',
+        '{"resource_changes": [{"address": "a.b"}]}',
+        '{"resource_changes": [{"change": {"actions": ["delete"]}}]}',  # no address
+        '{"resource_changes": [{"address": 7, "change": {"actions": ["create"]}}]}',
+        '{"resource_changes": [{"address": "a.b", "change": {"actions": "delete"}}]}',
+        '{"resource_changes": [{"address": "a.b", "change": {"actions": [null]}}]}',
+        '{"resource_changes": [{"address": "a.b", "change": {"actions": []}}]}',  # O2
+        '{"resource_changes": ["a.b"]}',
+        '{"resource_changes": [null]}',
+    ):
+        with pytest.raises(SystemExit) as e:
+            cli.planned_changes(bad)
+        assert e.value.code == 2, bad
+        assert "could not be read back" in capsys.readouterr().out, bad
+    fake = _FakeRunner(plan_json="")
+    with pytest.raises(SystemExit) as e:
+        cli.tf("apply", "my-proj", "yes", "command line", runner=fake)
+    assert e.value.code == 2
+    assert len(fake.calls) == 2 and "show" in fake.calls[1]  # plan, show
+    assert not any("apply" in c for c in fake.calls)  # never apply
+    for allow, origin in (("", "file"), ("yes", "environment"), ("no", "command line")):
+        fake = _FakeRunner(plan_json=DESTROYING_PLAN)
+        with pytest.raises(SystemExit) as e:
+            cli.tf(
+                "apply",
+                "my-proj",
+                "yes",
+                "command line",
+                runner=fake,
+                allow_destroy=allow,
+                allow_destroy_origin=origin,
+            )
+        assert e.value.code == 2, (allow, origin)
+        assert [c[2] for c in fake.calls] == ["plan", "show"]  # never `apply`
+        out = capsys.readouterr().out
+        assert "tf-apply: refused — the plan destroys" in out
+        assert "google_spanner_instance.this" in out and "ALLOW_DESTROY=yes" in out
+    fake = _FakeRunner(plan_json=DESTROYING_PLAN)
+    rc = cli.tf(
+        "apply",
+        "my-proj",
+        "yes",
+        "command line",
+        runner=fake,
+        allow_destroy="yes",
+        allow_destroy_origin="command line",
+    )
+    assert rc == 0 and [c[2] for c in fake.calls] == ["plan", "show", "apply"]
+    # a failing plan / show never reaches apply
+    fake = _FakeRunner(rc=1)
+    assert cli.tf("apply", "my-proj", "yes", "command line", runner=fake) == 1
+    assert [c[2] for c in fake.calls] == ["plan"]
+
+
+def test_apply_refuses_unknown_actions_even_with_allow_destroy(
+    scratch_infra: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Amendment N1 (round 4 #5): an action outside SAFE_ACTIONS ∪ {delete}
+    — `forget` (a `removed {}` block: the instance drops out of state and
+    keeps billing with no teardown path) or a verb a later Terraform adds —
+    refuses ALWAYS, ALLOW_DESTROY=yes or not; the plan file is removed."""
+    for verb in ("forget", "frobnicate"):
+        plan = (
+            '{"resource_changes": ['
+            '{"address": "module.spanner[0].google_spanner_instance.this", '
+            f'"change": {{"actions": ["{verb}"]}}}}, '
+            '{"address": "a.b", "change": {"actions": ["update"]}}]}'
+        )
+        for allow, origin in (("", ""), ("yes", "command line")):
+            fake = _FakeRunner(plan_json=plan)
+            with pytest.raises(SystemExit) as e:
+                cli.tf(
+                    "apply",
+                    "my-proj",
+                    "yes",
+                    "command line",
+                    runner=fake,
+                    allow_destroy=allow,
+                    allow_destroy_origin=origin,
+                )
+            assert e.value.code == 2, (verb, allow)
+            assert [c[2] for c in fake.calls] == ["plan", "show"]
+            out = capsys.readouterr().out
+            assert "actions outside" in out and "google_spanner_instance.this" in out
+            assert "a.b" not in out.split("for ")[1]  # only the offending address
+            planfile = next(a for a in fake.calls[0] if a.startswith("-out="))[5:]
+            assert not Path(planfile).exists()
 
 
 def test_cli_main_forwards_vars_and_origin_to_tf(
@@ -1129,8 +1703,9 @@ def test_cli_main_forwards_vars_and_origin_to_tf(
         runner=None,
         vars_: str = "",
         vars_origin: str = "command line",
+        **kw: str,
     ) -> int:  # noqa: E501
-        seen.append({"cmd": cmd, "vars_": vars_, "vars_origin": vars_origin})
+        seen.append({"cmd": cmd, "vars_": vars_, "vars_origin": vars_origin, **kw})
         return 0
 
     monkeypatch.setattr(cli, "tf", spy)
@@ -1142,6 +1717,12 @@ def test_cli_main_forwards_vars_and_origin_to_tf(
     assert [s["cmd"] for s in seen] == ["plan", "apply", "destroy"]
     assert all(s["vars_"] == "enable_composer=true" for s in seen)
     assert all(s["vars_origin"] == "environment" for s in seen)
+    # round 2 #3: apply alone forwards --allow-destroy + its origin
+    seen.clear()
+    ad = ["--allow-destroy", "yes", "--allow-destroy-origin", "environment"]
+    assert cli.main(["apply", "--project", "my-proj", *gate, *ad]) == 0
+    assert seen[0]["allow_destroy"] == "yes"
+    assert seen[0]["allow_destroy_origin"] == "environment"
 
 
 def test_cli_validate_argv_is_offline(scratch_infra: Path) -> None:

@@ -75,3 +75,46 @@ def test_source_tests_cover_every_required_column() -> None:
     assert gen.duckdb_type(dict[str, object]) == "json"
     assert gen.duckdb_type(gen.Event.model_fields["event_type"].annotation) == "varchar"
     assert gen.render_ddl().count("create or replace table") == 2
+
+
+# --------------------------------------------------- Phase 10: the Spanner shapes
+
+
+def test_sources_dim_user_identifier_is_the_swap_var() -> None:
+    """Phase 10 (§3.3's source swap): the dim_user SOURCE resolves through the
+    `dim_user_identifier` var (default = the landed table, every existing build
+    unchanged); events carry no identifier — nothing else swaps."""
+    text = gen.SOURCES_PATH.read_text()
+    assert "identifier: \"{{ var('dim_user_identifier', 'dim_user') }}\"" in text
+    assert text.count("identifier:") == 1
+
+
+def test_spanner_tf_matches_the_contract_renders() -> None:
+    """The module's dim_user DDL and federation view are the contract's renders
+    verbatim (generated-never-hand-edited, pinned INSIDE the .tf so tf-freeze's
+    manifest covers them); a hand edit on either side fails here."""
+    tf = (ROOT / "infra" / "modules" / "spanner" / "main.tf").read_text()
+    assert gen.spanner_dim_user_ddl() in tf
+    assert gen.federation_view_sql() in tf
+    ddl = gen.spanner_dim_user_ddl()
+    assert ddl.endswith("primary key (user_id, valid_from)")  # SCD2 key
+    assert "valid_to timestamp\n" in ddl + "\n"  # nullable: the open row
+    view = gen.federation_view_sql()
+    assert view.count("external_query") == 1
+    names = [c[0] for c in gen.columns(gen.DimUserRow)]
+    assert f"'select {', '.join(names)} from dim_user'" in view
+
+
+def test_spanner_send_schedule_ddl_matches_serving_columns() -> None:
+    """The module's send_schedule DDL carries the §2.9 nine columns in order
+    with primary key user_id — the same list serving/ddl.sql and
+    serving/spanner.py::COLUMNS serve."""
+    from serving.spanner import COLUMNS
+
+    tf = (ROOT / "infra" / "modules" / "spanner" / "main.tf").read_text()
+    ddl = tf.split("create table send_schedule (")[1].split("EOT")[0]
+    body, key = ddl.split(") primary key ")
+    declared = [ln.strip().split(" ")[0] for ln in body.strip().splitlines()]
+    assert declared == list(COLUMNS)
+    assert key.strip() == "(user_id)"
+    assert body.count("not null") == len(COLUMNS)  # every serving column required

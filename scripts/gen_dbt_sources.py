@@ -148,8 +148,15 @@ def render_sources() -> str:
         lines += [
             f"      - name: {table}",
             f"        description: {doc}",
-            "        columns:",
         ]
+        if table == "dim_user":
+            # Phase 10: the §3.3 source swap. Default = the landed table
+            # (every existing build unchanged); the Spanner integration run
+            # overrides it to the federation view `dim_user_spanner`.
+            lines.append(
+                "        identifier: \"{{ var('dim_user_identifier', 'dim_user') }}\""
+            )
+        lines.append("        columns:")
         for name, typ, nullable, values in columns(model):
             desc = f"{typ}, nullable" if nullable else typ
             lines += [f"          - name: {name}", f"            description: {desc}"]
@@ -161,6 +168,53 @@ def render_sources() -> str:
                     lines.append(f"              - {first}")
                     lines += [f"                {r}" for r in rest]
     return "\n".join(lines) + "\n"
+
+
+# Phase 10: the Spanner dims shapes, rendered from the SAME contract. Not
+# files `make gen-sources` writes — they are PINNED inside
+# infra/modules/spanner/main.tf (tf-freeze's manifest pins *.tf only, so a
+# side file could drift under the frozen tree): tests/test_dbt_sources.py
+# fails when the .tf drifts from these renders, and the repair is to paste
+# the render into the .tf by hand (then `make tf-freeze CONFIRM=yes`).
+SPANNER_TYPES = {"varchar": "string(max)", "timestamp": "timestamp", "date": "date"}
+SPANNER_CONNECTION = "spanner_dims"
+
+
+def spanner_dim_user_ddl() -> str:
+    """The Spanner `dim_user` DDL (SCD2 — key (user_id, valid_from), §2.3)."""
+    cols = columns(DimUserRow)
+    lines = ["create table dim_user ("]
+    for i, (name, typ, nullable, _) in enumerate(cols):
+        null = "" if nullable else " not null"
+        comma = "," if i < len(cols) - 1 else ""
+        lines.append(f"    {name} {SPANNER_TYPES[typ]}{null}{comma}")
+    lines.append(") primary key (user_id, valid_from)")
+    return "\n".join(lines)
+
+
+def federation_view_sql() -> str:
+    """The `raw.dim_user_spanner` view body: EXTERNAL_QUERY over the Spanner
+    connection, one column per line, each CAST to the generated BigQuery
+    landing schema's type (the same map `bq_schema.json` is rendered from —
+    so the view's shape is the landed table's by construction, not by
+    Spanner's type map, a named stack risk), the exact text the .tf embeds
+    (the `${var.*}` placeholders are Terraform's, rendered at apply)."""
+    cols = columns(DimUserRow)
+    names = [c[0] for c in cols]
+    inner = f"select {', '.join(names)} from dim_user"
+    body = ",\n".join(
+        f"    cast({name} as {BQ_TYPES[typ].lower()}) as {name}"
+        for name, typ, _, _ in cols
+    )
+    return (
+        "select\n"
+        f"{body}\n"
+        "from external_query(\n"
+        "    'projects/${var.project_id}/locations/${var.region}"
+        f"/connections/{SPANNER_CONNECTION}',\n"
+        f"    '{inner}'\n"
+        ")"
+    )
 
 
 def render() -> dict[Path, str]:

@@ -69,6 +69,10 @@ arrived" from "arrived at a bad time".
 time**; the conversion happens once, in staging
 (`stg_events.client_event_time_local`), against the tz valid at
 `client_event_time` — `valid_from <= t and (valid_to is null or t < valid_to)`.
+Phase 10: Spanner is the production dims home — `make spanner-load` upserts the
+seed into the Spanner `dim_user` table (key `(user_id, valid_from)`, DDL
+generated from the contract), and BigQuery reads it through the
+`raw.dim_user_spanner` `EXTERNAL_QUERY` view (§3.3's source swap).
 
 ### 2.4 Ground truth (generator side-file, never a source)
 
@@ -214,10 +218,22 @@ idempotent batch upsert keyed `user_id`; a row is replaced only when
 falls back to the cohort default when no row exists. `tz` is the current (open
 SCD2) `dim_user` zone, joined at write-back time from the `dim_user_current`
 model (Phase 8a), not carried on the score. `written_at = computed_as_of` on the
-DuckDB stand-in (Phase 8a): a per-row data-derived value keeps `send_schedule`
-byte-identical on a re-run and under a backfill — a wall clock would break both
-(§4, the determinism policy); a production serving store may stamp a real ingest
-time in a carved-out audit column, never asserted.
+DuckDB stand-in (Phase 8a) AND on Spanner (Phase 10): a per-row data-derived
+value keeps `send_schedule` byte-identical on a re-run and under a backfill — a
+wall clock would break both (§4, the determinism policy); a production serving
+store may stamp a real ingest time in a carved-out audit column, never
+asserted. Phase 10: `make writeback TARGET=spanner` reads the same two
+relations off BigQuery `ontime` and writes the Spanner `send_schedule` (the
+module's DDL — the nine columns, `model_version` compared under a parsed
+numeric order, `v10 > v2`); `TARGET=duckdb` (default) keeps the stand-in. On
+Spanner the stored-pair read and the winners' `insert_or_update` are ONE
+read-write transaction (`run_in_transaction`, retried on abort), so
+replace-iff-greater holds across concurrent write-backs, not only within one
+run (Phase 10 Amendment A); on the DuckDB stand-in the same three steps are
+one `begin`/`commit` and the file is single-writer across processes
+(Amendment H). The read and the write both map columns by NAME
+(Amendment I). The SA's Spanner access is a custom data-plane role — no
+`updateDdl`; Terraform owns the schema (Amendment E).
 
 ## 3. Components
 
@@ -249,7 +265,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | component | reads | writes | may NOT |
 |---|---|---|---|
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
-| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load); on BigQuery also the staging objects `gs://<project>-ontime/landing/<p>/{raw,dims}/` incl. a zero-byte `_empty.jsonl` (Phase 9b) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
+| loader | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load); on BigQuery also the staging objects `gs://<project>-ontime/landing/<p>/{raw,dims}/` incl. a zero-byte `_empty.jsonl` (Phase 9b); on Spanner the `dim_user` table (`make spanner-load`, idempotent upsert — Phase 10) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
 | eval | dbt outputs, truth, the profile JSON (the generator's input) | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), the marker-confined blocks of `docs/RESULTS.md` and `docs/AB_DESIGN.md` *(Phase 6; `WRITE=yes` only)* | write any table the pipeline reads; write under `fixtures/`; create or append to a doc |
 | write-back | `scores_send_time`, `dim_user_current` (the open `dim_user` row's tz — Phase 8a) | `send_schedule` | read truth; read raw; re-derive a score |
@@ -281,8 +297,8 @@ data profile, `TARGET` the warehouse.
 |---|---|---|
 | generator → `fixtures/<profile>/raw/events_<upload-date>.jsonl` (one file per UTC `server_upload_time` date — the landing unit Phase 7 replays) | Amplitude → BigQuery export | dbt `source` config |
 | `make bq-load` — the fixture files → the GCS staging bucket (`landing/<profile>/`) → `raw.events` / `raw.dim_user`, explicit schema generated from the contract, one `WRITE_TRUNCATE` load job per table — an empty selection lands a zero-byte object through it (Phase 9b, X) | Amplitude's own export job writing the `raw` dataset | the landing step is dropped; the source config is unchanged |
-| `dim_user` seed file (`dims/dim_user.csv`, loaded as the `raw.dim_user` source by `make load` — not a dbt seed, whose path could not follow `PROFILE`) | Spanner change streams / federation | `EXTERNAL_QUERY` source (demo), Dataflow template (prod) — a source-config swap, no model changes |
-| DuckDB `send_schedule` table | Spanner serving table | write-back target flag |
+| `dim_user` seed file (`dims/dim_user.csv`, loaded as the `raw.dim_user` source by `make load` — not a dbt seed, whose path could not follow `PROFILE`) | Spanner change streams / federation | *Delivered Phase 10:* the `raw.dim_user_spanner` `EXTERNAL_QUERY` view (spanner module, behind `enable_spanner`) over the Spanner dims `make spanner-load` lands; the swap is the generated source's `dim_user_identifier` var (default = the landed table, so free-tier builds never touch Spanner) — a source-config swap, no model changes. Dataflow template stays the prod path |
+| DuckDB `send_schedule` table | Spanner serving table | *Delivered Phase 10:* `make writeback TARGET=spanner` (default `duckdb` keeps the stand-in) |
 
 ## 4. System invariants (hold across every phase)
 
@@ -307,11 +323,15 @@ BACKLOG row, not code.
 ## 6. Deployment posture
 
 Region `us-central1`. Free/near-free layer safe to leave up: BigQuery, GCS,
-IAM, budget alerts. Spanner: 90-day trial, `enable_spanner` toggle, teardown
-date in `docs/DEPLOYMENT.md`. Composer: `enable_composer` toggle, applied once on
+IAM, budget alerts. Spanner: a `PROVISIONED` 100-PU instance that bills from
+creation (no free-trial instance — Phase 10 Amendment M), `enable_spanner`
+toggle, applied and torn down in one session, dates in `docs/DEPLOYMENT.md`. Composer: `enable_composer` toggle, applied once on
 demo day, destroyed the same hour. Budget alerts do not stop spend — stated,
 with the optional billing-disable function as the real guardrail. Terraform
-state in GCS (bootstrapped manually); WIF for CI, never JSON keys.
+state: a local `infra/terraform.tfstate` today — the GCS backend is
+bootstrap-documented and commented out (BACKLOG row; trigger: the first
+apply NOT torn down in the same session — the Phase 12 demo — and the
+Phase 12 exit for its confidentiality half); WIF for CI, never JSON keys.
 
 Implemented in Phase 9a (`infra/`, behind `enable_*` toggles that default false;
 `project_id` the only required var; one least-privilege service account, with
@@ -441,7 +461,12 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   `Permission denied to list services for consumer container` (the SA holds
   no `serviceusage` role by design, invariant 4 of 9a). Harmless — no
   resource and no state file changed (refresh fails before any plan); the
-  runbook's step 5 is to re-login as yourself before any `tf-*`.
+  runbook's step 5 is to re-login as yourself before any `tf-*`. The same
+  403 (`Caller does not have required permission to use project …
+  serviceusage.services.use`) appears when that re-login picked a Google
+  account with no role on the project (Phase 10 round 4's first teardown
+  attempt: the git-only account) — check the ADC email (tokeninfo, step 5)
+  before chasing the SA case; again nothing changed.
 - **`TF_VAR_*` from the environment reaches Terraform unseen**
   (`fix/tf-vars-argv`, after Phase 9b). Amendment T refused auto-loaded
   tfvars but 9a's runbook still said "or `TF_VAR_*`": an exported
@@ -450,9 +475,10 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   `TF_CLI_ARGS_<cmd>` are strictly worse (Terraform splices them into the
   argv, `-var-file` included). `infra/cli.py` now refuses to run while any
   `TF_VAR_*` / `TF_CLI_ARGS*` is in its environment, gives the child an
-  ALLOWLISTED environment (so `GOOGLE_*CREDENTIALS*` — a keyfile despite
-  "ADC only" — `TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*` cannot reach it
-  either), and a toggle reaches Terraform only as `VARS='name=value,…'` from
+  ALLOWLISTED environment (so a credential variable — a keyfile despite
+  "ADC only", under any spelling: the Google namespace is allowlisted,
+  Phase 10 Amendment N2 — `TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*` cannot
+  reach it either), and a toggle reaches Terraform only as `VARS='name=value,…'` from
   the command line (`$(origin VARS)`) → argv `-var` (validated, `project_id`
   excluded) — the argv is the whole input by construction.
 - **`partition_by` is a model config BOTH adapters interpret** (Phase 9b, found
@@ -513,3 +539,40 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   and outside the manifest, so a toggle could reach an apply with nothing in
   the tree or the argv showing it; `infra/cli.py` refuses plan/apply/destroy
   while one exists (Amendment T).
+- **google-cloud-spanner exports client metrics to Cloud Monitoring by
+  default** (Phase 10, review round 1). `spanner.Client()` starts a
+  built-in metrics exporter thread (`disable_builtin_metrics=False`;
+  `google-cloud-monitoring` arrives transitively). The pipeline never asked
+  for that egress and the SA carries no monitoring grant, so both clients
+  pass `disable_builtin_metrics=True`; pinned statically in
+  `tests/test_spanner_landing.py`.
+- **A Cloud Spanner federated query has no service-agent identity — it runs
+  as the querying principal** (Phase 10, first live apply, 2026-08-30). The
+  spec's stack risk ("the connection's service agent existing before the IAM
+  grant") was the wrong model: `service-<number>@gcp-sa-bigqueryconnection`
+  is Cloud SQL's delegation identity, is never provisioned by a Spanner
+  connection, and the grant to it failed the apply (26/27 created). Per the
+  docs, the principal running `EXTERNAL_QUERY` needs
+  `roles/spanner.databaseReader` on the database and
+  `roles/bigquery.connectionUser` on the connection — the pipeline SA's
+  database grant + `connectionUser` were the whole set (Amendment D; the
+  database grant became the custom data-plane role in round 2, Amendment E).
+- **Every predefined Spanner role that writes also carries `updateDdl`; a
+  custom role may only carry permissions of an ENABLED API** (Phase 10,
+  review round 2). `roles/spanner.databaseUser` is read+write+DDL, so the
+  pipeline SA's grant became the custom `ontimeSpannerDataUser`; and because
+  "a permission might not be available for use in custom roles if you have
+  not enabled the API" (IAM docs), the role sits in the spanner module
+  beside the API enablement, not at the root. A deleted custom role keeps
+  its id reserved for 7 days (undelete + import detour, like the SA's 30).
+- **`terraform apply -auto-approve` applies whatever the toggles imply —
+  including the destruction of a resource whose toggle you forgot** (Phase
+  10, review round 2). `enable_spanner` defaults false and the database has
+  `deletion_protection = false` (the toggle-flip is the sanctioned
+  teardown), so an apply that omitted `enable_spanner=true` while Spanner
+  was up would have destroyed it silently. `tf-apply` now saves a plan,
+  reads it back (`show -json`) and refuses any `delete` action unless
+  `ALLOW_DESTROY=yes` has command-line origin (Amendment F); round 4's
+  Amendment N1 made the gate an action ALLOWLIST — an unreadable plan or an
+  action outside `{no-op, read, create, update}` (+ `delete` with the flag)
+  is refused always.

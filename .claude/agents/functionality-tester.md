@@ -51,6 +51,15 @@ When invoked:
   the named tie-break.
 - Write-back: older `model_version` never overwrites; same input twice → same
   row hash.
+- Vendor boundaries (CLAUDE.md "Boundary contract"): feed the guard an input
+  outside its declared set — an unknown plan verb, an env name in the Google
+  namespace nobody has seen, a JSON entry missing a key, a result set with
+  zero rows or shuffled columns — and prove it REFUSES (or maps by name);
+  silent acceptance is a finding even when no test named the case.
+- Adapters over vendor types: mutate the adapter itself (return a constant,
+  reorder fields). If the fakes bypass it, the mutant SURVIVES the whole
+  suite — report that survivor as a correctness finding (round 4 #1); the
+  fix is a test on the real type built offline, never a fake of ours.
 
 ## Mutation (MANDATORY for every new or changed write path, model and guard)
 

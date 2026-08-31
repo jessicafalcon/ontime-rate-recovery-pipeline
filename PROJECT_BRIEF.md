@@ -173,7 +173,9 @@ schema with no dbt source; a CI check asserts no model references it.
   (profile switch).
 - **Free/near-free layer, safe to leave up:** BigQuery (free tier: 1 TB queries
   + 10 GB storage/mo), Spanner (**90-day free-trial instance**, separate from
-  the $300 credit), Cloud Storage (pennies), Terraform, IAM, budget alerts.
+  the $300 credit — *corrected 2026-08-31, Phase 10 Amendment M: what
+  Terraform makes is a `PROVISIONED` instance billing ~$0.09/h from creation;
+  it is never left up*), Cloud Storage (pennies), Terraform, IAM, budget alerts.
 - **Composer (paid, ~$400/mo floor, bills continuously):** built as an
   **isolated Terraform module** with its own apply/destroy. NOT left running.
   Plan: spin up once on demo day, run the DAG live, capture the green run, then
@@ -183,7 +185,8 @@ schema with no dbt source; a CI check asserts no model references it.
 - **Known cost/risk edges (documented, not hidden):**
   - Budget alerts do **not** stop spend. Optional Pub/Sub → Cloud Function that
     disables billing at $150 is the real guardrail.
-  - Spanner trial expires at 90 days → ~$65/mo minimum. Teardown date recorded
+  - Spanner trial expires at 90 days → ~$65/mo minimum *(corrected 2026-08-31,
+    Amendment M: there is no trial — it bills from creation)*. Teardown date recorded
     in `docs/DEPLOYMENT.md`; `enable_spanner` Terraform toggle.
   - Dataflow (change-stream template) is **not** free — hence federation for demo.
   - Composer env creation can fail or take 40+ min. Rehearse once before demo
@@ -247,7 +250,7 @@ Authoritative plan: `docs/PHASES.md` (re-cut by verifiable capability on
 when" whose proof is a command). Spec: `docs/ARCHITECTURE.md`. The table below
 is the same plan in the brief's track view.
 
-**Track A = local pipeline (free). Track B = real GCP (free tier/trial).
+**Track A = local pipeline (free). Track B = real GCP (free tier/trial — *corrected 2026-08-31, Amendment M: Spanner has no trial, it bills while up*).
 Composer is last and torn down after one run.** ⭐ = checkpoint (stopping there
 yields a coherent project).
 
@@ -330,7 +333,7 @@ Elegance improvements adopted: Amplitude three-clock attribution; model-as-dbt-
 model; organic opens + production jitter; Spanner federation instead of Dataflow
 for demo; `dbt build` as the gate; dbt unit tests; enforced truth isolation.
 
-Risk register: budget alerts don't stop spend; Spanner trial expiry; Dataflow
+Risk register: budget alerts don't stop spend; Spanner trial expiry *(corrected 2026-08-31, Amendment M: → Spanner bills from creation)*; Dataflow
 cost; Composer demo-day failure; cross-warehouse dialect drift; synthetic
 numbers mistaken for findings; §5 validation not reproducible until Phase 1
 commits the generator.

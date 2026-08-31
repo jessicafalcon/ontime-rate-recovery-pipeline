@@ -31,15 +31,17 @@ is applied until you run `make tf-apply` yourself.
 ### Operator permissions for `tf-apply` (your ADC identity, not the SA)
 
 Beyond creating the project resources (project Owner, or Editor + Project IAM
-Admin for the SA grants), three `tf-apply` mechanisms need a specific permission — the
-first is inside Owner/Editor, the two billing ones are not — and one
-post-apply path (the last row) needs a grant Terraform makes:
+Admin for the SA grants), four `tf-apply` mechanisms need a specific permission — the
+first is inside Owner/Editor, the two billing ones are not, the custom role's
+is in Owner but not in Editor + Project IAM Admin — and one post-apply path
+(the last row) needs a grant Terraform makes:
 
 | Mechanism | Permission | Minimal predefined role |
 |---|---|---|
 | `user_project_override` (every API call is quota'd on `project_id`) | `serviceusage.services.use` on the project | `roles/serviceusage.serviceUsageConsumer` (in Owner/Editor) |
 | `data.google_billing_account` (the budget's currency) | `billing.accounts.get` on the billing account | `roles/billing.viewer` on the billing account |
 | `google_billing_budget` create/delete | `billing.budgets.create` / `.delete` on the billing account | `roles/billing.costsManager` on the billing account |
+| `google_project_iam_custom_role` (the spanner module's data-plane role, Amendment E — only on an `enable_spanner=true` apply) | `iam.roles.create` / `.update` / `.delete` on the project, plus `iam.roles.undelete` — the provider undeletes a soft-deleted role on re-create within its 7-day window | `roles/iam.roleAdmin` on the project (NOT inside `projectIamAdmin`; before granting, check whether the operator's base role already carries them — `gcloud iam roles describe roles/editor` and look for `iam.roles.create` — and grant only if it does not) |
 | Impersonating the SA for manual BigQuery builds (9b on) | `iam.serviceAccounts.getAccessToken` on `ontime-pipeline` | `roles/iam.serviceAccountTokenCreator` ON the SA — Terraform grants it to `operator_principal` when set (Amendment Q) |
 
 The billing-account read is deferred to apply (the budget module `depends_on`
@@ -109,8 +111,11 @@ refuses a malformed item, whitespace, or `project_id` (PROJECT's), refuses
 to run while ANY `TF_VAR_*` / `TF_CLI_ARGS*` is in its environment or an
 auto-loaded `infra/terraform.tfvars` / `*.auto.tfvars{,.json}` exists
 (Amendment T), and gives the terraform child an ALLOWLISTED environment
-(`PATH`, `HOME`, `CLOUDSDK_*`, locale/proxy — never `GOOGLE_*CREDENTIALS*`,
-`TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*`), so the argv is the whole input by
+(`ENV_ALLOW`, seven exact names: `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`,
+`CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT` — never a credential, proxy or
+trust-anchor name (P2), `TF_WORKSPACE`, `TF_DATA_DIR`,
+`TF_LOG*`; and any name in the cloud-env domain (O1/P1/Q: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read, and the transport-redirection class `REDIRECTION_NAMES` — an enumerated closed set, the vendor scan a coverage aid) outside `CLOUD_ENV_ALLOW` in your shell refuses the command outright, names only —
+Phase 10 Amendments N2/O1/P1/Q, `infra.cli.CLOUD_ENV_ALLOW`), so the argv is the whole input by
 construction and the `tf-plan` you read is the `tf-apply` you get:
 
 ```
@@ -135,7 +140,7 @@ The default apply creates only the free/near-free layer:
 | Service account + IAM (+ WIF only when `enable_ci_wif=true`) | free | idempotent |
 | Budget (50 / 150 alerts, in the billing account's currency — $ on a USD account) | free (notifies only — see below) | idempotent |
 | **Composer** (`enable_composer=false`) | **not created** — ~$300+/mo if enabled | — |
-| **Spanner** (`enable_spanner=false`) | **not created** — ~$65+/mo after the 90-day trial | — |
+| **Spanner** (`enable_spanner=false`) | **not created** — a `PROVISIONED` 100-PU instance bills from creation, ~$0.09/h (~$65/mo); it is not a free-trial instance (Amendment M) | — |
 
 Total left up by default: a few cents of storage per month. Composer and Spanner
 stay off until their phase (11 / 10) flips the toggle on a deliberate apply.
@@ -213,7 +218,14 @@ datasets — so every BigQuery build runs **as the SA** (below), and
    off the BigQuery tables byte-for-byte against `fixtures/tiny/expected/`, the
    pins, and `bq ls` = exactly `raw`, `ontime`.
 5. **Switch ADC back before any `tf-*`:** `gcloud auth application-default
-   login` (no `--impersonate-service-account`). The impersonated SA has no
+   login` (no `--impersonate-service-account`), and pick the GCP account in
+   the browser — a login as any other Google account fails the next `tf-*`
+   at refresh with the same 403 shape as the SA case below (round 4's first
+   teardown attempt; nothing changed). The login prints the account it
+   selected — read it. To verify without putting a token on any argv or
+   URL (round 5 #4), POST it on stdin:
+   `gcloud auth application-default print-access-token | sed 's/^/access_token=/' | curl -s -d @- https://oauth2.googleapis.com/tokeninfo`
+   → `"email"` is the operator. The impersonated SA has no
    `serviceusage` permission, so `tf-plan`/`tf-apply`/`tf-destroy` fail at
    refresh with `Permission denied to list services for consumer container`
    — found live on the first `tf-destroy` after 9b (ARCHITECTURE §8). No
@@ -255,13 +267,123 @@ projects/ontime-rate-recovery/serviceAccounts/ontime-pipeline@ontime-rate-recove
 then `make tf-plan` (expect `17 to add`, the SA `0 to change`) → `make tf-apply`.
 Or wait for the window to close.
 
-## Spanner trial (Phase 10) and Composer (Phase 11) — teardown dates
+## Spanner (Phase 10) and Composer (Phase 11) — apply and teardown dates
 
-Both stay off (`enable_spanner`/`enable_composer` default false) until their
-phase, so 9a's `tf-*` targets never create them. When applied: **Spanner** starts
-a 90-day free trial, then bills ~$65/mo — tear it down before day 90 by setting
-`enable_spanner=false` and re-applying (Phase 10 adds a scoped
-`make tf-destroy MODULE=spanner`; **no `MODULE` variable exists in 9a**, so a 9a
-`make tf-destroy` destroys the whole stack). **Composer** bills ~$300+/mo —
-Phase 11 applies it on demo day and destroys it the same hour (Phase 12). Record
-the actual apply dates here when they land.
+Both stay off (`enable_spanner`/`enable_composer` default false), so a default
+apply never creates them. **Composer** bills ~$300+/mo — Phase 11 applies it on
+demo day and destroys it the same hour (Phase 12). Record the actual apply
+dates here when they land.
+
+### Spanner: bring-up, run, teardown (Phase 10)
+
+The module creates a `PROVISIONED` 100-processing-unit instance, which bills
+from its first minute (~$0.09/h, ~$65/mo) — it is NOT a Spanner free-trial
+instance (a separate kind, console/gcloud-created, one per project; Phase 10
+Amendment M corrected the "90-day trial clock" this section carried). Every
+step is ask-first, and the teardown belongs to the same working session as
+the apply: never leave it up.
+
+1. **Apply** (your operator ADC — Terraform never runs as the SA, §8. The
+   SA detour applies only when the SA is NOT in state: after a full
+   `tf-destroy` within its 30-day reservation. After a toggle-flip teardown
+   the SA stays live and in state — no detour. The custom role needs NO
+   detour either: the google provider undeletes a soft-deleted custom role
+   on create (third apply 2026-08-31, `Creation complete after 2s` inside
+   its 7-day window) — its `iam.roles.undelete` is why the operator
+   permission row lists it):
+   `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=true'` —
+   adds exactly the spanner module's 9 resources (2 kept-on API enablements,
+   instance, database with the `dim_user` + `send_schedule` DDL, the BigQuery
+   connection + `raw.dim_user_spanner` federation view, the custom
+   data-plane role `ontimeSpannerDataUser` — read/write, no DDL — and 2
+   scoped grants, both to the pipeline SA, which is the principal the
+   federated read runs as; §8). `tf-apply` plans first and shows you the
+   saved plan it applies.
+   **The same session, fill in the dated lines below.**
+   **While Spanner is up, EVERY `make tf-apply` carries
+   `VARS='enable_spanner=true'`** — the toggle defaults false and the
+   database has no deletion protection (the toggle-flip is the sanctioned
+   destroy). An apply that omits it would plan the teardown — and `tf-apply`
+   now REFUSES any plan that destroys something unless `ALLOW_DESTROY=yes`
+   is on the command line (it prints the addresses; Amendment F), refuses a
+   plan it cannot read back (`the saved plan could not be read back`) and
+   refuses any action outside `{no-op, read, create, update, delete}`
+   ALWAYS — `forget`, a state drop, included (Amendment N1) — so the
+   mistake stops before the cloud. `make tf-plan PROJECT=<id>
+   VARS='enable_spanner=true'` first is still the habit. **Live
+   2026-08-31:** an apply whose `VARS` carried `enable_spanner=true` but
+   omitted the applied `operator_principal` planned `9 to add, 0 to change,
+   1 to destroy` and stopped — `tf-apply: refused — the plan destroys
+   module.iam.google_service_account_iam_member.operator_token_creator[0]
+   …`, exit 2, nothing created, state unchanged (Amendment F's live proof;
+   carry EVERY applied toggle in `VARS`).
+2. **Land the dims** (as the SA):
+   `make spanner-load PROFILE=tiny PROJECT=<id> CONFIRM=yes`.
+3. **Prove it**: `make test-int-spanner PROJECT=<id> CONFIRM=yes` — the
+   federated view returns the seed's rows, the swapped build
+   (`dim_user_identifier: dim_user_spanner`) reproduces the three goldens,
+   and the Spanner write-back is idempotent with the DuckDB-pinned row hash
+   (its OK line reads `writeback OK: <id>.ontime → spanner, 20 users, 0
+   written` on the second run — the read is the warehouse's, not a
+   PROFILE's build). `PROFILE` is `tiny` only (a CLI refusal otherwise).
+   **Live 2026-08-30:** `spanner-load OK: tiny — 22 dim rows`; `4 passed
+   in 221.01s`; `writeback OK: ontime-rate-recovery.ontime → spanner, 20
+   users, 0 written`. **Live 2026-08-31, under the custom role
+   `ontimeSpannerDataUser` (Amendment E; the live role's permission set is
+   the module's 11, no `updateDdl`; the database's one binding):**
+   `spanner-load OK: tiny — 22 dim rows`; `4 passed in 239.42s`;
+   `writeback OK: ontime-rate-recovery.ontime → spanner, 20 users, 0
+   written`.
+4. **Tear down the same day** — the SCOPED destroy is the toggle flipped
+   back: `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=false'
+   ALLOW_DESTROY=yes` (count → 0 destroys exactly the module's resources —
+   the plan-first apply lists them and needs the explicit `ALLOW_DESTROY`;
+   the two API enablements stay on — free, like the root set). There is no
+   `MODULE` variable and no `-target`; a full `make tf-destroy …
+   CONFIRM=yes` also removes Spanner along with everything else.
+
+Dated lines (fill on apply day — the BACKLOG Spanner row's trigger):
+
+- `enable_spanner=true` applied: **2026-08-30** (23:37 UTC, `ontime-rate-recovery`,
+  operator ADC after the SA undelete + `terraform import` detour; 26/27 on
+  the first apply — Amendment D dropped the failed service-agent grant — then
+  `No changes` on the toggled re-plan).
+- *(Corrected 2026-08-31, Amendment M: the "trial ends 2026-11-28" and
+  "destroy-by" lines written here on apply day were wrong — the instance is
+  `PROVISIONED`, there was never a trial clock; it billed for the ~13 minutes
+  it was up.)*
+- Destroyed (`enable_spanner=false` re-applied): **2026-08-30** (23:50 UTC,
+  operator ADC): plan `0 to add, 0 to change, 8 to destroy` — exactly the
+  module's — then `Apply complete! Resources: 0 added, 0 changed, 8
+  destroyed`; `gcloud spanner instances list` → `Listed 0 items.`; state
+  keeps the 21 free-tier entries (two datasets, bucket, SA + grants, budget,
+  API enablements). **Nothing billable is up.** The two Spanner-side API
+  enablements stay on (free, like the root set).
+- Second apply (Amendments E–F's live proof): **2026-08-31** (02:30 UTC,
+  operator ADC, no detour — the SA was in state): `Plan: 9 to add, 0 to
+  change, 0 to destroy` → `Apply complete! Resources: 9 added, 0 changed,
+  0 destroyed`; toggled re-plan `No changes`. Instance type `PROVISIONED`
+  (100 PU, `regional-us-central1`).
+- Second teardown (`enable_spanner=false … ALLOW_DESTROY=yes`):
+  **2026-08-31** (02:48 UTC): `Plan: 0 to add, 0 to change, 9 to destroy`
+  (the module's 8 + the custom role) → `Apply complete! Resources: 0 added,
+  0 changed, 9 destroyed`; `Listed 0 items.`; state 21; default plan `No
+  changes`. The custom role is soft-deleted; the third apply (below)
+  re-created it with NO detour — the google provider undeletes a
+  soft-deleted custom role on create — so step 1's undelete + import
+  detour is the SA's alone.
+- Third apply (round 4, Amendment N3's live re-proof — the Spanner read
+  path changed): **2026-08-31** (06:07 UTC, operator ADC): `Plan: 9 to add,
+  0 to change, 0 to destroy` → `Apply complete! Resources: 9 added, 0
+  changed, 0 destroyed`; toggled re-plan `No changes`; `INSTANCE_TYPE
+  PROVISIONED`, `STATE READY`. As the SA: `spanner-load OK: tiny — 22 dim
+  rows`; `test-int-spanner` `4 passed in 248.70s`; `writeback OK:
+  ontime-rate-recovery.ontime → spanner, 20 users, 0 written`.
+- Third teardown: a first attempt at 06:38 UTC failed at refresh with 403
+  `serviceusage.services.use` — the ADC browser login had picked the
+  git-only Google account, not the GCP one (nothing changed; ARCHITECTURE
+  §8, step 5 below) — then, re-logged-in as the operator, **2026-08-31**
+  (06:42 UTC): `Plan: 0 to add, 0 to change, 9 to destroy` → `Apply
+  complete! Resources: 0 added, 0 changed, 9 destroyed`; `Listed 0 items.`;
+  state 21; re-plan `No changes`. ~35 minutes up ≈ 5¢. **Nothing billable
+  is up.**

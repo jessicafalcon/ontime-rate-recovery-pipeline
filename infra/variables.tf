@@ -17,6 +17,14 @@ variable "region" {
   description = "Region for the datasets, bucket, and (toggled) Composer/Spanner."
   type        = string
   default     = "us-central1"
+
+  # Interpolated into the spanner module's view SQL string literal (the
+  # EXTERNAL_QUERY connection path) and the instance config — the shape check
+  # every interpolated var carries (project_id/github_*/operator_principal).
+  validation {
+    condition     = can(regex("^[a-z]+-[a-z]+[0-9]{1,2}$", var.region))
+    error_message = "region must be a GCP region id like us-central1."
+  }
 }
 
 variable "enable_composer" {
@@ -26,7 +34,7 @@ variable "enable_composer" {
 }
 
 variable "enable_spanner" {
-  description = "Provision the Spanner module (Phase 10). Off — the 90-day trial clock only starts on apply."
+  description = "Provision the Spanner module (Phase 10). Off — the instance bills from creation (~$0.09/h): apply, prove, tear down in one session."
   type        = bool
   default     = false
 }

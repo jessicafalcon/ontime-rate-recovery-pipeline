@@ -135,7 +135,12 @@ Cap is the architect's call: compare this table to round N−1's.
 
 The two-round rule (CLAUDE.md Workflow rules, "Review cap") is applied by a
 human reading two tables, not by this command — a parser that decided the cap
-would itself become the thing under review (DECISIONS "Process").
+would itself become the thing under review (DECISIONS "Process"). When it
+fires, the disposition is a fix amendment that replaces the mechanism's KIND
+(denylist → allowlist or strict parse; a mapping of ours → the library's call
+tested on the real type — CLAUDE.md "Boundary contract", "Adapter contract"),
+never a longer list; and correctness fixes land one per commit ("Fix
+commits").
 
 Close with the one line the developer decides on per finding: **fix
 (wording/test-only)**, **fix amendment (design change → spec paragraph first,

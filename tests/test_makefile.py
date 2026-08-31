@@ -24,6 +24,7 @@ SCRUB = (
     "FULL",
     "PROJECT",
     "VARS",
+    "ALLOW_DESTROY",
     "MAKEFLAGS",
     "MFLAGS",
 )
@@ -316,9 +317,10 @@ def test_power_passes_write_as_one_literal(value: str) -> None:
     ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""],
 )
 def test_writeback_and_pipeline_pass_profile_as_one_literal(value: str) -> None:
-    """Phase 8a: PROFILE reaches Python as one single-quoted token from either
-    origin; writeback/pipeline take no CONFIRM (non-destructive: create-if-not-
-    exists + upsert; a reset is `make drop-db … CONFIRM=yes`)."""
+    """Phase 8a (amended Phase 10): PROFILE reaches Python as one single-quoted
+    token from either origin. `pipeline` takes no CONFIRM (non-destructive on
+    the local target); `writeback` grew TARGET/PROJECT/CONFIRM for
+    TARGET=spanner — the default duckdb path still needs none."""
     quoted = "'" + value.replace("'", "'\\''") + "'"
     for target in ("writeback", "pipeline"):
         for origin in ("cmdline", "env"):
@@ -329,7 +331,81 @@ def test_writeback_and_pipeline_pass_profile_as_one_literal(value: str) -> None:
             )
             assert f"serving.cli {target} {quoted}" in out, (target, origin, out)
             assert "pwned" not in out.replace(value, "")
-            assert "--confirm" not in out  # no CONFIRM knob
+            if target == "pipeline":
+                assert "--confirm" not in out  # no CONFIRM knob
+
+
+# --------------------------- Phase 10: writeback TARGET=spanner, spanner targets
+
+
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_writeback_passes_target_and_project_as_one_literal(value: str) -> None:
+    """Round 2 #15: the threat-model row's `"; ` / `$(shell …)` / `../x` claim
+    for `writeback` is pinned on TARGET and PROJECT too — each reaches
+    serving.cli as one single-quoted token from either origin, never
+    expanded, with the CONFIRM origin word beside them."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for var, flag in (("TARGET", "--target"), ("PROJECT", "--project")):
+        for origin in ("cmdline", "env"):
+            kv = {"PROFILE": "tiny", var: value}
+            out = _make_n(
+                "writeback",
+                kv if origin == "cmdline" else {},
+                kv if origin == "env" else {},
+            )
+            assert f"{flag} {quoted}" in out, (var, origin, out)
+            assert "serving.cli writeback 'tiny'" in out
+            assert "pwned" not in out.replace(value, "")
+            assert "--confirm-origin '" in out
+
+
+def test_writeback_target_confirm_from_command_line_only() -> None:
+    """Phase 10: the writeback recipe carries `--confirm-origin '$(origin
+    CONFIRM)'` and forwards TARGET/PROJECT unexpanded, so an env-exported
+    CONFIRM reads `environment` and Python refuses the spanner target."""
+    out = _make_n("writeback", {"PROFILE": "tiny", "TARGET": "spanner"}, {})
+    assert "--confirm-origin 'command line'" not in out
+    assert "--target 'spanner'" in out
+    out = _make_n(
+        "writeback",
+        {"PROFILE": "tiny", "TARGET": "spanner", "CONFIRM": "yes"},
+        {},
+    )
+    assert "--confirm 'yes' --confirm-origin 'command line'" in out
+    out = _make_n(
+        "writeback",
+        {"PROFILE": "tiny", "TARGET": "spanner"},
+        {"CONFIRM": "yes"},
+    )
+    assert "--confirm 'yes' --confirm-origin 'environment'" in out
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""],
+)
+def test_spanner_targets_pass_variables_as_one_literal(value: str) -> None:
+    """Phase 10: spanner-load and test-int-spanner forward PROFILE/PROJECT as
+    one single-quoted token from either origin, with the CONFIRM origin word
+    beside them; test-int-spanner defaults PROFILE to tiny."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for target, cli in (
+        ("spanner-load", "loader.cli spanner-load"),
+        ("test-int-spanner", "loader.cli test-int-spanner"),
+    ):
+        for origin in ("cmdline", "env"):
+            out = _make_n(
+                target,
+                {"PROFILE": "tiny", "PROJECT": value} if origin == "cmdline" else {},
+                {"PROFILE": "tiny", "PROJECT": value} if origin == "env" else {},
+            )
+            assert f"{cli} 'tiny' --project {quoted}" in out, (target, origin, out)
+            assert "pwned" not in out.replace(value, "")
+            assert "--confirm-origin '" in out
+    out = _make_n("test-int-spanner", {}, {})
+    assert "loader.cli test-int-spanner 'tiny'" in out  # PROFILE defaults to tiny
 
 
 # ----------------------------------- Phase 8b: dbt-build THROUGH, test-int-airflow
@@ -470,6 +546,24 @@ def test_tf_freeze_confirm_from_command_line_only() -> None:
     assert "--project" not in out
     out = _make_n("tf-freeze", {}, {"CONFIRM": "yes"})
     assert "--confirm 'yes' --confirm-origin 'environment'" in out
+
+
+def test_tf_apply_allow_destroy_from_command_line_only() -> None:
+    """Round 2 #3: tf-apply carries ALLOW_DESTROY with `$(origin ALLOW_DESTROY)`
+    verbatim (unexported, one literal); an exported one reads `environment`
+    and Python refuses a destroying plan. tf-destroy/tf-plan never take it."""
+    out = _make_n("tf-apply", {"PROJECT": "my-proj", "CONFIRM": "yes"}, {})
+    assert "--allow-destroy '' --allow-destroy-origin 'file'" in out
+    out = _make_n(
+        "tf-apply", {"PROJECT": "my-proj", "CONFIRM": "yes", "ALLOW_DESTROY": "yes"}, {}
+    )
+    assert "--allow-destroy 'yes' --allow-destroy-origin 'command line'" in out
+    out = _make_n(
+        "tf-apply", {"PROJECT": "my-proj", "CONFIRM": "yes"}, {"ALLOW_DESTROY": "yes"}
+    )
+    assert "--allow-destroy 'yes' --allow-destroy-origin 'environment'" in out
+    for target in ("tf-destroy", "tf-plan"):
+        assert "--allow-destroy" not in _make_n(target, {"PROJECT": "my-proj"}, {})
 
 
 def test_tf_apply_and_destroy_confirm_from_command_line_only() -> None:

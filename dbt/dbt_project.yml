@@ -25,7 +25,10 @@ clean-targets: ["target", "dbt_packages"]
 # incremental models, data-derived horizon = max(server_upload_time); a partition
 # is `final` once it is >= lookback_days behind it. Pinned identity, lookback_days
 # * 24 > late_arrival_max_hours on every profile (medium's 72 h is the floor), so
-# a late event never lands on a closed partition.
+# a late event never lands on a closed partition. Phase 10 adds
+# dim_user_identifier — which relation the raw.dim_user SOURCE resolves to
+# (§3.3's source-config swap): default the landed table on every target; the
+# Spanner integration run overrides it to the federation view dim_user_spanner.
 vars:
   skew_max_min: 5
   delivery_grace_min: 10
@@ -36,6 +39,7 @@ vars:
   shrinkage_pseudo_count: 5
   model_version: v1
   lookback_days: 5
+  dim_user_identifier: dim_user
 
 models:
   ontime:

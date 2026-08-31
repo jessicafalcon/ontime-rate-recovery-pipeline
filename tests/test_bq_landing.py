@@ -248,7 +248,10 @@ def test_parity_fixture_refuses_without_the_carried_gate(
     with pytest.raises(RuntimeError, match="refused"):
         parity.carried_gate()
     monkeypatch.setenv("OTR_CONFIRM_ORIGIN", "environment")
-    assert parity.carried_gate() == ("yes", "environment")  # passed through
+    with pytest.raises(RuntimeError, match="refused"):
+        parity.carried_gate()  # round 2 #7: the origin is re-checked, not just present
+    monkeypatch.setenv("OTR_CONFIRM_ORIGIN", "command line")
+    assert parity.carried_gate() == ("yes", "command line")  # passed through
     src = (ROOT / "tests" / "integration" / "test_int_bigquery.py").read_text()
     assert '"command line"' not in src  # never forged in the module
     # round 3 #10: the planted conflict is always cleaned up, and #9: the

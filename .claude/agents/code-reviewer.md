@@ -46,6 +46,23 @@ When invoked:
 - **Write-back contract.** Replace only on strictly greater
   `(model_version, computed_as_of)`, keyed `user_id`; a caller-supplied
   version or timestamp is a correctness finding.
+- **Boundary contract (CLAUDE.md Engineering contracts).** A guard over an
+  input the repo does not own — a vendor's JSON, the cloud-env domain
+  (`infra.cli.in_cloud_namespace`, an enumerated closed set — prefixes, suffix,
+  names, the redirection class — the vendor scan a coverage aid), a
+  library's result type, a CLI's output —
+  must be an allowlist over a closed set or a strict parse to a declared
+  shape, with a test pinning the set EXACTLY. A regex of bad names, a
+  search for one bad verb, a `.get(…, default)` on foreign JSON, a fix that
+  appends the previous round's case to an existing check: correctness
+  finding, and say which allowlist replaces it. A `die` that prints a
+  CREDENTIAL's value — any cloud-env name's value — is a security finding
+  (a rejected `PROJECT` or `VARS` item echoing its input is by design).
+- **Adapter contract.** A fake replaces the client, never the adapter. An
+  adapter over a vendor type that is more than one library call must have a
+  test on the REAL type built offline; a mapping that only the fakes
+  exercise (they re-implement it on DuckDB) is a correctness finding — it
+  runs nowhere.
 - **Dialect contract.** Exactly five dispatch macros (JSON extract,
   `timestamp_diff`, `safe_divide`, `to_local_time`, partition overwrite).
   Dialect-specific SQL outside a macro, or a sixth macro without a DECISIONS
