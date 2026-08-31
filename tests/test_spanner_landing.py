@@ -393,11 +393,16 @@ def test_conftest_scrub_uses_the_cloud_env_policy(tmp_path: Path) -> None:
             capture_output=True,
             text=True,
         )
-        outcomes[label] = (r.returncode, r.stdout[-600:])
+        outcomes[label] = (r.returncode, r.stdout[-2000:])
     assert outcomes["scrubbed"][0] == 0, outcomes["scrubbed"][1]
-    assert outcomes["bare"][0] != 0, outcomes["bare"][
-        1
-    ]  # the probe bites without the scrub
+    # The probe bites without the scrub — and it is the probe's OWN assertion
+    # that failed, not a collection/import error a bare `!= 0` would also pass
+    # (round 6 #13): the node id ran and its unlisted_cloud_env assertion is
+    # what pytest reports.
+    bare_out = outcomes["bare"][1]
+    assert outcomes["bare"][0] != 0, bare_out
+    assert "::test_probe" in bare_out, bare_out
+    assert "unlisted_cloud_env" in bare_out, bare_out
     # and the function the scrub calls is itself the allowlist
     from infra.cli import CLOUD_ENV_ALLOW, unlisted_cloud_env
 
