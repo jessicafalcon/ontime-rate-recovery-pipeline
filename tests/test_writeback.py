@@ -1005,3 +1005,50 @@ def test_spanner_rows_come_from_the_library_by_name() -> None:
         "Db2", (Db,), {"__enter__": lambda self: _Backend(_streamed(shuffled, []))}
     )()  # type: ignore[attr-defined]
     assert client.read(sp.EXISTING_SQL) == []
+
+
+def test_bigquery_rows_come_from_the_library_by_name() -> None:
+    """Round 5 #10 (O4, missed in round 4 — the Adapter contract on the second
+    client): `GoogleQueryClient.query` maps by name through google-cloud-
+    bigquery's own `Row.items()`, exercised on REAL `Row`s built offline with
+    a shuffled field order and on an empty result — no client, no network."""
+    from google.cloud.bigquery.table import Row
+
+    from serving import spanner as sp
+
+    values = {
+        "user_id": "u-1",
+        "cohort_id": "c",
+        "send_hour_local": 8,
+        "send_minute_local": 0,
+        "tz": "UTC",
+        "confidence": 0.5,
+        "model_version": "v1",
+        "computed_as_of": datetime(2026, 1, 13, tzinfo=UTC),
+    }
+    names = list(reversed(wb.CANDIDATE_FIELDS))
+    rows = [Row(tuple(values[n] for n in names), {n: i for i, n in enumerate(names)})]
+
+    class Job:
+        def __init__(self, rows: list) -> None:
+            self._rows = rows
+
+        def result(self) -> object:
+            return iter(self._rows)
+
+    class Client:
+        def __init__(self, rows: list) -> None:
+            self.rows, self.sqls = rows, []
+
+        def query(self, sql: str) -> Job:
+            self.sqls.append(sql)
+            return Job(self.rows)
+
+    q = sp.GoogleQueryClient.__new__(sp.GoogleQueryClient)
+    q._client = Client(rows)  # type: ignore[attr-defined]
+    out = q.query("select 1")
+    assert q._client.sqls == ["select 1"]  # type: ignore[attr-defined]
+    assert out == [values]
+    assert wb.candidate_of(out[0]) == wb.Candidate(**values)
+    q._client = Client([])  # type: ignore[attr-defined]
+    assert q.query("select 1") == []
