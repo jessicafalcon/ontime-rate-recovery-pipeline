@@ -227,12 +227,14 @@ CLOUD_ENV_IGNORED = frozenset(
         "AWS_DEFAULT_REGION",
     }
 )
+# The settings the runbook uses — each a real vendor input, none an identity
+# (O3: the impersonation SETTING is not admitted — the runbook impersonates
+# with the login flag, and a selector of WHO acts is not a setting; nothing
+# here spawns gcloud, so its interpreter path is not admitted either).
 CLOUD_ENV_ALLOW = frozenset(
     {
         "CLOUDSDK_CONFIG",  # the gcloud/ADC config dir — where the ADC file lives
         "CLOUDSDK_CORE_PROJECT",  # a project default, not an identity
-        "CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT",  # WHO to impersonate (runbook)
-        "CLOUDSDK_PYTHON",  # gcloud's interpreter
         "GOOGLE_CLOUD_PROJECT",  # a project default, not an identity
     }
 )

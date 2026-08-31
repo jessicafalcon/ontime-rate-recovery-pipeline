@@ -1381,6 +1381,8 @@ UNLISTED_CLOUD_ENV = (
     "GOOGLE_GHA_CREDS_PATH",
     "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES",
     "GCLOUD_A_SPELLING_NOBODY_HAS_SEEN_YET",
+    "CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT",  # O3: an identity selector
+    "CLOUDSDK_PYTHON",
     "SPANNER_EMULATOR_HOST",  # round 5 #1 (O1): endpoint redirection → anonymous creds
     "BIGQUERY_EMULATOR_HOST",
     "STORAGE_EMULATOR_HOST",
@@ -1405,11 +1407,9 @@ def test_cli_refuses_a_credential_in_the_env_loudly(
         "GCE_METADATA_",
     )
     assert cli.CLOUD_ENV_SUFFIXES == ("_EMULATOR_HOST",)
-    assert cli.CLOUD_ENV_ALLOW == {
+    assert cli.CLOUD_ENV_ALLOW == {  # O3: the three runbook settings, exactly
         "CLOUDSDK_CONFIG",
         "CLOUDSDK_CORE_PROJECT",
-        "CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT",
-        "CLOUDSDK_PYTHON",
         "GOOGLE_CLOUD_PROJECT",
     }
     for name in UNLISTED_CLOUD_ENV:
