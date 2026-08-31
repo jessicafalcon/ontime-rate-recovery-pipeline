@@ -61,6 +61,9 @@ COLUMNS: tuple[str, ...] = CANDIDATE_FIELDS + ("written_at",)
 # 3 #3): the select list is generated from this tuple and `existing_of` maps
 # the row back by key, so a reordered select cannot swap two string columns.
 EXISTING_COLUMNS: tuple[str, ...] = ("user_id", "model_version", "computed_as_of")
+# The stored pair's declared types come from the SAME Candidate declaration, so
+# a column added to EXISTING_COLUMNS cannot lose its type check (round 6 #10).
+EXISTING_TYPES: dict[str, type] = {c: CANDIDATE_TYPES[c] for c in EXISTING_COLUMNS}
 
 
 def existing_sql(relation: str) -> str:
@@ -74,20 +77,30 @@ EXISTING_SQL = existing_sql(SEND_SCHEDULE)
 _SOURCE_ALIAS = {name: ("d" if name == "tz" else "s") for name in CANDIDATE_FIELDS}
 
 
+def _typed_cells(
+    row: dict[str, object], columns: tuple[str, ...], types: dict[str, type]
+) -> None:
+    """The declared-shape TYPE check BOTH reads share (round 6 #10): each cell
+    is its declared type (int excludes bool) or a loud refusal — never a
+    coercion. One mapper, so a column cannot be checked in one read and not the
+    other."""
+    for name in columns:
+        want, cell = types[name], row[name]
+        if not isinstance(cell, want) or (want is int and isinstance(cell, bool)):
+            raise ValueError(f"{name} is {type(cell).__name__}, want {want.__name__}")
+
+
 def candidate_of(row: dict[str, object]) -> Candidate:
     """A Candidate from a row keyed by column NAME (round 2 #9): the read maps
     by name like the write does, so a reordered select list or a swapped pair
     of same-typed columns cannot land in the wrong field. Missing or extra
-    keys refuse; a cell of the wrong declared type refuses (round 5 O4 — the
-    rule `existing_of` follows, on the read that reaches the served row)."""
+    keys refuse; a wrong-typed cell refuses via `_typed_cells` (round 5 O4 —
+    the rule `existing_of` follows too, round 6 #10)."""
     if set(row) != set(CANDIDATE_FIELDS):
         raise ValueError(
             f"candidate columns {sorted(row)} != {sorted(CANDIDATE_FIELDS)}"
         )
-    for name in CANDIDATE_FIELDS:
-        want, cell = CANDIDATE_TYPES[name], row[name]
-        if not isinstance(cell, want) or (want is int and isinstance(cell, bool)):
-            raise ValueError(f"{name} is {type(cell).__name__}, want {want.__name__}")
+    _typed_cells(row, CANDIDATE_FIELDS, CANDIDATE_TYPES)
     return Candidate(**{name: row[name] for name in CANDIDATE_FIELDS})
 
 
@@ -143,21 +156,16 @@ def read_existing(
 
 def existing_of(row: dict[str, object]) -> tuple[str, tuple[str, datetime]]:
     """One stored row, by column name → (user_id, (model_version, computed_as_of));
-    a row without exactly the EXISTING_COLUMNS keys, or a cell of the wrong
-    type, refuses — never coerces (Amendment J's rule, on the read)."""
+    a row without exactly the EXISTING_COLUMNS keys, or a wrong-typed cell,
+    refuses — never coerces (Amendment J's rule; the SAME `_typed_cells` check
+    candidate_of uses, round 6 #10)."""
     if set(row) != set(EXISTING_COLUMNS):
         raise ValueError(
             f"stored row has {sorted(row)}, want {sorted(EXISTING_COLUMNS)}"
         )
+    _typed_cells(row, EXISTING_COLUMNS, EXISTING_TYPES)
     user_id, version, ts = row["user_id"], row["model_version"], row["computed_as_of"]
-    if not isinstance(user_id, str) or not isinstance(version, str):
-        raise ValueError(
-            f"user_id/model_version are {type(user_id).__name__}/"
-            f"{type(version).__name__}, want str"
-        )
-    if not isinstance(ts, datetime):
-        raise ValueError(f"computed_as_of is {type(ts).__name__}, want datetime")
-    return user_id, (version, ts)
+    return user_id, (version, ts)  # type: ignore[return-value]
 
 
 def version_key(model_version: str) -> tuple[int]:
