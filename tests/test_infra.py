@@ -1447,9 +1447,15 @@ def test_cli_refuses_a_credential_in_the_env_loudly(
     assert cli.unlisted_cloud_env(
         {"GOOGLE_X": "1", "CLOUDSDK_CONFIG": "2", "PATH": "3"}
     ) == ["GOOGLE_X"]
-    assert (
-        cli.unlisted_cloud_env({}) == []
-    )  # round 5 #7: empty means empty, never a fallback
+    # {} is the empty mapping, never a fallback to os.environ (round 5 #7). The
+    # old `== []` was vacuous — the conftest scrub had already emptied the
+    # process env, so a fallback mutation passed too (round 6 #2, a SURVIVED
+    # hand-mutation). Pollute the env with an unlisted name and prove the
+    # explicit {} still returns [] while None (the default) DOES surface it.
+    monkeypatch.setenv("GOOGLE_POLLUTE", "1")
+    assert cli.unlisted_cloud_env({}) == []
+    assert "GOOGLE_POLLUTE" in cli.unlisted_cloud_env()
+    monkeypatch.delenv("GOOGLE_POLLUTE")
 
 
 def test_cloud_env_policy_covers_every_vendor_declared_name() -> None:
