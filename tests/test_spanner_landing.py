@@ -4,6 +4,7 @@ CLI gates before any client. No service, no network."""
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from datetime import UTC, date, datetime
@@ -347,16 +348,58 @@ def test_every_cloud_command_refuses_a_credential_in_the_env(
     assert f"refused — {var} in the environment" in capsys.readouterr().out
 
 
-def test_conftest_scrub_uses_the_cloud_env_policy() -> None:
-    """Round 4 #8 (the tester's b3′ survivor): tests/conftest.py scrubs with
-    the gate's own `infra.cli.unlisted_cloud_env` — no second list or pattern
-    that could drift from the policy; and the function itself is an allowlist
-    over the three prefixes (a listed setting stays, anything else goes)."""
+def test_conftest_scrub_uses_the_cloud_env_policy(tmp_path: Path) -> None:
+    """Round 4 #8 → round 5 #6 (O6): BEHAVIOURAL, not a source grep. A child
+    pytest with tests/conftest.py copied beside a probe, run with unlisted
+    Google-namespace names, an emulator host and a TF_VAR_* exported, must
+    see NONE of them through the gate's own functions and still see the
+    listed setting; the same probe WITHOUT the conftest must fail — so the
+    scrub, not the environment, is what passes it. A second list or pattern
+    in the scrub that missed any of these would fail the first half."""
+    import shutil
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parent.parent
+    probe_src = (
+        "import os\n"
+        "from infra.cli import env_tf_vars, unlisted_cloud_env\n\n"
+        "def test_probe() -> None:\n"
+        "    assert unlisted_cloud_env() == [] and env_tf_vars() == []\n"
+        "    assert os.environ['CLOUDSDK_CONFIG'] == 'keep'\n"
+    )
+    poisoned = {
+        **os.environ,
+        "GOOGLE_APPLICATION_CREDENTIALS": "/k.json",
+        "GCLOUD_KEYFILE_JSON": "{}",
+        "CLOUDSDK_AUTH_ACCESS_TOKEN": "t",
+        "SPANNER_EMULATOR_HOST": "h:1",
+        "GCE_METADATA_HOST": "h:2",
+        "TF_VAR_enable_spanner": "true",
+        "TF_CLI_ARGS_apply": "-x",
+        "CLOUDSDK_CONFIG": "keep",
+    }
+    outcomes = {}
+    for label, with_conftest in (("scrubbed", True), ("bare", False)):
+        d = tmp_path / label
+        d.mkdir()
+        (d / "test_probe.py").write_text(probe_src)
+        if with_conftest:
+            shutil.copy(root / "tests" / "conftest.py", d / "conftest.py")
+        r = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(d)],
+            env=poisoned,
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        outcomes[label] = (r.returncode, r.stdout[-600:])
+    assert outcomes["scrubbed"][0] == 0, outcomes["scrubbed"][1]
+    assert outcomes["bare"][0] != 0, outcomes["bare"][
+        1
+    ]  # the probe bites without the scrub
+    # and the function the scrub calls is itself the allowlist
     from infra.cli import CLOUD_ENV_ALLOW, unlisted_cloud_env
 
-    src = (Path(__file__).parent / "conftest.py").read_text()
-    assert "from infra.cli import unlisted_cloud_env" in src
-    assert "unlisted_cloud_env()" in src
-    assert "KEYFILE" not in src and "re.compile" not in src
     env = {k: "v" for k in CLOUD_ENV_ALLOW} | {"GOOGLE_NEW": "v", "OTHER_TOKEN": "v"}
     assert unlisted_cloud_env(env) == ["GOOGLE_NEW"]
