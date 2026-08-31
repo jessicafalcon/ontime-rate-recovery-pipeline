@@ -22,7 +22,7 @@ variable "region" {
   # EXTERNAL_QUERY connection path) and the instance config — the shape check
   # every interpolated var carries (project_id/github_*/operator_principal).
   validation {
-    condition     = can(regex("^[a-z]+-[a-z]+[0-9]$", var.region))
+    condition     = can(regex("^[a-z]+-[a-z]+[0-9]{1,2}$", var.region))
     error_message = "region must be a GCP region id like us-central1."
   }
 }

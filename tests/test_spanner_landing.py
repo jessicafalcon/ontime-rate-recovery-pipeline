@@ -4,7 +4,6 @@ CLI gates before any client. No service, no network."""
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
 from datetime import UTC, date, datetime
@@ -91,6 +90,13 @@ def test_int_spanner_fixture_refuses_without_the_carried_gate(
     monkeypatch.setenv("OTR_CONFIRM", "yes")
     with pytest.raises(RuntimeError, match="refused"):
         integ.carried_gate()
+    monkeypatch.setenv("OTR_CONFIRM_ORIGIN", "environment")
+    with pytest.raises(RuntimeError, match="refused"):
+        integ.carried_gate()  # round 2 #7: an env-origin pair is refused here too
+    monkeypatch.setenv("OTR_CONFIRM_ORIGIN", "command line")
+    assert integ.carried_gate() == ("yes", "command line")
+    src = (ROOT / "tests" / "integration" / "test_int_spanner.py").read_text()
+    assert '"command line"' not in src  # never forged: loader.cli.confirmed decides
 
 
 def test_spanner_load_cli_gates_before_any_client(
@@ -208,10 +214,125 @@ def test_spanner_clients_disable_the_builtin_metrics_exporter() -> None:
     `disable_builtin_metrics=True` — no Cloud Monitoring exporter thread, no
     unreviewed egress, no failing exports under a SA with no monitoring grant
     (dbt telemetry is off for the same reason)."""
-    calls = []
-    for path in (ROOT / "loader" / "spanner.py", ROOT / "serving" / "spanner.py"):
-        text = path.read_text()
-        calls += re.findall(r"spanner\.Client\(([^)]*)\)", text)
-    assert len(calls) == 2, calls
-    assert all("disable_builtin_metrics=True" in c for c in calls), calls
-    assert "OTR_GCP_PROJECT" not in os.environ  # no leak from a sibling test
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "*.py"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    calls: list[tuple[str, str]] = []
+    for rel in tracked:  # the whole tracked tree (round 2 #5), not a fixed list
+        text = (ROOT / rel).read_text()
+        calls += [(rel, c) for c in re.findall(r"spanner\.Client\(([^)]*)\)", text)]
+    assert {rel for rel, _ in calls} == {"loader/spanner.py", "serving/spanner.py"}, (
+        calls
+    )
+    assert all("disable_builtin_metrics=True" in c for _, c in calls), calls
+
+
+def test_cell_refuses_instead_of_coercing() -> None:
+    """Round 2 #10: an empty REQUIRED cell and an offset-bearing timestamp are
+    refusals (the contract is naive UTC wall times and REQUIRED means
+    present), beside the values the contract does admit."""
+    fields = {f["name"]: f for f in spanner.dim_fields()}
+    assert spanner._cell("", fields["valid_to"]) is None  # NULLABLE: the open row
+    with pytest.raises(ValueError, match="REQUIRED"):
+        spanner._cell("", fields["user_id"])
+    with pytest.raises(ValueError, match="REQUIRED"):
+        spanner._cell("", fields["valid_from"])
+    with pytest.raises(ValueError, match="offset"):
+        spanner._cell("2026-01-01T00:00:00+09:00", fields["valid_from"])
+    with pytest.raises(ValueError, match="offset"):
+        spanner._cell("2026-01-01T00:00:00Z", fields["valid_to"])
+    got = spanner._cell("2026-01-01T00:00:00", fields["valid_from"])
+    assert got == datetime(2026, 1, 1, tzinfo=UTC)
+    assert spanner._cell("2026-01-01", fields["signup_date"]) == date(2026, 1, 1)
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        "u-1,UTC,c,2026-01-01,2026-01-01T00:00:00",
+        "u-1,UTC,c,2026-01-01,2026-01-01T00:00:00,,extra",
+    ],
+)
+def test_row_width_drift_refuses(
+    row: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 2 #11 (the tester's surviving mutation): a data row with fewer or
+    more cells than the contract refuses with the line number — never a
+    truncated or positionally-shifted landing."""
+    dims = tmp_path / "dims"
+    dims.mkdir()
+    header = ",".join(f["name"] for f in spanner.dim_fields())
+    (dims / "dim_user.csv").write_text(f"{header}\n{row}\n")
+    monkeypatch.setattr(spanner.loader, "fixture_dir", lambda p: tmp_path)
+    store = FakeDim()
+    with pytest.raises(ValueError, match="line 2"):
+        spanner.load_dims("tiny", "my-proj", clients=lambda p: store)
+    assert store.upserts == 0
+
+
+CLOUD_ENTRY_POINTS = [
+    "bq-load",
+    "spanner-load",
+    "dbt-build:bigquery",
+    "test-int-bigquery",
+    "test-int-spanner",
+    "writeback:spanner",
+]
+
+
+@pytest.mark.parametrize("entry", CLOUD_ENTRY_POINTS)
+@pytest.mark.parametrize(
+    "var",
+    [
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_CREDENTIALS",
+        "GOOGLE_BACKUP_CREDENTIALS_JSON",
+        "GOOGLE_OAUTH_ACCESS_TOKEN",
+        "CLOUDSDK_AUTH_ACCESS_TOKEN",
+    ],
+)
+def test_every_cloud_command_refuses_a_credential_in_the_env(
+    entry: str, var: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Round 2 #2: a key file / inline key / bearer token in the environment
+    would silently become the identity of every google client. Every cloud
+    entry point refuses it (exit 2) BEFORE any client factory is resolved —
+    one policy (infra.cli.refuse_keyfile_env) behind the one gate
+    (loader.cli.require_confirm), matched by name shape so a new spelling is
+    caught too."""
+    import subprocess
+
+    from serving import cli as scli
+    from serving import spanner as sp
+
+    def boom(*a: object, **k: object) -> object:
+        raise AssertionError("a client factory / child resolved despite a keyfile env")
+
+    monkeypatch.setattr(spanner, "default_clients", boom)
+    monkeypatch.setattr(sp, "default_query_clients", boom)
+    monkeypatch.setattr(sp, "default_spanner_clients", boom)
+    monkeypatch.setattr(cli.bq, "default_clients", boom)
+    monkeypatch.setattr(subprocess, "run", boom)
+    monkeypatch.setenv(var, "/tmp/key.json")
+    gate = ("yes", "command line")
+    proj = "ontime-rate-recovery"
+    calls = {
+        "bq-load": lambda: cli.bq_load("tiny", proj, *gate),
+        "spanner-load": lambda: cli.spanner_load("tiny", proj, *gate),
+        "dbt-build:bigquery": lambda: cli.dbt_build(
+            "tiny", "bigquery", *gate, project=proj
+        ),
+        "test-int-bigquery": lambda: cli.int_bigquery("tiny", proj, *gate),
+        "test-int-spanner": lambda: cli.int_spanner("tiny", proj, *gate),
+        "writeback:spanner": lambda: scli.writeback("tiny", "spanner", proj, *gate),
+    }
+    with pytest.raises(SystemExit) as e:
+        calls[entry]()
+    assert e.value.code == 2
+    assert f"refused — {var} in the environment" in capsys.readouterr().out

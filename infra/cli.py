@@ -7,6 +7,12 @@ tf-validate — offline: `init -backend=false -lockfile=readonly` + `validate` +
               `fmt -check`. No auth; the pinned lock is never rewritten.
 tf-plan     — reads GCP APIs (ADC/WIF); shows the diff. Non-destructive.
 tf-apply    — creates cloud resources. CONFIRM=yes from the command line only.
+              Plans FIRST (`plan -out`), reads the plan back (`show -json`) and
+              REFUSES a plan that destroys anything unless ALLOW_DESTROY=yes
+              also has command-line origin — an apply that omits a toggle
+              (`enable_spanner=true` while Spanner is up) would otherwise be a
+              silent teardown (Phase 10 review round 2 #3). The saved plan is
+              what gets applied: the plan you were shown is the apply you get.
 tf-destroy  — deletes them. CONFIRM=yes from the command line only.
 tf-freeze   — rewrites infra/MANIFEST.sha256 (the content pin over every file
               Terraform loads — `*.tf`, `*.tf.json` — plus the provider lock;
@@ -26,10 +32,12 @@ tests exercise the guards against a fake — a real terraform is never spawned b
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import NoReturn
@@ -175,6 +183,15 @@ ENV_ALLOW = (
     "HTTPS_PROXY",
 )
 ENV_REFUSE_PREFIXES = ("TF_VAR_", "TF_CLI_ARGS")
+# A credential in the environment (a key file path, an inline key, a bearer
+# token) would silently become the identity of ANY google client — the
+# allowlist already keeps it from terraform; every cloud command refuses it
+# LOUDLY instead (Phase 10 review round 2 #2): auth is the ADC file, never a
+# key. Matched by name shape so a new `GOOGLE_*_CREDENTIALS*` spelling is
+# caught without a list edit.
+KEYFILE_ENV_RE = re.compile(
+    r"^(GOOGLE_.*CREDENTIALS.*|GOOGLE_OAUTH_ACCESS_TOKEN|CLOUDSDK_AUTH_ACCESS_TOKEN)$"
+)
 
 
 def tf_env() -> dict[str, str]:
@@ -187,6 +204,23 @@ def env_tf_vars() -> list[str]:
     Terraform would read them unasked with nothing in the argv showing it. The
     allowlist already drops them; this names them so the refusal is loud."""
     return sorted(k for k in os.environ if k.startswith(ENV_REFUSE_PREFIXES))
+
+
+def keyfile_env() -> list[str]:
+    return sorted(k for k in os.environ if KEYFILE_ENV_RE.match(k))
+
+
+def refuse_keyfile_env(what: str) -> None:
+    """The ONE keyfile policy for every cloud command (tf-plan/apply/destroy,
+    bq-load, spanner-load, dbt-build on a cloud target, the write-back's
+    Spanner target, test-int-*): a credential-bearing variable in the
+    environment is a refusal, before any client or child exists."""
+    found = keyfile_env()
+    if found:
+        die(
+            f"{what}: refused — {', '.join(found)} in the environment would become "
+            "the identity of every google client; unset it (auth is ADC, never a key)"
+        )
 
 
 def refuse_env_tf_vars(cmd: str) -> None:
@@ -210,6 +244,35 @@ def refuse_auto_tfvars(cmd: str) -> None:
 Runner = Callable[..., subprocess.CompletedProcess]
 
 
+def planned_deletes(show_json: str) -> list[str]:
+    """Resource addresses a saved plan would delete (`terraform show -json`'s
+    `resource_changes[].change.actions` containing `delete` — a replace
+    counts: it is a delete). Empty for a create/update-only plan."""
+    plan = json.loads(show_json or "{}")
+    return sorted(
+        rc["address"]
+        for rc in plan.get("resource_changes", [])
+        if "delete" in rc.get("change", {}).get("actions", [])
+    )
+
+
+def require_allow_destroy(deletes: list[str], allow: str, origin: str) -> None:
+    """A plan with destroys applies only with ALLOW_DESTROY=yes from the
+    command line ($(origin ALLOW_DESTROY), like CONFIRM): the toggle-flip
+    teardown says so explicitly; an apply that merely forgot a toggle does not."""
+    if not deletes:
+        return
+    if origin == "command line" and allow == "yes":
+        return
+    die(
+        "tf-apply: refused — the plan destroys "
+        + ", ".join(deletes)
+        + "; if that is intended (the toggle-flip teardown), re-run with "
+        "ALLOW_DESTROY=yes on the command line; if not, the VARS you passed "
+        "omit a toggle that is currently applied"
+    )
+
+
 def _run(runner: Runner, argv: list[str], label: str) -> int | None:
     """Run one terraform argv through the injected runner; returns the exit code,
     or None when the binary is missing (a clean FAIL, already reported — None is a
@@ -221,6 +284,52 @@ def _run(runner: Runner, argv: list[str], label: str) -> int | None:
         return None
 
 
+def _apply(
+    runner: Runner, var: list[str], project: str, allow: str, allow_origin: str
+) -> int:
+    """plan -out → show -json → (refuse on destroys unless allowed) → apply
+    <planfile>. The plan file holds variable values, so it lives in TMPDIR
+    and is removed on every path."""
+    fd, plan_path = tempfile.mkstemp(prefix="tfplan-", suffix=".bin")
+    os.close(fd)
+    try:
+        rc = _run(
+            runner,
+            _TF + ["plan", "-input=false", f"-out={plan_path}", *var],
+            "tf-apply",
+        )
+        if rc is None:
+            return 1
+        if rc != 0:
+            print(f"tf-apply FAIL: {project} (plan)")
+            return 1
+        try:
+            shown = runner(
+                _TF + ["show", "-json", plan_path],
+                env=tf_env(),
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            print("tf-apply FAIL: terraform not on PATH")
+            return 1
+        if shown.returncode != 0:
+            print(f"tf-apply FAIL: {project} (show)")
+            return 1
+        require_allow_destroy(planned_deletes(shown.stdout), allow, allow_origin)
+        rc = _run(runner, _TF + ["apply", "-input=false", plan_path], "tf-apply")
+        if rc is None:
+            return 1
+        if rc != 0:
+            print(f"tf-apply FAIL: {project}")
+            return 1
+        print(f"tf-apply OK: {project}")
+        return 0
+    finally:
+        if os.path.exists(plan_path):
+            os.unlink(plan_path)
+
+
 def tf(
     cmd: str,
     project: str = "",
@@ -229,6 +338,8 @@ def tf(
     runner: Runner = subprocess.run,
     vars_: str = "",
     vars_origin: str = "command line",
+    allow_destroy: str = "",
+    allow_destroy_origin: str = "",
 ) -> int:
     if cmd in CLOUD_MUTATING:
         require_confirm(cmd, confirm, origin)
@@ -249,10 +360,12 @@ def tf(
         return 0
     validate_project(project)
     refuse_auto_tfvars(cmd)
+    refuse_keyfile_env(f"tf-{cmd}")
     var = ["-var", f"project_id={project}", *parse_vars(vars_, vars_origin)]
+    if cmd == "apply":
+        return _apply(runner, var, project, allow_destroy, allow_destroy_origin)
     argv = {
         "plan": _TF + ["plan", "-input=false", *var],
-        "apply": _TF + ["apply", "-input=false", "-auto-approve", *var],
         "destroy": _TF + ["destroy", "-input=false", "-auto-approve", *var],
     }[cmd]
     rc = _run(runner, argv, f"tf-{cmd}")
@@ -278,6 +391,9 @@ def main(argv: list[str] | None = None) -> int:
         if name in CONFIRM_GATED:
             p.add_argument("--confirm", default="")
             p.add_argument("--confirm-origin", default="")
+        if name == "apply":
+            p.add_argument("--allow-destroy", default="")
+            p.add_argument("--allow-destroy-origin", default="")
     a = ap.parse_args(argv)
     if a.cmd == "validate":
         return tf("validate")
@@ -285,8 +401,19 @@ def main(argv: list[str] | None = None) -> int:
         return freeze(a.confirm, a.confirm_origin)
     if a.cmd == "plan":
         return tf("plan", a.project, vars_=a.vars, vars_origin=a.vars_origin)
+    if a.cmd == "apply":
+        return tf(
+            "apply",
+            a.project,
+            a.confirm,
+            a.confirm_origin,
+            vars_=a.vars,
+            vars_origin=a.vars_origin,
+            allow_destroy=a.allow_destroy,
+            allow_destroy_origin=a.allow_destroy_origin,
+        )
     return tf(
-        a.cmd,
+        "destroy",
         a.project,
         a.confirm,
         a.confirm_origin,

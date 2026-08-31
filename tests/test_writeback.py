@@ -355,6 +355,7 @@ def test_malformed_version_refuses_on_the_insert_path_too() -> None:
             spanner_clients=lambda p: store,
         )
     assert store.rows() == {} and store.upserts == 0  # refused before any write
+    assert not store.in_transaction()  # the abort rolled back, nothing left open
 
 
 def test_columns_are_the_golden_nine_and_row_of_maps_by_name() -> None:
@@ -458,9 +459,12 @@ class FakeQuery:
                 [c.user_id, c.tz],
             )
 
-    def query(self, sql: str) -> list[tuple]:
+    def query(self, sql: str) -> list[dict[str, object]]:
+        """Rows keyed by column name, like google-cloud-bigquery's Row."""
         self.sqls.append(sql)
-        return self.con.execute(_bq_sql(sql)).fetchall()
+        cur = self.con.execute(_bq_sql(sql))
+        names = [d[0] for d in cur.description]
+        return [dict(zip(names, r, strict=True)) for r in cur.fetchall()]
 
 
 class FakeSpanner:
@@ -509,24 +513,36 @@ class FakeSpanner:
 
     _in_txn = False
 
+    def _attempt(self, fn: Callable[[object], object]) -> object:
+        """One attempt inside a real transaction; an exception rolls it back
+        and propagates — run_in_transaction's shape (round 2 #13)."""
+        self.con.execute("begin transaction")
+        self._in_txn = True
+        self.attempts += 1
+        try:
+            out = fn(self)
+        except BaseException:
+            self.con.execute("rollback")
+            raise
+        finally:
+            self._in_txn = False
+        return out
+
     def transact(self, fn: Callable[[object], object]) -> object:
-        self.con.execute("begin transaction")
-        self._in_txn = True
-        try:
-            self.attempts += 1
-            fn(self)  # attempt 1: aborted
-        finally:
-            self._in_txn = False
+        self._attempt(fn)  # attempt 1: aborted by the store
         self.con.execute("rollback")
-        self.con.execute("begin transaction")
-        self._in_txn = True
-        try:
-            self.attempts += 1
-            out = fn(self)  # attempt 2: committed
-        finally:
-            self._in_txn = False
+        out = self._attempt(fn)  # attempt 2: committed
         self.con.execute("commit")
         return out
+
+    def in_transaction(self) -> bool:
+        """DuckDB: a `begin` with no commit/rollback leaves one open."""
+        try:
+            self.con.execute("begin transaction")
+        except duckdb.TransactionException:
+            return True
+        self.con.execute("rollback")
+        return False
 
     def rows(self) -> dict[str, tuple]:
         got = self.con.execute(
@@ -593,6 +609,7 @@ def test_spanner_writeback_second_run_writes_zero() -> None:
     assert all(r[AS_OF] == r[WRITTEN] for r in store.rows().values())
     assert all(r[AS_OF].tzinfo is not None for r in store.rows().values())
     before = store.rows()
+    upserts_after_run_1 = store.upserts
     n, written = sp.write_back(
         "my-proj",
         bq_clients=lambda p: FakeQuery(p, rows),
@@ -600,6 +617,7 @@ def test_spanner_writeback_second_run_writes_zero() -> None:
     )
     assert (n, written) == (2, 0)  # nothing strictly greater
     assert store.rows() == before
+    assert store.upserts == upserts_after_run_1  # the mutation ledger: no call at all
 
 
 def test_spanner_replace_only_on_strictly_greater() -> None:
@@ -625,7 +643,7 @@ def test_spanner_replace_only_on_strictly_greater() -> None:
     ]
     q = FakeQuery("my-proj", rows)
     assert all(
-        r[-1].tzinfo is None
+        r["computed_as_of"].tzinfo is None
         for r in q.query(wb.candidates_sql(*sp.relations("my-proj")))
     )
     n, written = sp.write_back(
@@ -706,3 +724,106 @@ def test_cloud_writeback_ok_line_names_the_warehouse_read(
             in out
         )
         assert "tiny" not in out
+
+
+def test_candidates_are_read_by_column_name() -> None:
+    """Round 2 #9: the READ maps by name like the write — a select list in any
+    order, or a row dict in any key order, lands every value in its field; a
+    missing or extra column refuses. candidates_sql names each Candidate field
+    exactly once, tz from the dims side, the rest from the scores side."""
+    from serving import spanner as sp
+
+    row = {
+        "tz": "Asia/Tokyo",
+        "cohort_id": "COHORT",
+        "computed_as_of": datetime(2026, 1, 12, 0, 47),
+        "confidence": 0.25,
+        "user_id": "U",
+        "send_minute_local": 41,
+        "model_version": "v3",
+        "send_hour_local": 7,
+    }
+    c = wb.candidate_of(row)
+    for name, value in row.items():
+        assert getattr(c, name) == value, name
+    with pytest.raises(ValueError):
+        wb.candidate_of({k: v for k, v in row.items() if k != "tz"})
+    with pytest.raises(ValueError):
+        wb.candidate_of({**row, "written_at": row["computed_as_of"]})
+    sql = wb.candidates_sql()
+    select = sql[len("select ") : sql.index(" from ")]
+    items = [x.strip() for x in select.split(",")]
+    assert items == [f"{'d' if f == 'tz' else 's'}.{f}" for f in wb.CANDIDATE_FIELDS]
+    # the cloud read goes through the same mapper: a fake returning keys in a
+    # different order than the select list still lands by name
+    rows = [_bq_row("u-000001", 8, "v1", datetime(2026, 1, 13))]
+
+    class Shuffled(FakeQuery):
+        def query(self, sql: str) -> list[dict[str, object]]:
+            return [dict(reversed(list(r.items()))) for r in super().query(sql)]
+
+    store = FakeSpanner("my-proj")
+    sp.write_back(
+        "my-proj",
+        bq_clients=lambda p: Shuffled(p, rows),
+        spanner_clients=lambda p: store,
+    )
+    got = dict(zip(wb.COLUMNS, store.rows()["u-000001"], strict=True))
+    assert (got["cohort_id"], got["tz"], got["send_hour_local"]) == ("c", "UTC", 8)
+
+
+def test_duckdb_writeback_is_one_transaction(fresh: Path) -> None:
+    """Round 2 #8 (Amendment A's DuckDB half): a failure between the delete and
+    the insert rolls the run back — the table is exactly what the run started
+    from, never a half-replaced one."""
+    before = send_schedule_hash(fresh)
+    con = duckdb.connect(str(fresh))
+    try:  # make one row stale so there IS a winner to replace
+        con.execute(
+            "update serving.send_schedule set computed_as_of = timestamp '2020-01-01', "
+            "written_at = timestamp '2020-01-01' where user_id = 'u-000001'"
+        )
+        stale = send_schedule_hash(fresh)
+    finally:
+        con.close()
+    real_apply = wb.apply_writeback
+
+    def delete_then_die(con: duckdb.DuckDBPyConnection, winners: list) -> None:
+        assert winners, "no winner to replace"
+        con.execute("delete from serving.send_schedule where user_id = 'u-000001'")
+        raise RuntimeError("simulated failure between delete and insert")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(wb, "apply_writeback", delete_then_die)
+        with pytest.raises(RuntimeError, match="simulated"):
+            wb.write_back("tiny", fresh)
+    assert (
+        send_schedule_hash(fresh) == stale
+    )  # rolled back: the stale row is still there
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(wb, "apply_writeback", real_apply)
+        assert wb.write_back("tiny", fresh)[1] == 1  # and the next run repairs it
+    assert send_schedule_hash(fresh) == before
+
+
+def test_duckdb_target_is_single_writer(fresh: Path) -> None:
+    """The stand-in's cross-process serialization is DuckDB's file lock: while
+    this process holds the database, a second process cannot open it at all —
+    so two write-backs cannot interleave on the DuckDB target (stated, and
+    pinned, per round 2 #8)."""
+    con = duckdb.connect(str(fresh))
+    try:
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import duckdb,sys; duckdb.connect(sys.argv[1]); print('opened')",
+                str(fresh),
+            ],
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        con.close()
+    assert probe.returncode != 0 and "opened" not in probe.stdout, probe.stdout
+    assert "lock" in probe.stderr.lower() or "IOException" in probe.stderr, probe.stderr

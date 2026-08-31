@@ -24,6 +24,7 @@ SCRUB = (
     "FULL",
     "PROJECT",
     "VARS",
+    "ALLOW_DESTROY",
     "MAKEFLAGS",
     "MFLAGS",
 )
@@ -337,6 +338,29 @@ def test_writeback_and_pipeline_pass_profile_as_one_literal(value: str) -> None:
 # --------------------------- Phase 10: writeback TARGET=spanner, spanner targets
 
 
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_writeback_passes_target_and_project_as_one_literal(value: str) -> None:
+    """Round 2 #15: the threat-model row's `"; ` / `$(shell …)` / `../x` claim
+    for `writeback` is pinned on TARGET and PROJECT too — each reaches
+    serving.cli as one single-quoted token from either origin, never
+    expanded, with the CONFIRM origin word beside them."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for var, flag in (("TARGET", "--target"), ("PROJECT", "--project")):
+        for origin in ("cmdline", "env"):
+            kv = {"PROFILE": "tiny", var: value}
+            out = _make_n(
+                "writeback",
+                kv if origin == "cmdline" else {},
+                kv if origin == "env" else {},
+            )
+            assert f"{flag} {quoted}" in out, (var, origin, out)
+            assert "serving.cli writeback 'tiny'" in out
+            assert "pwned" not in out.replace(value, "")
+            assert "--confirm-origin '" in out
+
+
 def test_writeback_target_confirm_from_command_line_only() -> None:
     """Phase 10: the writeback recipe carries `--confirm-origin '$(origin
     CONFIRM)'` and forwards TARGET/PROJECT unexpanded, so an env-exported
@@ -522,6 +546,24 @@ def test_tf_freeze_confirm_from_command_line_only() -> None:
     assert "--project" not in out
     out = _make_n("tf-freeze", {}, {"CONFIRM": "yes"})
     assert "--confirm 'yes' --confirm-origin 'environment'" in out
+
+
+def test_tf_apply_allow_destroy_from_command_line_only() -> None:
+    """Round 2 #3: tf-apply carries ALLOW_DESTROY with `$(origin ALLOW_DESTROY)`
+    verbatim (unexported, one literal); an exported one reads `environment`
+    and Python refuses a destroying plan. tf-destroy/tf-plan never take it."""
+    out = _make_n("tf-apply", {"PROJECT": "my-proj", "CONFIRM": "yes"}, {})
+    assert "--allow-destroy '' --allow-destroy-origin 'file'" in out
+    out = _make_n(
+        "tf-apply", {"PROJECT": "my-proj", "CONFIRM": "yes", "ALLOW_DESTROY": "yes"}, {}
+    )
+    assert "--allow-destroy 'yes' --allow-destroy-origin 'command line'" in out
+    out = _make_n(
+        "tf-apply", {"PROJECT": "my-proj", "CONFIRM": "yes"}, {"ALLOW_DESTROY": "yes"}
+    )
+    assert "--allow-destroy 'yes' --allow-destroy-origin 'environment'" in out
+    for target in ("tf-destroy", "tf-plan"):
+        assert "--allow-destroy" not in _make_n(target, {"PROJECT": "my-proj"}, {})
 
 
 def test_tf_apply_and_destroy_confirm_from_command_line_only() -> None:

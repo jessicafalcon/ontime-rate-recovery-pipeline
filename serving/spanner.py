@@ -40,9 +40,11 @@ T = TypeVar("T")
 
 
 class QueryClient(Protocol):
-    """The ONE BigQuery call the cloud read makes — a select; no DDL, no load."""
+    """The ONE BigQuery call the cloud read makes — a select; no DDL, no load.
+    Rows come back keyed by column NAME (the write path maps by name too —
+    round 2 #9)."""
 
-    def query(self, sql: str) -> list[tuple]: ...
+    def query(self, sql: str) -> list[dict[str, object]]: ...
 
 
 class Txn(Protocol):
@@ -74,8 +76,8 @@ class GoogleQueryClient:
 
         self._client = bigquery.Client(project=project)
 
-    def query(self, sql: str) -> list[tuple]:
-        return [tuple(r) for r in self._client.query(sql).result()]
+    def query(self, sql: str) -> list[dict[str, object]]:
+        return [dict(r.items()) for r in self._client.query(sql).result()]
 
 
 class _GoogleTxn:
@@ -171,7 +173,7 @@ def write_back(
     scores, dims = relations(project)
     candidates = [
         replace(c, computed_as_of=_utc(c.computed_as_of))
-        for c in (wb.Candidate(*r) for r in q.query(wb.candidates_sql(scores, dims)))
+        for c in map(wb.candidate_of, q.query(wb.candidates_sql(scores, dims)))
     ]
 
     def guard_and_write(txn: Txn) -> int:

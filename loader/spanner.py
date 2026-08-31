@@ -68,14 +68,24 @@ def dim_fields() -> list[dict[str, str]]:
 
 
 def _cell(value: str, field: dict[str, str]) -> object:
-    """One CSV cell to the contract's type. An empty NULLABLE cell is NULL (the
-    open SCD2 row's valid_to); timestamps are UTC instants, stamped so."""
-    if value == "" and field["mode"] == "NULLABLE":
-        return None
+    """One CSV cell to the contract's type, refusing — never coercing — a
+    value outside it (round 2 #10): an empty cell is NULL only for a NULLABLE
+    field (the open SCD2 row's valid_to) and a refusal for a REQUIRED one; a
+    timestamp is a naive UTC wall time by contract (generator/writer.py), so
+    one carrying an offset is a refusal, not a silently re-stamped instant."""
+    if value == "":
+        if field["mode"] == "NULLABLE":
+            return None
+        raise ValueError(f"{field['name']}: empty cell for a REQUIRED field")
     if field["type"] == "DATE":
         return date.fromisoformat(value)
     if field["type"] == "TIMESTAMP":
-        return datetime.fromisoformat(value).replace(tzinfo=UTC)
+        ts = datetime.fromisoformat(value)
+        if ts.tzinfo is not None:
+            raise ValueError(
+                f"{field['name']}: {value!r} carries an offset; naive UTC only"
+            )
+        return ts.replace(tzinfo=UTC)
     return value
 
 
@@ -90,9 +100,13 @@ def read_rows(profile: str) -> tuple[tuple[str, ...], list[tuple]]:
         header = tuple(next(reader))
         if header != names:
             raise ValueError(f"dim_user.csv header {header} != contract {names}")
-        rows = [
-            tuple(_cell(v, f) for v, f in zip(r, fields, strict=True)) for r in reader
-        ]
+        rows = []
+        for i, r in enumerate(reader, start=2):  # 1 is the header
+            if len(r) != len(fields):
+                raise ValueError(
+                    f"dim_user.csv line {i}: {len(r)} cells != contract {len(fields)}"
+                )
+            rows.append(tuple(_cell(v, f) for v, f in zip(r, fields, strict=True)))
     return names, rows
 
 

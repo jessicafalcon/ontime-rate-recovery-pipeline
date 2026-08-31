@@ -11,7 +11,8 @@
 # generator/models.py and pinned by tests/test_dbt_sources.py) and
 # `send_schedule` (the §2.9 nine-column serving table the DuckDB stand-in
 # mirrors), the BigQuery connection + `raw.dim_user_spanner` federation view
-# (EXTERNAL_QUERY — §3.3's source swap), and two scoped grants. DDL is
+# (EXTERNAL_QUERY — §3.3's source swap), one custom data-plane role and two
+# scoped grants. DDL is
 # inlined here, not a side file: `tf-freeze`'s manifest pins *.tf only, and a
 # file it does not pin could drift under the frozen tree.
 
@@ -131,14 +132,50 @@ resource "google_bigquery_connection" "spanner_dims" {
 # a grant to an identity that never participates — and one that does not
 # exist until something else provisions it (the first apply failed on it).
 
+# The data-plane role the pipeline SA gets on the ONE database (review round
+# 2 #1): every predefined role that can WRITE (`roles/spanner.databaseUser`)
+# also carries `spanner.databases.updateDdl` — schema rights the write-back
+# and the landing never use and the protocols say they must not have
+# ("Terraform owns the schema"). So the grant is a custom role holding
+# exactly the data-plane permissions (read, select, write, the two
+# transaction kinds, sessions, the two metadata reads the client performs)
+# — pinned as an exact set by tests/test_infra.py. It lives HERE, not at the
+# root: a custom role may only carry permissions of an enabled API
+# (docs: "a permission might not be available for use in custom roles if
+# you have not enabled the API"), and the Spanner API is enabled by this
+# module. Deleting a custom role reserves its id for 7 days (undeletable in
+# that window) — the same shape as the SA's 30-day reservation; the runbook
+# carries the `gcloud iam roles undelete` + `terraform import` detour.
+resource "google_project_iam_custom_role" "data_user" {
+  project     = var.project_id
+  role_id     = "ontimeSpannerDataUser"
+  title       = "On-Time Spanner data user (read/write, no DDL)"
+  description = "The pipeline SA's data-plane access to the ontime database: read, select, write, transactions, sessions. No updateDdl, no operations, no IAM."
+  permissions = [
+    "spanner.databases.beginOrRollbackReadWriteTransaction",
+    "spanner.databases.beginReadOnlyTransaction",
+    "spanner.databases.get",
+    "spanner.databases.read",
+    "spanner.databases.select",
+    "spanner.databases.write",
+    "spanner.instances.get",
+    "spanner.sessions.create",
+    "spanner.sessions.delete",
+    "spanner.sessions.get",
+    "spanner.sessions.list",
+  ]
+
+  depends_on = [google_project_service.spanner]
+}
+
 # The pipeline SA writes send_schedule (the write-back), lands dim_user, and
-# is the principal the federated read runs as: databaseUser on the ONE
-# database — no instance/database admin.
+# is the principal the federated read runs as: the data-plane custom role
+# above on the ONE database — no DDL, no instance/database admin.
 resource "google_spanner_database_iam_member" "pipeline_user" {
   project  = var.project_id
   instance = google_spanner_instance.this.name
   database = google_spanner_database.this.name
-  role     = "roles/spanner.databaseUser"
+  role     = google_project_iam_custom_role.data_user.name
   member   = "serviceAccount:${var.sa_email}"
 }
 

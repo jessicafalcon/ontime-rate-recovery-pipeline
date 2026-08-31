@@ -67,7 +67,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   types from `bq_schema.json`, idempotent batch upsert, injectable client),
   `cli.py` (`load`, `bq-load`, `spanner-load`, `dbt-build` — lands by
   target — `drop-db`, `test-int-bigquery`, `test-int-spanner`).
-  Pipeline code — guarded by `test_truth_isolation.py`.
+  `require_confirm` is the ONE cloud gate (CONFIRM origin + the keyfile
+  policy); `confirmed()` its predicate, shared with the integration
+  fixtures' carried gate. Pipeline code — guarded by
+  `test_truth_isolation.py`.
 - `eval/` *(Phase 3+)* — the ONLY code that reads truth: `score.py` (label
   accuracy vs `truth/prompts.jsonl`; Phase 5: reachable-centre MAE and
   coverage vs `truth/users.jsonl`, off the model's own columns — never a
@@ -91,7 +94,9 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `v10 > v2`, non-`v<int>` refuses; `candidates_sql(scores, dims)` the ONE
   read with a Golden-style relation override; `winners_of` shared;
   `written_at = computed_as_of`; `COLUMNS` the ONE nine-column tuple every
-  writer uses, `row_of` by field name), `spanner.py` (Phase 10:
+  writer uses, `row_of` / `candidate_of` by field name on the write AND the
+  read, the select list generated from the fields; the DuckDB run is one
+  transaction on a single-writer file), `spanner.py` (Phase 10:
   `TARGET=spanner` — reads BigQuery `ontime`, then in ONE Spanner
   read-write transaction (`run_in_transaction`, retried on abort) reads the
   stored pairs and batch-`insert_or_update`s the winners; injectable
@@ -119,17 +124,22 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `tests/test_dbt_sources.py` against the contract renders — `gen-sources`
   never writes a `.tf`; a drift is a paste + `tf-freeze`), `EXTERNAL_QUERY`
   connection + `raw.dim_user_spanner` view (each column cast to the landing
-  schema's type), two database/connection-scoped grants, both to the SA
-  (the federated read runs as the querying principal — §8; type + scope
-  pinned; the gated modules have their own exact resource allowlists, no
-  data sources); `deletion_protection = false` — the scoped teardown is the
-  toggle flipped back (`tf-apply … VARS='enable_spanner=false'`), no
-  `MODULE`, no `-target`, and while Spanner is up EVERY apply must carry
-  `enable_spanner=true` (an omitted `VARS` is the teardown — DEPLOYMENT).
+  schema's type), the custom data-plane role `ontimeSpannerDataUser`
+  (exact permission set pinned; no `updateDdl` — every predefined writing
+  role has it), two database/connection-scoped grants, both to the SA (the
+  federated read runs as the querying principal — §8; type + scope pinned;
+  the gated modules have their own exact resource allowlists, no data
+  sources; `region` validated in the root and every module);
+  `deletion_protection = false` — the scoped teardown is the toggle flipped
+  back (`tf-apply … VARS='enable_spanner=false' ALLOW_DESTROY=yes`), no
+  `MODULE`, no `-target`; an apply that omits `enable_spanner=true` while
+  Spanner is up is REFUSED by the plan-first apply (DEPLOYMENT).
   `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`/`tf-freeze` on
   `CONFIRM=yes $(origin)`; toggles only as a command-line `VARS` → argv
-  `-var`, refuses `TF_VAR_*`/`TF_CLI_ARGS*` and auto-loaded tfvars, runs
-  terraform under an env allowlist — `fix/tf-vars-argv`) drives
+  `-var`, refuses `TF_VAR_*`/`TF_CLI_ARGS*`, auto-loaded tfvars and any
+  credential-bearing env var (`KEYFILE_ENV_RE` — the one policy every cloud
+  command shares), runs terraform under an env allowlist —
+  `fix/tf-vars-argv`) drives
   `make tf-validate|tf-plan|tf-apply|tf-destroy|tf-freeze`.
   `terraform.tfvars.example` only (never a `*.tfvars`); `.terraform.lock.hcl`
   is tracked (the provider pin); ADC/WIF, never a key. A pipeline dir — guarded
@@ -350,7 +360,16 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `TF_CLI_ARGS*` is in the environment, and plan/apply/destroy also while an
   auto-loaded `infra/terraform.tfvars` or `*.auto.tfvars{,.json}` exists
   (Amendment T) — the argv is the whole input by construction
-- `make tf-apply | tf-destroy PROJECT=<id> CONFIRM=yes [VARS=…]` *(Phase 9a)* — apply
+- `make tf-apply | tf-destroy PROJECT=<id> CONFIRM=yes [VARS=…]
+  [ALLOW_DESTROY=yes]` *(Phase 9a; plan-first apply Phase 10)* — apply
+  PLANS FIRST (`plan -out`), reads the saved plan back (`show -json`) and
+  REFUSES to apply one that destroys or replaces anything unless
+  `ALLOW_DESTROY=yes` also has command-line origin (`$(origin
+  ALLOW_DESTROY)`; the toggle-flip teardown passes it; an apply that merely
+  omitted a currently-applied toggle stops with the addresses printed); the
+  saved plan is what gets applied — no `-auto-approve` on apply. Any
+  `GOOGLE_*CREDENTIALS*` / access-token variable in the environment refuses
+  every project-taking `tf-*` (and every other cloud command) loudly. Apply
   creates the free-tier layer: 9 API enablements (free, kept on by destroy),
   two BigQuery datasets, a GCS staging bucket, a least-privilege service
   account with 4 scoped grants, and budget alerts at 50/150 in the billing
@@ -791,10 +810,11 @@ toggles only as a command-line `VARS='name=value,…'` → argv `-var`
 terraform child runs under an env allowlist (no keyfile env, no
 `TF_WORKSPACE`); two §8 gotchas (the impersonated-SA ADC cannot run
 Terraform — the first post-9b `tf-destroy` failed at refresh, no resource or
-state changed; env `TF_VAR_*`/`TF_CLI_ARGS*`). **The stack on
-`ontime-rate-recovery` was destroyed 2026-08-30** (re-auth as the operator,
-then `tf-destroy`) — nothing billable is up; the SA id is reserved again
-until ~2026-09-29 (undelete + import detour in DEPLOYMENT).
+state changed; env `TF_VAR_*`/`TF_CLI_ARGS*`). The post-9b `tf-destroy`
+(2026-08-30) emptied the stack; Phase 10's apply the same day re-created the
+free-tier layer (SA undeleted + imported, so it is live and in state — no
+detour until the next full `tf-destroy`). **Current stack: see the Phase 10
+paragraph below.**
 **Phase 10 in flight** (`phase-10-spanner-writeback`, spec approved
 2026-08-30, reconciliation items 1–6): offline complete — the TARGET-keyed
 read seam (`candidates_sql` relation override; `TARGET=spanner` reads
@@ -822,17 +842,28 @@ byte-identical, write-back idempotent with the DuckDB hash), `writeback OK:
 ontime-rate-recovery.ontime → spanner, 20 users, 0 written`. Trial clock
 started 2026-08-30 (ends 2026-11-28); torn down the same session (operator
 ADC, `8 destroyed`, `Listed 0 items.`) — dated lines in DEPLOYMENT.
-**Nothing billable is up; the free-tier layer (two datasets, bucket, SA,
-budget) is UP** — `make tf-destroy … CONFIRM=yes` when the phase is done
-with it. **Phase 10's Done-when is met.** NEXT: the scoped re-review (round
-2 over round 1's diff + Amendments A–D) and the coherence-auditor exit
-pass, then the PR.
+**Nothing billable is up; the free-tier layer (two datasets, bucket, SA +
+grants, budget — cents/month) IS up** — `make tf-destroy … CONFIRM=yes`
+when the phase is done with it. **Phase 10's Done-when is met.** **Review
+round 2 applied (2026-08-30, 21 findings):** Amendments E (custom
+data-plane role — `databaseUser` carries `updateDdl`), F (`tf-apply` plans
+first, applies the saved plan, refuses destroys without `ALLOW_DESTROY=yes`),
+G (a credential in the env refuses every cloud command, one policy), H (the
+DuckDB write-back is one transaction; single-writer pinned), I (the read
+maps by name), J (the landing refuses instead of coercing); `region`
+validated in every module; the metrics pin over the tracked tree;
+`carried_gate` through `loader.cli.confirmed`; records de-contradicted.
+**E and F are unverified live** — NEXT: an ask-first `enable_spanner=true`
+re-apply (proves the custom role and the plan-first apply; `test-int-spanner`
+under the narrower role) + its `ALLOW_DESTROY=yes` teardown, then round 3
+(scoped) and the coherence-auditor exit pass, then the PR.
 Open BACKLOG rows: **12** (Phase 10 struck: the write-back read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /
 a dim change mid-schedule / two live versions), the `loader/`→`landing/`
 rename (trigger: `fix/landing-package` after Phase 10 merges, before
-Phase 11); the Spanner-trial row's dated DEPLOYMENT lines land on apply day.
+Phase 11); the Spanner-trial row re-dated on apply day 2026-08-30 (clock
+runs to 2026-11-28; new trigger: every phase exit).
 Earlier: `fix/tf-vars-argv` struck the env-`TF_VAR_*` row; 9b struck: the two-datasets row, the DAG-landing
 row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
 (first 9b apply 2026-08-30); opened: the guard's contract residual (JSON

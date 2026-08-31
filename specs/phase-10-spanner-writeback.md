@@ -194,16 +194,16 @@ make test && make lint && make review-gate SPEC=specs/phase-10-spanner-writeback
 | Done-when | Proof (test file / `make` target / command output) |
 |---|---|
 | 1 | `tests/test_writeback.py::test_spanner_writeback_second_run_writes_zero`, `…::test_spanner_guard_and_write_are_one_retried_transaction` (fakes that EXECUTE the SQL on in-process DuckDB; Amendment A); live: `make test-int-spanner …` output `writeback OK: <project>.ontime → spanner, 20 users, 0 written` on run 2 + equal row hash |
-| 2 | `tests/test_writeback.py::test_version_orders_numerically_v10_beats_v2`, `…::test_malformed_version_refuses`, `…::test_malformed_version_refuses_on_the_insert_path_too` (Amendment B); mutation lines 1–2 |
-| 3 | `tests/test_writeback.py::test_reader_relations_per_target`, `…::test_writeback_reads_only_scores_and_dim_current` (the two read statements), `…::test_fakes_execute_the_read_contract`, `…::test_columns_are_the_golden_nine_and_row_of_maps_by_name` (ONE column tuple, values by name), `tests/test_pipeline.py` (existing `SEND_SCHEDULE_SHA256_TINY` pin unchanged), `tests/test_truth_isolation.py` |
-| 4 | `tests/integration/test_int_spanner.py::test_goldens_match_with_federated_dims`, `…::test_federated_view_rows_equal_seed`, `…::test_build_read_dims_through_the_federation_view` (dbt's manifest resolved the source to the view — the falsifier, Amendment C; live, behind `OTR_INT`); offline: `tests/test_dbt_sources.py` (identifier var + view SQL rendered with casts, hand edit fails), `tests/test_spanner_landing.py::test_dbt_build_admits_exactly_one_var_override` |
-| 5 | `tests/test_infra.py::test_spanner_module_is_count_gated_and_default_off`, `…::test_every_declared_resource_type_is_on_the_allowlist` (the gated modules' own exact allowlists), `…::test_spanner_grants_are_scoped_to_the_one_database_and_connection`, `…::test_spanner_names_pin_the_python_constants`, `…::test_input_shape_validations_exist` (`region`) (static), live `tf-plan` outputs (default: no spanner resource; toggled: only the module's), the dated `docs/DEPLOYMENT.md` lines, teardown apply output |
-| 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_spanner_targets_pass_variables_as_one_literal`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter`; the audited table in Threat model |
+| 2 | `tests/test_writeback.py::test_version_orders_numerically_v10_beats_v2`, `…::test_malformed_version_refuses`, `…::test_malformed_version_refuses_on_the_insert_path_too` (Amendment B), `…::test_duckdb_writeback_is_one_transaction` + `…::test_duckdb_target_is_single_writer` (Amendment H — the DuckDB half of "across runs"); mutation lines 1–2 |
+| 3 | `tests/test_writeback.py::test_reader_relations_per_target`, `…::test_writeback_reads_only_scores_and_dim_current` (the two read statements), `…::test_fakes_execute_the_read_contract`, `…::test_columns_are_the_golden_nine_and_row_of_maps_by_name` (ONE column tuple, values by name), `…::test_candidates_are_read_by_column_name` (Amendment I — the read by name too), `tests/test_pipeline.py` (existing `SEND_SCHEDULE_SHA256_TINY` pin unchanged), `tests/test_truth_isolation.py` |
+| 4 | `tests/integration/test_int_spanner.py::test_goldens_match_with_federated_dims`, `…::test_federated_view_rows_equal_seed`, `…::test_build_read_dims_through_the_federation_view` (dbt's manifest resolved the source to the view — the falsifier, Amendment C; live, behind `OTR_INT`); offline: `tests/test_dbt_sources.py` (identifier var + view SQL rendered with casts, hand edit fails), `tests/test_spanner_landing.py::test_dbt_build_admits_exactly_one_var_override`, `…::test_cell_refuses_instead_of_coercing` + `…::test_row_width_drift_refuses` (Amendment J — the landing refuses what the contract does not admit) |
+| 5 | `tests/test_infra.py::test_spanner_module_is_count_gated_and_default_off`, `…::test_every_declared_resource_type_is_on_the_allowlist` (the gated modules' own exact allowlists), `…::test_spanner_grants_are_scoped_to_the_one_database_and_connection`, `…::test_spanner_custom_role_is_the_exact_data_plane_set` (Amendment E), `…::test_spanner_names_pin_the_python_constants`, `…::test_input_shape_validations_exist` + `…::test_region_is_validated_wherever_it_is_declared` (`region`, root and every module) (static), live `tf-plan` outputs (default: `No changes` — no spanner resource; toggled: only the module's), the dated `docs/DEPLOYMENT.md` lines, teardown apply output |
+| 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `…::test_spanner_targets_pass_variables_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter` (the whole tracked tree), `…::test_every_cloud_command_refuses_a_credential_in_the_env` (Amendment G, six entry points × five variable shapes), `…::test_int_spanner_fixture_refuses_without_the_carried_gate` (origin re-checked through `loader.cli.confirmed`), `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy` (Amendment F), `…::test_cli_refuses_a_credential_in_the_env_loudly`; the audited table in Threat model |
 
 **Live status (2026-08-30, `ontime-rate-recovery`):** the live halves of
 Done-when 1, 4 and 5 ran after the ask-first apply:
 - Apply (operator ADC, after `gcloud iam service-accounts undelete
-  100054726773702357820` + `terraform import module.iam.google_service_account.pipeline …`):
+  <sa-unique-id>` (the numeric id, read from the local gitignored state backup — not a record) + `terraform import module.iam.google_service_account.pipeline …`):
   toggled plan `Plan: 27 to add, 0 to change, 0 to destroy` (18 root + the
   module's 9 as then written; the imported SA absent from the list); first
   apply 26/27 — the service-agent grant failed (`Service account
@@ -223,7 +223,17 @@ Done-when 1, 4 and 5 ran after the ask-first apply:
   8 to destroy` (exactly the module's), `make tf-apply … CONFIRM=yes` →
   `Apply complete! Resources: 0 added, 0 changed, 8 destroyed` (23:50 UTC);
   `gcloud spanner instances list` → `Listed 0 items.`; the dated lines are in
-  `docs/DEPLOYMENT.md` § Spanner. **Done-when 1–6 are met, live and offline.**
+  `docs/DEPLOYMENT.md` § Spanner. The DEFAULT plan after it (toggle at its
+  default, operator grant kept): `No changes. Your infrastructure matches the
+  configuration.` — zero Spanner resources (Done-when 5's first clause,
+  round 2 #21). **Done-when 1–6 are met, live and offline** at that HEAD.
+- **Unverified live at THIS head (review round 2, Amendments E–F):** the
+  custom data-plane role (`ontimeSpannerDataUser`) replacing
+  `databaseUser`, and the plan-first `tf-apply` with `ALLOW_DESTROY`. The
+  offline pins are green; the next ask-first `enable_spanner=true` apply
+  (permissions valid? the custom role applies? `test-int-spanner` still
+  `4 passed` under the narrower role?) and its `ALLOW_DESTROY=yes` teardown
+  are the live proof, recorded here on that day.
 
 ## Invariants (REQUIRED)
 
@@ -242,6 +252,9 @@ serving/writeback.py::version_key           constant-return:(0,)
 serving/spanner.py::apply_writeback         delete-call
 loader/spanner.py::load_dims                constant-return:0
 loader/cli.py::dbt_vars_args                constant-return:[]
+infra/cli.py::planned_deletes               constant-return:[]
+infra/cli.py::refuse_keyfile_env            delete-call
+loader/cli.py::confirmed                    constant-return:True
 ```
 
 (The federation view and Spanner DDL are SQL rendered by
@@ -271,13 +284,16 @@ per the TEMPLATE's SQL rule.)
   units)** — satisfies invariant 5. A separate `.sql` file was rejected:
   `tf-freeze`'s manifest pins `*.tf`/`*.tf.json` only, and a file it doesn't
   pin can drift under the frozen tree. The module also owns the BigQuery
-  connection + `raw.dim_user_spanner` view + TWO scoped grants, both to the
-  pipeline SA: `databaseUser` on the one database (it is also the principal
-  the federated read runs as — `databaseUser ⊇ databaseReader`) and
-  `bigquery.connectionUser` on the one connection (querying a view over
-  `EXTERNAL_QUERY` needs use rights on its connection). Round 1 finding 19
-  counted three; Amendment D removed the service-agent grant on the first
-  live apply — no such identity is on the Spanner federation path.
+  connection + `raw.dim_user_spanner` view + ONE custom data-plane role
+  (`ontimeSpannerDataUser`: read/select/write/transactions/sessions — no
+  `updateDdl`; Amendment E) + TWO scoped grants, both to the pipeline SA:
+  that role on the one database (it is also the principal the federated
+  read runs as) and `bigquery.connectionUser` on the one connection
+  (querying a view over `EXTERNAL_QUERY` needs use rights on its
+  connection). Round 1 finding 19 counted three; Amendment D removed the
+  service-agent grant on the first live apply — no such identity is on the
+  Spanner federation path; round 2 #1 replaced `databaseUser` (it carries
+  `updateDdl`) with the custom role.
 - **The federation swap is a generated source-identifier var, default
   unchanged (item 6)** — satisfies invariant 4 and §3.3's "source-config
   swap, no model changes". Making the view the default `bigquery` source was
@@ -341,10 +357,10 @@ any path/client):
 
 | Target | empty | `../x` | `"; ` | env-exported | `$(origin)` on CONFIRM | Pinned by |
 |---|---|---|---|---|---|---|
-| `make writeback TARGET=spanner PROJECT=<id> CONFIRM=yes` | empty TARGET → `duckdb` (today's behaviour); empty PROJECT with TARGET=spanner → refusal before any client | PROFILE/TARGET validated `[a-z0-9_]+`, PROJECT by GCP shape — `../x` refused, no path derived from user input | reaches Python as one literal, fails validation | TARGET/PROJECT from env reach Python (stated residual, validated the same); CONFIRM counts only command-line | required for TARGET≠duckdb, `$(origin CONFIRM)` | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `tests/test_writeback.py::test_cloud_writeback_refuses_before_any_client` |
+| `make writeback TARGET=spanner PROJECT=<id> CONFIRM=yes` | empty TARGET → `duckdb` (today's behaviour); empty PROJECT with TARGET=spanner → refusal before any client; empty PROFILE is allowed on the Spanner target only (the read is the warehouse's) | PROFILE/TARGET validated `[a-z0-9_]+`, PROJECT by GCP shape — `../x` refused, no path derived from user input | reaches Python as one literal, fails validation (pinned on TARGET and PROJECT — round 2 #15) | TARGET/PROJECT from env reach Python (stated residual, validated the same); CONFIRM counts only command-line; a credential in the env refuses (Amendment G) | required for TARGET≠duckdb, `$(origin CONFIRM)` | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `tests/test_writeback.py::test_cloud_writeback_refuses_before_any_client`, `tests/test_spanner_landing.py::test_every_cloud_command_refuses_a_credential_in_the_env` |
 | `make spanner-load PROFILE=<p> PROJECT=<id> CONFIRM=yes` | empty PROFILE/PROJECT → refusal | refused by shape validation | one literal, fails validation | same residual; CONFIRM command-line only | `$(origin CONFIRM)` | `tests/test_makefile.py::test_spanner_targets_pass_variables_as_one_literal` |
 | `make test-int-spanner PROJECT=<id> CONFIRM=yes [PROFILE=tiny]` | empty → refusal before `OTR_INT` export | refused | one literal | same residual; CONFIRM command-line only | `$(origin CONFIRM)` | same test; gating mirrors `test-int-bigquery` (CONFIRM first, then env) |
-| `make tf-apply … VARS='enable_spanner=…'` | existing target, unchanged — but while Spanner is UP, an apply that omits `VARS` IS the teardown (the toggle defaults false; `deletion_protection = false`, `-auto-approve`): the runbook says plan first (round 1 finding 12) | n/a (VARS items validated `name=value`) | refused by VARS item validation | env-origin VARS refused (`$(origin VARS)`); `TF_VAR_*` refuses every `tf-*` | `$(origin CONFIRM)` | existing `tests/test_makefile.py::test_tf_targets_pass_vars_as_one_literal`, `tests/test_infra.py` |
+| `make tf-apply … VARS='enable_spanner=…' [ALLOW_DESTROY=yes]` | existing target; Amendment F: it plans FIRST and applies the saved plan, and a plan that destroys anything is refused unless `ALLOW_DESTROY=yes` — so an apply that omits a currently-applied toggle cannot tear Spanner down (round 1 #12 → round 2 #3); empty ALLOW_DESTROY → refusal on destroys only | n/a (VARS items validated `name=value`; ALLOW_DESTROY takes the literal `yes` only) | refused by VARS item validation; ALLOW_DESTROY compared as a literal | env-origin VARS refused (`$(origin VARS)`); env-origin ALLOW_DESTROY reads `environment` and is refused (`$(origin ALLOW_DESTROY)`); `TF_VAR_*` refuses every `tf-*`; any `GOOGLE_*CREDENTIALS*` / access-token variable refuses every `tf-*` (Amendment G) | `$(origin CONFIRM)` | `tests/test_makefile.py::test_tf_targets_pass_vars_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy`, `…::test_cli_refuses_a_credential_in_the_env_loudly` |
 
 Cloud cost twice / destroys: `writeback TARGET=spanner` twice is the
 idempotence proof (writes 0; cents of reads); `spanner-load` twice
@@ -489,6 +505,108 @@ user who controls the environment (the threat model's standing carve-out).
   grants, no `gcp-sa-bigqueryconnection` anywhere in the module) and the
   member/role pins. ARCHITECTURE §8 carries the gotcha; the apply resumed
   with the corrected module.
+
+## Amendments (review round 2, 2026-08-30)
+
+- **E — the pipeline SA's database grant is a custom data-plane role, not
+  `roles/spanner.databaseUser` (finding 1; who-gets-what).** Restores the
+  least-privilege claim behind **invariant 5**'s module ("no admin, no
+  DDL — Terraform owns the schema"): every predefined Spanner role that can
+  write also carries `spanner.databases.updateDdl`, so the SA could have
+  altered or dropped `send_schedule`/`dim_user`. Mechanism:
+  `google_project_iam_custom_role.data_user` (`ontimeSpannerDataUser`) in
+  the spanner module with EXACTLY the data-plane set — read, select, write,
+  the two transaction kinds, sessions, the two metadata reads — granted on
+  the one database. It lives in the module, not the root, because a custom
+  role may only carry permissions of an enabled API (docs) and the module
+  enables Spanner's. Cost: a deleted custom role reserves its id for 7 days
+  (the SA's 30-day shape) — the runbook carries the `gcloud iam roles
+  undelete` + import detour. Pinned by
+  `tests/test_infra.py::test_spanner_custom_role_is_the_exact_data_plane_set`
+  (exact set, a control-plane pattern denylist, no `roles/spanner.*`
+  anywhere, the role only in the module). Rejected: recording the residual
+  (the review asked for the tightening); Spanner fine-grained access
+  control (database roles + `databaseRoleUser` — a second access model the
+  clients would have to name on every call). **Unverified live at this
+  head** (spec Live status).
+- **F — `tf-apply` plans first, applies the SAVED plan, and refuses a plan
+  that destroys anything unless `ALLOW_DESTROY=yes` has command-line origin
+  (finding 3; a new argv surface).** Restores **invariant 5**'s operational
+  half (a default-toggle apply creates — and now DESTROYS — nothing Spanner)
+  and turns round 1 #12's prose into a mechanism: an apply that omits a
+  currently-applied toggle used to be a silent `-auto-approve` teardown.
+  Mechanism: `infra/cli.py::_apply` = `plan -out=<tmp>` → `show -json` →
+  `planned_deletes` (any `resource_changes[].change.actions` containing
+  `delete`; a replace counts) → `require_allow_destroy` → `apply <tmp>`;
+  the plan file holds variable values so it lives in TMPDIR and is removed
+  on every path; `-auto-approve` is gone from apply (a saved plan applies
+  without a prompt; the plan you were shown is the apply you get).
+  `ALLOW_DESTROY` is the one new make variable: `$(origin)`-gated like
+  CONFIRM, unexported, one literal (threat-model row above). `tf-destroy`
+  is unchanged — destruction is its purpose and CONFIRM covers it. Pinned
+  by `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy`,
+  `tests/test_makefile.py::test_tf_apply_allow_destroy_from_command_line_only`.
+  Rejected: `prevent_destroy` (blocks the sanctioned toggle-flip too);
+  inferring intent from the VARS content (a heuristic on the toggle names).
+  **Unverified live at this head.**
+- **G — a credential-bearing environment variable refuses EVERY cloud
+  command, loudly, before any client or child (finding 2).** Restores
+  **invariant 6** for the identity, not just the confirmation: the google
+  clients honour `GOOGLE_APPLICATION_CREDENTIALS`/`GOOGLE_CREDENTIALS`/
+  access-token variables, so a key in the env would silently have been the
+  SA for `spanner-load`, `bq-load`, `writeback TARGET=spanner`, the cloud
+  `dbt-build` and both `test-int-*`; `infra/cli.py`'s allowlist dropped it
+  from terraform SILENTLY (applying as ADC while the operator believed the
+  key was in use). Mechanism: ONE policy, `infra.cli.KEYFILE_ENV_RE` +
+  `refuse_keyfile_env`, matched by name SHAPE (`GOOGLE_*CREDENTIALS*`, the
+  two token variables) so a new spelling is caught; called from the ONE
+  gate every cloud command passes (`loader.cli.require_confirm` — the cloud
+  `dbt-build` now goes through it too) and from `tf()` for
+  plan/apply/destroy. `tests/conftest.py` scrubs those names so a
+  developer's export never reddens the suite. Pinned by
+  `tests/test_spanner_landing.py::test_every_cloud_command_refuses_a_credential_in_the_env`
+  (6 entry points × 5 shapes, factories and `subprocess.run` armed to fail)
+  and `tests/test_infra.py::test_cli_refuses_a_credential_in_the_env_loudly`.
+- **H — the DuckDB write-back is ONE transaction (finding 8; the DuckDB
+  half of Amendment A).** Restores **invariant 2**'s "across runs" on the
+  stand-in: `write_back` wraps read → guard → delete+insert in
+  `begin`/`commit`, rolling back on any exception, so a failure mid-apply
+  leaves the rows the run started from. Across processes DuckDB is
+  single-writer (a second process cannot open the file while this one holds
+  it) — stated in the docstring and pinned by
+  `…::test_duckdb_target_is_single_writer` (a subprocess probe) beside
+  `…::test_duckdb_writeback_is_one_transaction` (a delete-then-raise
+  applier; the table hash is unchanged, the next run repairs).
+- **I — the READ maps by column name, like the write (finding 9).** Restores
+  **invariant 3**'s "exactly these columns" for the values, not just the
+  relations: `candidates_sql`'s select list is GENERATED from
+  `Candidate`'s fields (tz from the dims alias, the rest from the scores
+  alias) and `candidate_of(row_by_name)` builds the dataclass by name,
+  refusing a missing or extra column; `QueryClient.query` returns dicts
+  (BigQuery's `Row.items()`), DuckDB's cursor `description` supplies the
+  names. Pinned by `…::test_candidates_are_read_by_column_name` (shuffled
+  keys land by name; missing/extra refuse; the select list is the field
+  list).
+- **J — the dims landing refuses what the contract does not admit
+  (findings 10, 11).** Restores **invariant 4** on the landing's input side
+  (the seed's rows, not just its header): an empty cell in a REQUIRED
+  field, a timestamp carrying an offset (the contract is naive UTC), and a
+  row with the wrong number of cells are `ValueError`s with the line, never
+  a coerced value or a positionally shifted row. Pinned by
+  `tests/test_spanner_landing.py::test_cell_refuses_instead_of_coercing`,
+  `…::test_row_width_drift_refuses` (the tester's surviving mutation, now
+  killed).
+- Also applied, no design change: the metrics pin scans every tracked
+  `*.py` (#5); `region` validated in the root AND every module that
+  declares it, two-digit regions admitted (#6); `carried_gate` re-checks the
+  origin through `loader.cli.confirmed` — the make target's own predicate,
+  never a forged literal (#7, both integration modules); the fake's
+  `transact` rolls back on an exception like `run_in_transaction` (#13);
+  invariant 1's ledger assertion (#14); `writeback`'s TARGET/PROJECT
+  quoting pinned (#15); the SA unique id redacted from the spec and the
+  BACKLOG note extended (#4); CLAUDE status de-contradicted (#16, #18,
+  #19); PHASES Delivered paragraph (#17); scaling bounds recorded (#20);
+  the default plan recorded (#21).
 
 ## Out of scope (deferred, recorded)
 

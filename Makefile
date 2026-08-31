@@ -12,7 +12,7 @@
 # environment is `$(origin VAR)`; every future CONFIRM knob tests
 # `$(origin CONFIRM)` = `command line` inside its recipe (spec threat model,
 # corrected in review round 1; pinned by tests/test_makefile.py).
-unexport SPEC BASE DELETED CONFIRM PROFILE TARGET WRITE THROUGH FULL PROJECT VARS
+unexport SPEC BASE DELETED CONFIRM PROFILE TARGET WRITE THROUGH FULL PROJECT VARS ALLOW_DESTROY
 _Q = '$(subst ','\'',$(1))'
 
 setup:
@@ -234,8 +234,12 @@ tf-validate:
 tf-plan:
 	uv run python -m infra.cli plan --project $(call _Q,$(value PROJECT)) --vars $(call _Q,$(value VARS)) --vars-origin '$(origin VARS)'
 
+# tf-apply plans first and applies the SAVED plan; a plan that destroys
+# anything is refused unless ALLOW_DESTROY=yes also comes from the COMMAND
+# LINE ($(origin ALLOW_DESTROY)) — the toggle-flip teardown passes it; an
+# apply that merely omitted a currently-applied toggle cannot destroy.
 tf-apply:
-	uv run python -m infra.cli apply --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --vars $(call _Q,$(value VARS)) --vars-origin '$(origin VARS)'
+	uv run python -m infra.cli apply --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --vars $(call _Q,$(value VARS)) --vars-origin '$(origin VARS)' --allow-destroy $(call _Q,$(value ALLOW_DESTROY)) --allow-destroy-origin '$(origin ALLOW_DESTROY)'
 
 tf-destroy:
 	uv run python -m infra.cli destroy --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --vars $(call _Q,$(value VARS)) --vars-origin '$(origin VARS)'

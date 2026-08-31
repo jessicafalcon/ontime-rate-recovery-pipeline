@@ -222,6 +222,68 @@ annotated **Superseded by …** in place and never deleted.
   `connectionUser`), and the module's `project_number` input is gone.
   Rejected: provisioning the agent so the grant applies — read on the
   database for an identity that never queries it.
+- **The SA's Spanner grant is a custom data-plane role, in the module
+  (round 2 #1, Amendment E).** `roles/spanner.databaseUser` — the only
+  predefined role that writes — carries `spanner.databases.updateDdl`;
+  `ontimeSpannerDataUser` holds exactly read/select/write/the two
+  transaction kinds/sessions/two metadata reads, pinned as an exact set with
+  a control-plane denylist. In the module (its API must be enabled for the
+  permissions to be valid — docs), so it shares the toggle's lifecycle and a
+  7-day id reservation on delete (runbook detour: `gcloud iam roles
+  undelete` + `terraform import`). Rejected: FGAC database roles (a second
+  access model named on every client call); recording the residual.
+- **`tf-apply` plans first and refuses a destroying plan without
+  `ALLOW_DESTROY=yes` from the command line (round 2 #3, Amendment F).**
+  The saved plan is what gets applied (`plan -out` → `show -json` → apply
+  the file; `-auto-approve` gone from apply). An apply that omits a
+  currently-applied toggle used to be a silent teardown; now it prints the
+  addresses it would destroy and stops. `ALLOW_DESTROY` is the one new make
+  variable (`$(origin)`-gated, unexported, literal `yes`). Rejected:
+  `prevent_destroy` (blocks the toggle-flip too); guessing intent from the
+  VARS text. Scaling note: `show -json` of a large plan is a few MB of
+  stdout, parsed once — fine at any size this stack reaches.
+- **A credential in the environment refuses every cloud command, loudly
+  (round 2 #2, Amendment G).** One policy (`infra.cli.KEYFILE_ENV_RE`,
+  name-shape matched), one gate (`loader.cli.require_confirm`, which the
+  cloud `dbt-build` now uses too) plus `tf()`. The env allowlist alone
+  dropped the key SILENTLY from terraform — an operator who set it believed
+  it was in use. `tests/conftest.py` scrubs the names so the suite never
+  reddens on a developer's export. Rejected: honouring the key when set (the
+  repo's rule is ADC/WIF, never a key at rest).
+- **The DuckDB write-back is one transaction; the file is single-writer
+  (round 2 #8, Amendment H).** `begin`/`commit` around read → guard →
+  delete+insert, rollback on exception; a subprocess probe pins that a
+  second process cannot open the file while one holds it — the stand-in's
+  cross-process serialization is DuckDB's lock, stated and tested rather
+  than assumed.
+- **The read maps by column name (round 2 #9, Amendment I).** The select
+  list is generated from `Candidate`'s fields and rows are built by name
+  from BigQuery's `Row.items()` / DuckDB's cursor description; a swapped
+  pair of same-typed columns can no longer land in the wrong field on the
+  read side either. Rejected: keeping the golden hash as the only guard
+  (it catches tiny's data, not the mechanism).
+- **The dims landing refuses instead of coercing (round 2 #10/#11,
+  Amendment J).** Empty REQUIRED cell, offset-bearing timestamp, wrong cell
+  count: `ValueError` with the line. The contract is naive UTC wall times
+  (generator/writer.py) and REQUIRED means present; `replace(tzinfo=UTC)`
+  on an offset value discarded the offset silently.
+- **Scaling bounds the Spanner paths carry (round 2 #20).** (1) The dims
+  landing is one `insert_or_update` batch of the whole seed (tiny: 22 rows;
+  Spanner's per-commit cap is 80,000 mutation cells — a profile past it
+  chunks by `(user_id, valid_from)` ranges, each chunk its own batch, the
+  landing unchanged otherwise). (2) Amendment A's transaction reads ALL of
+  `send_schedule` (`EXISTING_SQL` has no predicate), which takes shared
+  locks on the whole table and so serializes concurrent write-backs
+  entirely — correct by construction, and the intended behaviour for one
+  scheduler; a sharded write-back would read only its candidates'
+  `user_id`s (`where user_id in unnest(@ids)`), the guard unchanged. Neither
+  is code today; both are the DECISIONS note the scaling rule asks for.
+- **Records name the project id, the SA email, the project number and the
+  SA's numeric unique id shape — never the id itself (round 2 #4).** The
+  unique id is an account identifier, not a credential, but it is read from
+  the local gitignored state backup at detour time and is redacted to
+  `<sa-unique-id>` in the spec; the BACKLOG note's wording now lists what
+  records may carry.
 - **The count-gated modules carry their own exact resource allowlists and
   may read no data source (round 1 #11).** The root allowlist exempted
   `modules/{composer,spanner}` entirely, so a `null_resource` + `local-exec`

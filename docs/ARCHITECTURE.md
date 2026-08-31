@@ -229,7 +229,11 @@ numeric order, `v10 > v2`); `TARGET=duckdb` (default) keeps the stand-in. On
 Spanner the stored-pair read and the winners' `insert_or_update` are ONE
 read-write transaction (`run_in_transaction`, retried on abort), so
 replace-iff-greater holds across concurrent write-backs, not only within one
-run (Phase 10 Amendment A).
+run (Phase 10 Amendment A); on the DuckDB stand-in the same three steps are
+one `begin`/`commit` and the file is single-writer across processes
+(Amendment H). The read and the write both map columns by NAME
+(Amendment I). The SA's Spanner access is a custom data-plane role — no
+`updateDdl`; Terraform owns the schema (Amendment E).
 
 ## 3. Components
 
@@ -542,3 +546,19 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   `roles/spanner.databaseReader` on the database and
   `roles/bigquery.connectionUser` on the connection — the pipeline SA's
   `databaseUser` + `connectionUser` grants are the whole set (Amendment D).
+- **Every predefined Spanner role that writes also carries `updateDdl`; a
+  custom role may only carry permissions of an ENABLED API** (Phase 10,
+  review round 2). `roles/spanner.databaseUser` is read+write+DDL, so the
+  pipeline SA's grant became the custom `ontimeSpannerDataUser`; and because
+  "a permission might not be available for use in custom roles if you have
+  not enabled the API" (IAM docs), the role sits in the spanner module
+  beside the API enablement, not at the root. A deleted custom role keeps
+  its id reserved for 7 days (undelete + import detour, like the SA's 30).
+- **`terraform apply -auto-approve` applies whatever the toggles imply —
+  including the destruction of a resource whose toggle you forgot** (Phase
+  10, review round 2). `enable_spanner` defaults false and the database has
+  `deletion_protection = false` (the toggle-flip is the sanctioned
+  teardown), so an apply that omitted `enable_spanner=true` while Spanner
+  was up would have destroyed it silently. `tf-apply` now saves a plan,
+  reads it back (`show -json`) and refuses any `delete` action unless
+  `ALLOW_DESTROY=yes` has command-line origin (Amendment F).

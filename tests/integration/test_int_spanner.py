@@ -52,7 +52,9 @@ def carried_gate() -> tuple[str, str]:
     loader.cli::int_spanner (the make target), never forged here."""
     confirm = os.environ.get("OTR_CONFIRM", "")
     origin = os.environ.get("OTR_CONFIRM_ORIGIN", "")
-    if not (confirm and origin):
+    # The pair is CARRIED, and re-checked with the make target's own predicate
+    # (round 2 #7) — never a literal forged here.
+    if not loader_cli.confirmed(confirm, origin):
         raise RuntimeError("refused: run via `make test-int-spanner … CONFIRM=yes`")
     return confirm, origin
 

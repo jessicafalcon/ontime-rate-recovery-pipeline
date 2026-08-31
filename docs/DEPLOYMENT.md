@@ -268,22 +268,31 @@ Applying Spanner starts the 90-day trial clock; after it, the 100-processing-
 unit instance bills ~$65/mo. Every step is ask-first, and the teardown belongs
 to the same working session as the apply.
 
-1. **Apply** (your operator ADC — Terraform never runs as the SA, §8; before
-   ~2026-09-29 the soft-deleted `ontime-pipeline` SA id needs the
-   undelete + import detour above):
+1. **Apply** (your operator ADC — Terraform never runs as the SA, §8. The
+   SA detour applies only when the SA is NOT in state: after a full
+   `tf-destroy` within its 30-day reservation. After a toggle-flip teardown
+   the SA stays live and in state — no detour. The custom role has the same
+   shape with a 7-day window: after a toggle-flip teardown within 7 days,
+   `gcloud iam roles undelete ontimeSpannerDataUser --project=<id>` then
+   `terraform -chdir=infra import 'module.spanner[0].google_project_iam_custom_role.data_user' projects/<id>/roles/ontimeSpannerDataUser`
+   before the re-apply):
    `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=true'` —
-   adds exactly the spanner module's 8 resources (2 kept-on API enablements,
+   adds exactly the spanner module's 9 resources (2 kept-on API enablements,
    instance, database with the `dim_user` + `send_schedule` DDL, the BigQuery
-   connection + `raw.dim_user_spanner` federation view, 2 scoped grants —
-   both to the pipeline SA, which is the principal the federated read runs
-   as; §8).
+   connection + `raw.dim_user_spanner` federation view, the custom
+   data-plane role `ontimeSpannerDataUser` — read/write, no DDL — and 2
+   scoped grants, both to the pipeline SA, which is the principal the
+   federated read runs as; §8). `tf-apply` plans first and shows you the
+   saved plan it applies.
    **The same session, fill in the dated lines below.**
    **While Spanner is up, EVERY `make tf-apply` carries
    `VARS='enable_spanner=true'`** — the toggle defaults false and the
    database has no deletion protection (the toggle-flip is the sanctioned
-   destroy), so an unrelated apply that omits it IS the teardown, with
-   `-auto-approve`. Before any apply in the window: `make tf-plan
-   PROJECT=<id> VARS='enable_spanner=true'` and read it for `destroy`.
+   destroy). An apply that omits it would plan the teardown — and `tf-apply`
+   now REFUSES any plan that destroys something unless `ALLOW_DESTROY=yes`
+   is on the command line (it prints the addresses; Amendment F), so the
+   mistake stops before the cloud. `make tf-plan PROJECT=<id>
+   VARS='enable_spanner=true'` first is still the habit.
 2. **Land the dims** (as the SA):
    `make spanner-load PROFILE=tiny PROJECT=<id> CONFIRM=yes`.
 3. **Prove it**: `make test-int-spanner PROJECT=<id> CONFIRM=yes` — the
@@ -297,11 +306,12 @@ to the same working session as the apply.
    in 221.01s`; `writeback OK: ontime-rate-recovery.ontime → spanner, 20
    users, 0 written`.
 4. **Tear down the same day** — the SCOPED destroy is the toggle flipped
-   back: `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=false'`
-   (count → 0 destroys exactly the module's resources; the two API
-   enablements stay on — free, like the root set). There is no `MODULE`
-   variable and no `-target`; a full `make tf-destroy … CONFIRM=yes` also
-   removes Spanner along with everything else.
+   back: `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=false'
+   ALLOW_DESTROY=yes` (count → 0 destroys exactly the module's resources —
+   the plan-first apply lists them and needs the explicit `ALLOW_DESTROY`;
+   the two API enablements stay on — free, like the root set). There is no
+   `MODULE` variable and no `-target`; a full `make tf-destroy …
+   CONFIRM=yes` also removes Spanner along with everything else.
 
 Dated lines (fill on apply day — the BACKLOG trial row's trigger):
 

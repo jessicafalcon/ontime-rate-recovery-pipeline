@@ -51,8 +51,24 @@ class Candidate:
 # dataclass declaration order IS the serving order) + written_at. Every
 # writer (DuckDB, Spanner) and the offline row hash read this one tuple;
 # tests/test_writeback.py pins it to SEND_SCHEDULE_GOLDEN.columns.
-COLUMNS: tuple[str, ...] = tuple(f.name for f in fields(Candidate)) + ("written_at",)
+CANDIDATE_FIELDS: tuple[str, ...] = tuple(f.name for f in fields(Candidate))
+COLUMNS: tuple[str, ...] = CANDIDATE_FIELDS + ("written_at",)
 EXISTING_SQL = f"select user_id, model_version, computed_as_of from {SEND_SCHEDULE}"
+# Which relation each Candidate field is read from: tz is the open dim_user
+# row's (the `d` side of the join); everything else is the score's (`s`).
+_SOURCE_ALIAS = {name: ("d" if name == "tz" else "s") for name in CANDIDATE_FIELDS}
+
+
+def candidate_of(row: dict[str, object]) -> Candidate:
+    """A Candidate from a row keyed by column NAME (round 2 #9): the read maps
+    by name like the write does, so a reordered select list or a swapped pair
+    of same-typed columns cannot land in the wrong field. Missing or extra
+    keys refuse."""
+    if set(row) != set(CANDIDATE_FIELDS):
+        raise ValueError(
+            f"candidate columns {sorted(row)} != {sorted(CANDIDATE_FIELDS)}"
+        )
+    return Candidate(**{name: row[name] for name in CANDIDATE_FIELDS})
 
 
 def row_of(c: Candidate) -> tuple:
@@ -75,9 +91,9 @@ def candidates_sql(scores: str = SCORES, dims: str = DIM_CURRENT) -> str:
     to the open dim_user tz. `scores`/`dims` override the DuckDB relation names
     (TARGET=spanner reads `<project>.ontime.…` off BigQuery — Phase 10, the
     Golden-style relation seam)."""
+    select = ", ".join(f"{_SOURCE_ALIAS[c]}.{c}" for c in CANDIDATE_FIELDS)
     return (
-        "select s.user_id, s.cohort_id, s.send_hour_local, s.send_minute_local, "
-        "d.tz, s.confidence, s.model_version, s.computed_as_of "
+        f"select {select} "
         f"from {scores} as s "
         f"join {dims} as d using (user_id) "
         "order by s.user_id"
@@ -87,8 +103,9 @@ def candidates_sql(scores: str = SCORES, dims: str = DIM_CURRENT) -> str:
 def read_candidates(con: duckdb.DuckDBPyConnection) -> list[Candidate]:
     """The served pair from scores_send_time, tz from the open dim_user row
     (dim_user_current) — never the source events or the unclamped centre."""
-    rows = con.execute(candidates_sql()).fetchall()
-    return [Candidate(*r) for r in rows]
+    cur = con.execute(candidates_sql())
+    names = [d[0] for d in cur.description]
+    return [candidate_of(dict(zip(names, r, strict=True))) for r in cur.fetchall()]
 
 
 def read_existing(
@@ -153,14 +170,28 @@ def apply_writeback(con: duckdb.DuckDBPyConnection, winners: list[Candidate]) ->
 def write_back(profile: str, db: Path | None = None) -> tuple[int, int]:
     """(candidates, written). Upsert the served schedule into send_schedule,
     replacing a user's row only on a strictly greater version/as-of pair.
-    Idempotent: a second run over the same scores writes zero."""
+    Idempotent: a second run over the same scores writes zero.
+
+    The stored-pair read, the guard and the delete+insert run in ONE DuckDB
+    transaction (round 2 #8, the DuckDB half of Amendment A): a failure
+    mid-apply rolls back to the rows the run started from, never a
+    half-replaced table. Across processes the DuckDB file is single-writer
+    (a second process cannot open it while this one holds it — pinned by
+    `tests/test_writeback.py::test_duckdb_target_is_single_writer`), so two
+    write-backs cannot interleave on the stand-in at all."""
     con = loader.connect(db or loader.db_path(profile))
     try:
         ensure_table(con)
-        candidates = read_candidates(con)
-        existing = read_existing(con)
-        winners = winners_of(candidates, existing)
-        apply_writeback(con, winners)
+        con.begin()
+        try:
+            candidates = read_candidates(con)
+            existing = read_existing(con)
+            winners = winners_of(candidates, existing)
+            apply_writeback(con, winners)
+        except BaseException:
+            con.rollback()
+            raise
+        con.commit()
     finally:
         con.close()
     return len(candidates), len(winners)

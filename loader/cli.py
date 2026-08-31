@@ -28,7 +28,7 @@ import subprocess
 import sys
 from typing import NoReturn
 
-from infra.cli import validate_project
+from infra.cli import refuse_keyfile_env, validate_project
 from loader import bq, spanner
 from loader import load as loader
 
@@ -92,12 +92,23 @@ LOCAL_TARGET = "duckdb"
 CLOUD_TARGET = "bigquery"
 
 
+def confirmed(confirm: str, origin: str) -> bool:
+    """THE rule: CONFIRM=yes with command-line origin (`$(origin CONFIRM)`).
+    One predicate for the make targets' gate and for the integration
+    fixtures' carried gate (round 2 #7) — the fixture cannot drift from it."""
+    return origin == "command line" and confirm == "yes"
+
+
 def require_confirm(what: str, confirm: str, origin: str) -> None:
-    if origin != "command line" or confirm != "yes":
+    """The ONE gate every cloud-cost command passes through, before any
+    client: CONFIRM=yes from the command line, and no credential in the
+    environment (infra.cli's keyfile policy — round 2 #2)."""
+    if not confirmed(confirm, origin):
         die(
             f"{what}: refused — a cloud-cost command; pass CONFIRM=yes on the "
             "command line (CLAUDE.md: ask first, every time)"
         )
+    refuse_keyfile_env(what)
 
 
 def bq_load(
@@ -230,11 +241,8 @@ def dbt_build(
         die(f"dbt-build: refused — FULL takes only the literal 'yes', got {full!r}")
     target = target or LOCAL_TARGET
     validate_name("TARGET", target)
-    if target != LOCAL_TARGET and (origin != "command line" or confirm != "yes"):
-        die(
-            f"dbt-build: refused — TARGET={target} is a cloud target; "
-            "pass CONFIRM=yes on the command line (CLAUDE.md: ask first, every time)"
-        )
+    if target != LOCAL_TARGET:
+        require_confirm(f"dbt-build TARGET={target}", confirm, origin)
     if target not in (LOCAL_TARGET, CLOUD_TARGET):
         die(f"dbt-build: refused — no such target {target!r} (duckdb | bigquery)")
     if target == CLOUD_TARGET:
