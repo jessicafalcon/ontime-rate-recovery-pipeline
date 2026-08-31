@@ -54,10 +54,11 @@ def _scrub_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "ALLOW_DESTROY",
     ):
         monkeypatch.delenv(var, raising=False)
-    from infra.cli import ENV_REFUSE_PREFIXES, unlisted_cloud_env
+    from infra.cli import env_tf_vars, unlisted_cloud_env
 
-    tf_vars = [k for k in os.environ if k.startswith(ENV_REFUSE_PREFIXES)]
-    for var in tf_vars + unlisted_cloud_env():
+    # env_tf_vars() is the gate's own TF_VAR_*/TF_CLI_ARGS* scan — called, not
+    # re-implemented, so the scrub cannot drift from it (round 6 #12).
+    for var in env_tf_vars() + unlisted_cloud_env():
         # the cloud commands refuse them; a developer's export must not redden the suite
         monkeypatch.delenv(var)
     yield
