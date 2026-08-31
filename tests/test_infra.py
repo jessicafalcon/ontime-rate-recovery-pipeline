@@ -1536,6 +1536,7 @@ def test_apply_plans_first_and_refuses_destroys_without_allow_destroy(
         '{"resource_changes": [{"address": 7, "change": {"actions": ["create"]}}]}',
         '{"resource_changes": [{"address": "a.b", "change": {"actions": "delete"}}]}',
         '{"resource_changes": [{"address": "a.b", "change": {"actions": [null]}}]}',
+        '{"resource_changes": [{"address": "a.b", "change": {"actions": []}}]}',  # O2
         '{"resource_changes": ["a.b"]}',
         '{"resource_changes": [null]}',
     ):

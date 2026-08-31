@@ -340,9 +340,10 @@ _UNREADABLE = (
 def planned_changes(show_json: str) -> list[tuple[str, frozenset[str]]]:
     """`(address, actions)` per resource change of a saved plan. STRICT: an
     empty, non-JSON or non-object body, a missing `resource_changes` list, or
-    an entry that is not `{address: str, change: {actions: [str, …]}}` is a
-    refusal, never "no changes" (round 3 K's envelope checks and round 4 N1's
-    per-entry ones, in one place — the gate runs on evidence)."""
+    an entry that is not `{address: str, change: {actions: [str, …]}}` with at
+    least one action is a refusal, never "no changes" (round 3 K's envelope
+    checks, round 4 N1's per-entry ones, round 5 O2's non-empty rule — in one
+    place; the gate runs on evidence, and an empty set is not evidence)."""
     try:
         plan = json.loads(show_json)
     except ValueError as e:  # JSONDecodeError; an empty body lands here too
@@ -358,6 +359,7 @@ def planned_changes(show_json: str) -> list[tuple[str, frozenset[str]]]:
         if (
             not isinstance(address, str)
             or not isinstance(actions, list)
+            or not actions
             or not all(isinstance(a, str) for a in actions)
         ):
             die(_UNREADABLE.format(f"resource_changes[{i}] has no address/actions"))
