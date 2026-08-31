@@ -1294,7 +1294,10 @@ def test_cli_vars_are_the_only_toggle_path(
         "enable_ci_wif=true,github_repository=o/r,"
         "operator_principal=user:a@b.c,budget_alert_thresholds=[50,150]"
     )
-    assert cli.tf("apply", "my-proj", "yes", "command line", fake, vars_, "command line") == 0
+    assert (
+        cli.tf("apply", "my-proj", "yes", "command line", fake, vars_, "command line")
+        == 0
+    )
     argv = fake.calls[0]
     assert argv[argv.index("project_id=my-proj") + 1 :] == [
         "-var",
@@ -1319,7 +1322,9 @@ def test_cli_vars_are_the_only_toggle_path(
     for item in bad:
         fake = _FakeRunner()
         with pytest.raises(SystemExit) as e:
-            cli.tf("plan", "my-proj", runner=fake, vars_=item, vars_origin="command line")
+            cli.tf(
+                "plan", "my-proj", runner=fake, vars_=item, vars_origin="command line"
+            )
         assert e.value.code == 2 and fake.calls == [], item
         assert "VARS: refused" in capsys.readouterr().out
     fake = _FakeRunner()  # an exported VARS is refused, like an exported CONFIRM
