@@ -197,15 +197,18 @@ def parse_vars(vars_: str, origin: str = "") -> list[str]:
 # (CLOUD_ENV_NAMES) and the transport-redirection class (REDIRECTION_NAMES) —
 # so it refuses on the IN-PROCESS cloud paths (bq-load, writeback), not only
 # the terraform child (P2 closed the redirection class for the child alone).
-# tests/test_infra.py's closure test pins that set exactly and checks every
-# name the vendor DECLARATION modules name is classified once; a scan of the
-# installed google/ tree for literal env reads is a COVERAGE AID that flags a
-# newly-read name against the recorded ignored classes — not a proof the domain
-# is closed over everything the libraries read (a constant-keyed read escapes
-# any scan; Q A3 records the two known — APPDATA, refused, and
-# ENABLE_GCS_PYTHON_CLIENT_OTEL_TRACES, a benign tracing switch). A false
-# refusal is the intended direction; admitting a setting is one line here plus
-# a DECISIONS entry.
+# tests/test_infra.py's closure test pins the PREFIXES, the suffix and
+# CLOUD_ENV_ALLOW exactly (an exact `==` pin on REDIRECTION_NAMES /
+# CLOUD_ENV_NAMES membership is BACKLOG), and checks every name the vendor
+# DECLARATION modules name is classified once. It also scans the installed
+# google/ tree for literal env reads and HARD-FAILS on any newly-read name not
+# classified — so a library upgrade that adds a LITERAL-keyed read reddens the
+# suite; only a CONSTANT-keyed read escapes the scan (Q A3 records the two
+# known — APPDATA, refused, and ENABLE_GCS_PYTHON_CLIENT_OTEL_TRACES, a benign
+# tracing switch). The scan does not prove the domain closed over everything
+# the libraries read; the ENUMERATED refuse domain is the security boundary. A
+# false refusal is the intended direction; admitting a setting is one line here
+# plus a DECISIONS entry.
 CLOUD_ENV_PREFIXES = (
     "GOOGLE_",
     "GCLOUD_",
@@ -235,12 +238,17 @@ CLOUD_ENV_NAMES = frozenset(
     }
 )
 # The transport-redirection class the Credential standard names a secret: a
-# proxy endpoint (upper- and lower-case — requests honors both), a TLS
-# trust-anchor override, a gRPC roots override, a session-key log, an OAuth
-# downgrade. Any HTTP/TLS stack the google clients import reads these, so an
-# operator export reaches the IN-PROCESS cloud paths, not only the terraform
-# child ENV_ALLOW governs (Amendment Q, A1). A declared closed set; widening it
-# is a visible edit (never the open-world transport scan the finding proposed).
+# proxy endpoint, a TLS trust-anchor override, a gRPC roots override, a
+# session-key log, an OAuth downgrade. Refused on the IN-PROCESS cloud paths,
+# not only the terraform child ENV_ALLOW governs (Amendment Q, A1). The CA /
+# TLS / key-log names are a finite closed set. The PROXY names are enumerated
+# by spelling — a known RESIDUAL: `requests`/`urllib` honor any name whose
+# casefold ends `_proxy` (mixed-case variants still pass), and this set is not
+# itself `==`-pinned. Both are BACKLOG (upgrade the proxy half to the
+# casefold-`_proxy` predicate + an exact membership pin, and add the
+# in-process-entry-point refusal test). `grpc_proxy` (grpc's own, honored on
+# the Spanner write-back path) is added so that concrete redirect is closed
+# today.
 REDIRECTION_NAMES = frozenset(
     {
         "HTTP_PROXY",
@@ -249,6 +257,7 @@ REDIRECTION_NAMES = frozenset(
         "http_proxy",
         "https_proxy",
         "all_proxy",
+        "grpc_proxy",  # grpc C-core proxy — the Spanner write-back's transport
         "REQUESTS_CA_BUNDLE",
         "CURL_CA_BUNDLE",
         "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH",
