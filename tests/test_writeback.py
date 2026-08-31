@@ -462,9 +462,7 @@ class FakeQuery:
     def query(self, sql: str) -> list[dict[str, object]]:
         """Rows keyed by column name, like google-cloud-bigquery's Row."""
         self.sqls.append(sql)
-        cur = self.con.execute(_bq_sql(sql))
-        names = [d[0] for d in cur.description]
-        return [dict(zip(names, r, strict=True)) for r in cur.fetchall()]
+        return wb.rows_by_name(self.con.execute(_bq_sql(sql)))
 
 
 class FakeSpanner:
@@ -497,9 +495,7 @@ class FakeSpanner:
             self.txn_reads += 1
         else:
             self.snapshot_reads += 1
-        cur = self.con.execute(sql)
-        names = [d[0] for d in cur.description]
-        return [dict(zip(names, r, strict=True)) for r in cur.fetchall()]
+        return wb.rows_by_name(self.con.execute(sql))
 
     def upsert(self, table: str, columns: tuple[str, ...], rows: list[tuple]) -> None:
         assert self._in_txn, "upsert outside the transaction"
@@ -894,6 +890,13 @@ def test_existing_pairs_are_read_by_column_name() -> None:
         wb.existing_of({"user_id": "u-1", "model_version": "v2"})
     with pytest.raises(ValueError, match="datetime"):
         wb.existing_of({"user_id": "u-1", "model_version": "v2", "computed_as_of": "x"})
+    # round 4 #6 (Amendment N3): a non-str cell refuses, never `str()`-coerced
+    for bad in (
+        {"user_id": 1, "model_version": "v2"},
+        {"user_id": "u-1", "model_version": 2},
+    ):
+        with pytest.raises(ValueError, match="want str"):
+            wb.existing_of({**bad, "computed_as_of": ts})
     store = FakeSpanner("my-proj")
     store.con.execute(
         "insert into send_schedule values ('u-1', 'c', 8, 0, 'UTC', 0.5, 'v1', "
@@ -901,3 +904,93 @@ def test_existing_pairs_are_read_by_column_name() -> None:
     )
     rows = store.transact(lambda t: t.read(sp.EXISTING_SQL))
     assert rows and set(rows[0]) == set(wb.EXISTING_COLUMNS)
+
+
+def _streamed(fields: list[tuple[str, str]], rows: list[list[str]]) -> object:
+    """A REAL google-cloud-spanner StreamedResultSet built offline from
+    PartialResultSet protos — metadata (name + type per column) and the row
+    cells as protobuf Values; no network, no client."""
+    from google.cloud.spanner_v1 import (
+        PartialResultSet,
+        ResultSetMetadata,
+        StructType,
+        Type,
+        TypeCode,
+    )
+    from google.cloud.spanner_v1.streamed import StreamedResultSet
+    from google.protobuf import struct_pb2
+
+    md = ResultSetMetadata(
+        row_type=StructType(
+            fields=[
+                StructType.Field(name=n, type_=Type(code=getattr(TypeCode, t)))
+                for n, t in fields
+            ]
+        )
+    )
+    first = PartialResultSet(metadata=md)
+    for row in rows:
+        first.values.extend(struct_pb2.Value(string_value=v) for v in row)
+    return StreamedResultSet(iter([first]))
+
+
+class _Backend:
+    """What `execute_sql` returns is the adapter's only seam."""
+
+    def __init__(self, result: object) -> None:
+        self.result = result
+        self.sqls: list[str] = []
+
+    def execute_sql(self, sql: str) -> object:
+        self.sqls.append(sql)
+        return self.result
+
+
+def test_spanner_rows_come_from_the_library_by_name() -> None:
+    """Amendment N3 (round 4 #1/#2): the Spanner read is the library's own
+    `StreamedResultSet.to_dict_list()`, exercised on REAL result sets through
+    the real adapter classes into `existing_of` — an empty table (the first
+    write-back after a fresh apply), a shuffled column order, a zero-response
+    stream. No mapping of ours sits between the wire and the guard."""
+    from google.cloud.spanner_v1.streamed import StreamedResultSet
+
+    from serving import spanner as sp
+
+    shuffled = [
+        ("computed_as_of", "TIMESTAMP"),
+        ("user_id", "STRING"),
+        ("model_version", "STRING"),
+    ]
+    # the transaction read (the write path)
+    assert sp._GoogleTxn(_Backend(_streamed(shuffled, []))).read(sp.EXISTING_SQL) == []
+    assert (
+        sp._GoogleTxn(_Backend(StreamedResultSet(iter([])))).read(sp.EXISTING_SQL) == []
+    )
+    backend = _Backend(_streamed(shuffled, [["2026-01-13T00:00:00Z", "u-1", "v2"]]))
+    rows = sp._GoogleTxn(backend).read(sp.EXISTING_SQL)
+    assert backend.sqls == [sp.EXISTING_SQL]
+    assert [set(r) for r in rows] == [set(wb.EXISTING_COLUMNS)]
+    user_id, (version, ts) = wb.existing_of(rows[0])
+    assert (user_id, version) == ("u-1", "v2")
+    assert ts == datetime(2026, 1, 13, tzinfo=UTC) and ts.tzinfo is not None
+    # the snapshot read (the integration read-back) — same library call
+    client = sp.GoogleSpannerClient.__new__(sp.GoogleSpannerClient)
+
+    class Db:
+        def snapshot(self) -> Db:
+            return self
+
+        def __enter__(self) -> _Backend:
+            return _Backend(
+                _streamed(shuffled, [["2026-01-13T00:00:00Z", "u-1", "v2"]])
+            )
+
+        def __exit__(self, *a: object) -> bool:
+            return False
+
+    client._db = Db()  # type: ignore[attr-defined]
+    assert [wb.existing_of(r)[0] for r in client.read(sp.EXISTING_SQL)] == ["u-1"]
+    client._db = type(
+        "Db2", (Db,), {"__enter__": lambda self: _Backend(_streamed(shuffled, []))}
+    )()  # type: ignore[attr-defined]
+    assert client.read(sp.EXISTING_SQL) == []

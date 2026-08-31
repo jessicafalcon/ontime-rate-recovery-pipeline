@@ -41,7 +41,7 @@ is in Owner but not in Editor + Project IAM Admin — and one post-apply path
 | `user_project_override` (every API call is quota'd on `project_id`) | `serviceusage.services.use` on the project | `roles/serviceusage.serviceUsageConsumer` (in Owner/Editor) |
 | `data.google_billing_account` (the budget's currency) | `billing.accounts.get` on the billing account | `roles/billing.viewer` on the billing account |
 | `google_billing_budget` create/delete | `billing.budgets.create` / `.delete` on the billing account | `roles/billing.costsManager` on the billing account |
-| `google_project_iam_custom_role` (the spanner module's data-plane role, Amendment E — only on an `enable_spanner=true` apply) | `iam.roles.create` / `.update` / `.delete` on the project, plus `iam.roles.undelete` for the 7-day detour | `roles/iam.roleAdmin` on the project (NOT inside `projectIamAdmin`) |
+| `google_project_iam_custom_role` (the spanner module's data-plane role, Amendment E — only on an `enable_spanner=true` apply) | `iam.roles.create` / `.update` / `.delete` on the project, plus `iam.roles.undelete` for the 7-day detour | `roles/iam.roleAdmin` on the project (NOT inside `projectIamAdmin`; before granting, check whether the operator's base role already carries them — `gcloud iam roles describe roles/editor` and look for `iam.roles.create` — and grant only if it does not) |
 | Impersonating the SA for manual BigQuery builds (9b on) | `iam.serviceAccounts.getAccessToken` on `ontime-pipeline` | `roles/iam.serviceAccountTokenCreator` ON the SA — Terraform grants it to `operator_principal` when set (Amendment Q) |
 
 The billing-account read is deferred to apply (the budget module `depends_on`
@@ -111,8 +111,12 @@ refuses a malformed item, whitespace, or `project_id` (PROJECT's), refuses
 to run while ANY `TF_VAR_*` / `TF_CLI_ARGS*` is in its environment or an
 auto-loaded `infra/terraform.tfvars` / `*.auto.tfvars{,.json}` exists
 (Amendment T), and gives the terraform child an ALLOWLISTED environment
-(`PATH`, `HOME`, `CLOUDSDK_*`, locale/proxy — never `GOOGLE_*CREDENTIALS*`,
-`TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*`), so the argv is the whole input by
+(`ENV_ALLOW`, ten exact names: `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`,
+`CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT`, `SSL_CERT_FILE`, `NO_PROXY`,
+`HTTPS_PROXY` — never a credential name, `TF_WORKSPACE`, `TF_DATA_DIR`,
+`TF_LOG*`; and any other `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` name in your
+shell refuses the command outright, names only — Phase 10 Amendment N2:
+the Google namespace is an allowlist, `infra.cli.CLOUD_ENV_ALLOW`), so the argv is the whole input by
 construction and the `tf-plan` you read is the `tf-apply` you get:
 
 ```
@@ -295,7 +299,10 @@ the apply: never leave it up.
    database has no deletion protection (the toggle-flip is the sanctioned
    destroy). An apply that omits it would plan the teardown — and `tf-apply`
    now REFUSES any plan that destroys something unless `ALLOW_DESTROY=yes`
-   is on the command line (it prints the addresses; Amendment F), so the
+   is on the command line (it prints the addresses; Amendment F), refuses a
+   plan it cannot read back (`the saved plan could not be read back`) and
+   refuses any action outside `{no-op, read, create, update, delete}`
+   ALWAYS — `forget`, a state drop, included (Amendment N1) — so the
    mistake stops before the cloud. `make tf-plan PROJECT=<id>
    VARS='enable_spanner=true'` first is still the habit. **Live
    2026-08-31:** an apply whose `VARS` carried `enable_spanner=true` but

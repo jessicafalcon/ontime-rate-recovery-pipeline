@@ -8,11 +8,13 @@ tf-validate — offline: `init -backend=false -lockfile=readonly` + `validate` +
 tf-plan     — reads GCP APIs (ADC/WIF); shows the diff. Non-destructive.
 tf-apply    — creates cloud resources. CONFIRM=yes from the command line only.
               Plans FIRST (`plan -out`), reads the plan back (`show -json`) and
-              REFUSES a plan that destroys anything unless ALLOW_DESTROY=yes
-              also has command-line origin — an apply that omits a toggle
-              (`enable_spanner=true` while Spanner is up) would otherwise be a
-              silent teardown (Phase 10 review round 2 #3). The saved plan is
-              what gets applied: the plan you were shown is the apply you get.
+              applies it only if every planned action is inside SAFE_ACTIONS —
+              `delete` needs ALLOW_DESTROY=yes with command-line origin, any
+              other verb or an unreadable plan is refused always (Phase 10
+              review round 2 #3, round 4 Amendment N1): an apply that omits a
+              toggle (`enable_spanner=true` while Spanner is up) would otherwise
+              be a silent teardown. The saved plan is what gets applied: the
+              plan you were shown is the apply you get.
 tf-destroy  — deletes them. CONFIRM=yes from the command line only.
 tf-freeze   — rewrites infra/MANIFEST.sha256 (the content pin over every file
               Terraform loads — `*.tf`, `*.tf.json` — plus the provider lock;
@@ -73,11 +75,14 @@ def validate_project(project: str) -> str:
 
 
 def confirmed(confirm: str, origin: str) -> bool:
-    """THE rule: CONFIRM=yes with command-line origin (`$(origin CONFIRM)`).
-    ONE predicate for every gate — the tf-* targets, loader.cli's cloud
-    commands and drop-db, and the integration fixtures' carried gate (round 2
-    #7, round 3 #4) — so none can drift from it. It lives beside the keyfile
-    policy because loader.cli imports from here (the reverse would cycle)."""
+    """THE rule: a `yes` with command-line origin (`$(origin <VAR>)`). ONE
+    predicate for every gate in the pipeline CLIs — CONFIRM on the tf-*
+    targets, loader.cli's cloud commands and drop-db, the integration
+    fixtures' carried gate, and ALLOW_DESTROY on tf-apply (round 2 #7, round
+    3 #4, round 4) — so none can drift from it. `make freeze` (generator/cli.py)
+    keeps its own literal: the generator does not import the pipeline. It lives
+    beside the cloud-env policy because loader.cli imports from here (the
+    reverse would cycle)."""
     return origin == "command line" and confirm == "yes"
 
 
@@ -175,10 +180,33 @@ def parse_vars(vars_: str, origin: str = "command line") -> list[str]:
     return out
 
 
+# The Google environment namespace (Amendment N2, round 4): every variable
+# named `GOOGLE_*`, `GCLOUD_*` or `CLOUDSDK_*` is a google-auth / gcloud /
+# provider input — a setting or a credential. The policy is an ALLOWLIST: a
+# cloud command runs only while every name in the namespace is one of the
+# settings below; any other name is a credential until listed and refuses
+# LOUDLY (names only, never values) before a client or child exists. So a key
+# file path, an inline key, a bearer token or a credential-file override under
+# ANY spelling — present or future — can never become a google client's
+# identity silently (rounds 2–3 grew a denylist of spellings: G, then L; the
+# next spelling was always the next finding). A benign new setting is one
+# line here plus a DECISIONS entry; a false refusal is the intended direction.
+CLOUD_ENV_PREFIXES = ("GOOGLE_", "GCLOUD_", "CLOUDSDK_")
+CLOUD_ENV_ALLOW = frozenset(
+    {
+        "CLOUDSDK_CONFIG",  # the gcloud/ADC config dir — where the ADC file lives
+        "CLOUDSDK_CORE_PROJECT",  # a project default, not an identity
+        "CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT",  # WHO to impersonate (runbook)
+        "CLOUDSDK_PYTHON",  # gcloud's interpreter
+        "GOOGLE_CLOUD_PROJECT",  # a project default, not an identity
+    }
+)
 # What the terraform child may see (fix/tf-vars-argv): the argv is the whole
-# input BY CONSTRUCTION — no TF_VAR_*, TF_CLI_ARGS*, GOOGLE_*CREDENTIALS*,
+# input BY CONSTRUCTION — no TF_VAR_*, TF_CLI_ARGS*, credential variable,
 # TF_WORKSPACE, TF_DATA_DIR or TF_LOG* can reach it. Auth is the ADC file in
-# CLOUDSDK_CONFIG / HOME (never a keyfile env var); the rest is process hygiene.
+# CLOUDSDK_CONFIG / HOME; the rest is process hygiene. A vendor name here
+# must also be in CLOUD_ENV_ALLOW (pinned): the child never sees a name the
+# gate refuses.
 ENV_ALLOW = (
     "PATH",
     "HOME",
@@ -192,19 +220,6 @@ ENV_ALLOW = (
     "HTTPS_PROXY",
 )
 ENV_REFUSE_PREFIXES = ("TF_VAR_", "TF_CLI_ARGS")
-# A credential in the environment (a key file path, an inline key, a bearer
-# token) would silently become the identity of ANY google client — the
-# allowlist already keeps it from terraform; every cloud command refuses it
-# LOUDLY instead (Phase 10 review round 2 #2): auth is the ADC file, never a
-# key. Matched by name FAMILY so a new spelling is caught without a list
-# edit: the google provider's `GOOGLE_*CREDENTIALS*`, `GOOGLE_CLOUD_KEYFILE_JSON`
-# and `GCLOUD_KEYFILE_JSON`, the two bearer tokens, and gcloud's credential-
-# file override (round 3, Amendment L). Not `CLOUDSDK_AUTH_*` wholesale:
-# `…_IMPERSONATE_SERVICE_ACCOUNT` is a setting, not a credential.
-KEYFILE_ENV_RE = re.compile(
-    r"^(GOOGLE_.*CREDENTIALS.*|(GOOGLE|GCLOUD)_.*KEYFILE.*|GOOGLE_OAUTH_ACCESS_TOKEN"
-    r"|CLOUDSDK_AUTH_(ACCESS_TOKEN|CREDENTIAL_FILE_OVERRIDE))$"
-)
 
 
 def tf_env() -> dict[str, str]:
@@ -219,19 +234,25 @@ def env_tf_vars() -> list[str]:
     return sorted(k for k in os.environ if k.startswith(ENV_REFUSE_PREFIXES))
 
 
-def keyfile_env() -> list[str]:
-    return sorted(k for k in os.environ if KEYFILE_ENV_RE.match(k))
+def unlisted_cloud_env(env: dict[str, str] | None = None) -> list[str]:
+    """Names in the Google namespace that CLOUD_ENV_ALLOW does not admit —
+    what the gate refuses and what tests/conftest.py scrubs (one function)."""
+    src = os.environ if env is None else env
+    return sorted(
+        k for k in src if k.startswith(CLOUD_ENV_PREFIXES) and k not in CLOUD_ENV_ALLOW
+    )
 
 
-def refuse_keyfile_env(what: str) -> None:
-    """The ONE keyfile policy for every cloud command (tf-plan/apply/destroy,
+def refuse_cloud_env(what: str) -> None:
+    """The ONE cloud-env policy for every cloud command (tf-plan/apply/destroy,
     bq-load, spanner-load, dbt-build on a cloud target, the write-back's
-    Spanner target, test-int-*): a credential-bearing variable in the
+    Spanner target, test-int-*): an unlisted Google-namespace variable in the
     environment is a refusal, before any client or child exists."""
-    found = keyfile_env()
+    found = unlisted_cloud_env()
     if found:
         die(
-            f"{what}: refused — {', '.join(found)} in the environment would become "
+            f"{what}: refused — {', '.join(found)} in the environment is not on "
+            "the cloud-env allowlist (infra.cli.CLOUD_ENV_ALLOW) and would become "
             "the identity of every google client; unset it (auth is ADC, never a key)"
         )
 
@@ -257,48 +278,79 @@ def refuse_auto_tfvars(cmd: str) -> None:
 Runner = Callable[..., subprocess.CompletedProcess]
 
 
-def planned_deletes(show_json: str) -> list[str]:
-    """Resource addresses a saved plan would delete (`terraform show -json`'s
-    `resource_changes[].change.actions` containing `delete` — a replace
-    counts: it is a delete). Empty ONLY for a parsed plan whose list has no
-    delete; a body that cannot be read — empty, not JSON, not an object, no
-    `resource_changes` list — is a refusal, never "no deletes" (round 3,
-    Amendment K: the gate runs on evidence, not on absence)."""
+# The plan-action verbs a saved plan may carry and still apply (Amendment N1,
+# round 4): `terraform show -json`'s `resource_changes[].change.actions`. An
+# ALLOWLIST — `delete` (a replace is `["delete","create"]`: a delete) is
+# admitted only by ALLOW_DESTROY=yes from the command line; ANY other verb
+# (`forget`: a state drop that leaves the resource billing with no teardown
+# path; a verb a later Terraform adds) refuses always. A shape we do not
+# recognise is not safe.
+SAFE_ACTIONS = frozenset({"no-op", "read", "create", "update"})
+DELETE = "delete"
+_UNREADABLE = (
+    "tf-apply: refused — the saved plan could not be read back ({}); nothing applied"
+)
+
+
+def planned_changes(show_json: str) -> list[tuple[str, frozenset[str]]]:
+    """`(address, actions)` per resource change of a saved plan. STRICT: an
+    empty, non-JSON or non-object body, a missing `resource_changes` list, or
+    an entry that is not `{address: str, change: {actions: [str, …]}}` is a
+    refusal, never "no changes" (round 3 K's envelope checks and round 4 N1's
+    per-entry ones, in one place — the gate runs on evidence)."""
     try:
         plan = json.loads(show_json)
     except ValueError as e:  # JSONDecodeError; an empty body lands here too
-        die(
-            "tf-apply: refused — the saved plan could not be read back "
-            f"({e}); nothing applied"
-        )
+        die(_UNREADABLE.format(e))
     changes = plan.get("resource_changes") if isinstance(plan, dict) else None
     if not isinstance(changes, list):
+        die(_UNREADABLE.format("show -json has no resource_changes list"))
+    out: list[tuple[str, frozenset[str]]] = []
+    for i, rc in enumerate(changes):
+        address = rc.get("address") if isinstance(rc, dict) else None
+        change = rc.get("change") if isinstance(rc, dict) else None
+        actions = change.get("actions") if isinstance(change, dict) else None
+        if (
+            not isinstance(address, str)
+            or not isinstance(actions, list)
+            or not all(isinstance(a, str) for a in actions)
+        ):
+            die(_UNREADABLE.format(f"resource_changes[{i}] has no address/actions"))
+        out.append((address, frozenset(actions)))
+    return out
+
+
+def unsafe_changes(
+    changes: list[tuple[str, frozenset[str]]], allowed: frozenset[str]
+) -> list[str]:
+    """Addresses whose action set is not inside `allowed`."""
+    return sorted(address for address, actions in changes if not actions <= allowed)
+
+
+def require_safe_plan(show_json: str, allow: str, origin: str) -> None:
+    """The gate between `show -json` and `apply`: every action inside
+    SAFE_ACTIONS, or `delete` with ALLOW_DESTROY=yes from the command line
+    ($(origin ALLOW_DESTROY), the one `confirmed` predicate) — the toggle-flip
+    teardown says so explicitly; an apply that merely forgot a toggle does not.
+    Anything else refuses, the addresses named."""
+    changes = planned_changes(show_json)
+    unknown = unsafe_changes(changes, SAFE_ACTIONS | {DELETE})
+    if unknown:
         die(
-            "tf-apply: refused — the saved plan could not be read back "
-            "(show -json has no resource_changes list); nothing applied"
+            "tf-apply: refused — the plan has actions outside "
+            f"{{{', '.join(sorted(SAFE_ACTIONS | {DELETE}))}}} for "
+            + ", ".join(unknown)
+            + "; nothing applied (a state drop or an unknown verb never applies here)"
         )
-    return sorted(
-        rc["address"]
-        for rc in changes
-        if "delete" in rc.get("change", {}).get("actions", [])
-    )
-
-
-def require_allow_destroy(deletes: list[str], allow: str, origin: str) -> None:
-    """A plan with destroys applies only with ALLOW_DESTROY=yes from the
-    command line ($(origin ALLOW_DESTROY), like CONFIRM): the toggle-flip
-    teardown says so explicitly; an apply that merely forgot a toggle does not."""
-    if not deletes:
-        return
-    if origin == "command line" and allow == "yes":
-        return
-    die(
-        "tf-apply: refused — the plan destroys "
-        + ", ".join(deletes)
-        + "; if that is intended (the toggle-flip teardown), re-run with "
-        "ALLOW_DESTROY=yes on the command line; if not, the VARS you passed "
-        "omit a toggle that is currently applied"
-    )
+    deletes = unsafe_changes(changes, SAFE_ACTIONS)
+    if deletes and not confirmed(allow, origin):
+        die(
+            "tf-apply: refused — the plan destroys "
+            + ", ".join(deletes)
+            + "; if that is intended (the toggle-flip teardown), re-run with "
+            "ALLOW_DESTROY=yes on the command line; if not, the VARS you passed "
+            "omit a toggle that is currently applied"
+        )
 
 
 def _run(runner: Runner, argv: list[str], label: str) -> int | None:
@@ -315,9 +367,9 @@ def _run(runner: Runner, argv: list[str], label: str) -> int | None:
 def _apply(
     runner: Runner, var: list[str], project: str, allow: str, allow_origin: str
 ) -> int:
-    """plan -out → show -json → (refuse on destroys unless allowed) → apply
-    <planfile>. The plan file holds variable values, so it lives in TMPDIR
-    and is removed on every path."""
+    """plan -out → show -json → require_safe_plan → apply <planfile>. The plan
+    file holds variable values, so it lives in TMPDIR and is removed on every
+    path."""
     fd, plan_path = tempfile.mkstemp(prefix="tfplan-", suffix=".bin")
     os.close(fd)
     try:
@@ -344,7 +396,7 @@ def _apply(
         if shown.returncode != 0:
             print(f"tf-apply FAIL: {project} (show)")
             return 1
-        require_allow_destroy(planned_deletes(shown.stdout), allow, allow_origin)
+        require_safe_plan(shown.stdout, allow, allow_origin)
         rc = _run(runner, _TF + ["apply", "-input=false", plan_path], "tf-apply")
         if rc is None:
             return 1
@@ -388,7 +440,7 @@ def tf(
         return 0
     validate_project(project)
     refuse_auto_tfvars(cmd)
-    refuse_keyfile_env(f"tf-{cmd}")
+    refuse_cloud_env(f"tf-{cmd}")
     var = ["-var", f"project_id={project}", *parse_vars(vars_, vars_origin)]
     if cmd == "apply":
         return _apply(runner, var, project, allow_destroy, allow_destroy_origin)

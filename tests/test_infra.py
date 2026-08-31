@@ -1360,38 +1360,65 @@ def test_cli_child_env_is_an_allowlist(
     assert set(env) <= set(cli.ENV_ALLOW)
     assert env["HOME"] == "/tmp/h" and "PATH" in env
     assert not any(k.startswith(("GOOGLE_", "TF_")) for k in env)
+    # Amendment N2: a vendor name the child may see is one the gate admits
+    vendor = {k for k in cli.ENV_ALLOW if k.startswith(cli.CLOUD_ENV_PREFIXES)}
+    assert vendor and vendor <= cli.CLOUD_ENV_ALLOW
+
+
+# Google-namespace names that are NOT settings the runbook uses: every one is
+# refused by construction — the list is illustrative, the policy is the
+# allowlist (Amendment N2). Rounds 2–3's denylist missed a new one each round.
+UNLISTED_CLOUD_ENV = (
+    "GOOGLE_CREDENTIALS",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GOOGLE_BACKUP_CREDENTIALS_JSON",
+    "GOOGLE_OAUTH_ACCESS_TOKEN",
+    "CLOUDSDK_AUTH_ACCESS_TOKEN",
+    "GOOGLE_CLOUD_KEYFILE_JSON",
+    "GCLOUD_KEYFILE_JSON",
+    "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
+    "CLOUDSDK_AUTH_ACCESS_TOKEN_FILE",  # round 4 #7: outside L's family
+    "GOOGLE_GHA_CREDS_PATH",
+    "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES",
+    "GCLOUD_A_SPELLING_NOBODY_HAS_SEEN_YET",
+)
 
 
 def test_cli_refuses_a_credential_in_the_env_loudly(
     scratch_infra: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """Round 2 #2: a keyfile / inline key / bearer token in the environment is
-    a loud refusal (exit 2, no terraform child) on every project-taking
-    command — the allowlist alone would have DROPPED it silently, applying as
-    whoever ADC is while the operator believed the key was in use. The shape
-    match catches a new `GOOGLE_*CREDENTIALS*` spelling too."""
-    for name in (
-        "GOOGLE_CREDENTIALS",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "GOOGLE_BACKUP_CREDENTIALS_JSON",
-        "GOOGLE_OAUTH_ACCESS_TOKEN",
-        "CLOUDSDK_AUTH_ACCESS_TOKEN",
-        "GOOGLE_CLOUD_KEYFILE_JSON",  # Amendment L (round 3 #2): the keyfile family
-        "GCLOUD_KEYFILE_JSON",
-        "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
-    ):
+    """Round 2 #2 → round 4 Amendment N2: any Google-namespace variable the
+    allowlist does not admit is a loud refusal (exit 2, names only, no
+    terraform child) on every project-taking command — the child's allowlist
+    alone would have DROPPED a key silently, applying as whoever ADC is while
+    the operator believed the key was in use. The listed settings pass."""
+    assert cli.CLOUD_ENV_PREFIXES == ("GOOGLE_", "GCLOUD_", "CLOUDSDK_")
+    assert cli.CLOUD_ENV_ALLOW == {
+        "CLOUDSDK_CONFIG",
+        "CLOUDSDK_CORE_PROJECT",
+        "CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT",
+        "CLOUDSDK_PYTHON",
+        "GOOGLE_CLOUD_PROJECT",
+    }
+    for name in UNLISTED_CLOUD_ENV:
         monkeypatch.setenv(name, "x")
-        assert cli.keyfile_env() == [name]
+        assert cli.unlisted_cloud_env() == [name]
         for cmd in ("plan", "apply", "destroy"):
             fake = _FakeRunner()
             with pytest.raises(SystemExit) as e:
                 cli.tf(cmd, "my-proj", "yes", "command line", runner=fake)
             assert e.value.code == 2 and fake.calls == [], (cmd, name)
-            assert f"tf-{cmd}: refused — {name} in the environment" in (
-                capsys.readouterr().out
-            )
+            out = capsys.readouterr().out
+            assert f"tf-{cmd}: refused — {name} in the environment" in out
+            assert "x\n" not in out  # names, never values
         monkeypatch.delenv(name)
+    for name in sorted(cli.CLOUD_ENV_ALLOW):
+        monkeypatch.setenv(name, "x")
+    assert cli.unlisted_cloud_env() == []
     assert cli.tf("plan", "my-proj", runner=_FakeRunner()) == 0
+    assert cli.unlisted_cloud_env(
+        {"GOOGLE_X": "1", "CLOUDSDK_CONFIG": "2", "PATH": "3"}
+    ) == ["GOOGLE_X"]
 
 
 DESTROYING_PLAN = (
@@ -1408,30 +1435,45 @@ DESTROYING_PLAN = (
 def test_apply_plans_first_and_refuses_destroys_without_allow_destroy(
     scratch_infra: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    """Round 2 #3 (Amendment F): tf-apply reads its own saved plan back and
-    refuses to apply one that deletes (or replaces) anything unless
-    ALLOW_DESTROY=yes came from the command line — so an apply that omitted
-    `enable_spanner=true` while Spanner is up cannot tear it down; the
-    toggle-flip teardown passes the flag and proceeds."""
-    assert cli.planned_deletes(DESTROYING_PLAN) == [
+    """Round 2 #3 (Amendment F) → round 4 Amendment N1: tf-apply reads its own
+    saved plan back and applies it only if every action is in SAFE_ACTIONS;
+    `delete` (a replace counts) needs ALLOW_DESTROY=yes from the command line
+    — so an apply that omitted `enable_spanner=true` while Spanner is up
+    cannot tear it down; the toggle-flip teardown passes the flag and
+    proceeds. A plan that cannot be read back — envelope OR entry — refuses."""
+    assert cli.SAFE_ACTIONS == {"no-op", "read", "create", "update"}  # the exact set
+    changes = cli.planned_changes(DESTROYING_PLAN)
+    assert cli.unsafe_changes(changes, cli.SAFE_ACTIONS) == [
         "module.gcs.google_storage_bucket.this",
         "module.spanner[0].google_spanner_instance.this",
     ]
-    assert cli.planned_deletes(_FakeRunner.NO_DESTROY) == []
-    assert cli.planned_deletes('{"resource_changes": []}') == []
-    # Amendment K (round 3 #1): a plan that cannot be read back is a refusal,
-    # never "no deletes" — the gate runs on evidence, not on absence.
+    assert cli.unsafe_changes(changes, cli.SAFE_ACTIONS | {"delete"}) == []
+    safe = cli.planned_changes(_FakeRunner.NO_DESTROY)
+    assert safe == [("a.b", frozenset({"create"}))]
+    assert cli.unsafe_changes(safe, cli.SAFE_ACTIONS) == []
+    assert cli.planned_changes('{"resource_changes": []}') == []
+    # K (round 3 #1) + N1 (round 4 #3/#4): a plan that cannot be read back is
+    # a refusal, never "no deletes" — the envelope AND every entry.
     for bad in (
         "",
         "not json",
         "[]",
         '{"format_version": "1.2"}',
         '{"resource_changes": {}}',
+        '{"resource_changes": [{"address": "a.b", "change": {}}]}',  # no actions
+        '{"resource_changes": [{"address": "a.b", "change": null}]}',
+        '{"resource_changes": [{"address": "a.b"}]}',
+        '{"resource_changes": [{"change": {"actions": ["delete"]}}]}',  # no address
+        '{"resource_changes": [{"address": 7, "change": {"actions": ["create"]}}]}',
+        '{"resource_changes": [{"address": "a.b", "change": {"actions": "delete"}}]}',
+        '{"resource_changes": [{"address": "a.b", "change": {"actions": [null]}}]}',
+        '{"resource_changes": ["a.b"]}',
+        '{"resource_changes": [null]}',
     ):
         with pytest.raises(SystemExit) as e:
-            cli.planned_deletes(bad)
-        assert e.value.code == 2
-        assert "could not be read back" in capsys.readouterr().out
+            cli.planned_changes(bad)
+        assert e.value.code == 2, bad
+        assert "could not be read back" in capsys.readouterr().out, bad
     fake = _FakeRunner(plan_json="")
     with pytest.raises(SystemExit) as e:
         cli.tf("apply", "my-proj", "yes", "command line", runner=fake)
@@ -1470,6 +1512,41 @@ def test_apply_plans_first_and_refuses_destroys_without_allow_destroy(
     fake = _FakeRunner(rc=1)
     assert cli.tf("apply", "my-proj", "yes", "command line", runner=fake) == 1
     assert [c[2] for c in fake.calls] == ["plan"]
+
+
+def test_apply_refuses_unknown_actions_even_with_allow_destroy(
+    scratch_infra: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Amendment N1 (round 4 #5): an action outside SAFE_ACTIONS ∪ {delete}
+    — `forget` (a `removed {}` block: the instance drops out of state and
+    keeps billing with no teardown path) or a verb a later Terraform adds —
+    refuses ALWAYS, ALLOW_DESTROY=yes or not; the plan file is removed."""
+    for verb in ("forget", "frobnicate"):
+        plan = (
+            '{"resource_changes": ['
+            '{"address": "module.spanner[0].google_spanner_instance.this", '
+            f'"change": {{"actions": ["{verb}"]}}}}, '
+            '{"address": "a.b", "change": {"actions": ["update"]}}]}'
+        )
+        for allow, origin in (("", ""), ("yes", "command line")):
+            fake = _FakeRunner(plan_json=plan)
+            with pytest.raises(SystemExit) as e:
+                cli.tf(
+                    "apply",
+                    "my-proj",
+                    "yes",
+                    "command line",
+                    runner=fake,
+                    allow_destroy=allow,
+                    allow_destroy_origin=origin,
+                )
+            assert e.value.code == 2, (verb, allow)
+            assert [c[2] for c in fake.calls] == ["plan", "show"]
+            out = capsys.readouterr().out
+            assert "actions outside" in out and "google_spanner_instance.this" in out
+            assert "a.b" not in out.split("for ")[1]  # only the offending address
+            planfile = next(a for a in fake.calls[0] if a.startswith("-out="))[5:]
+            assert not Path(planfile).exists()
 
 
 def test_cli_main_forwards_vars_and_origin_to_tf(

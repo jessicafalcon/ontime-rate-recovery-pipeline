@@ -34,7 +34,7 @@ variable "enable_composer" {
 }
 
 variable "enable_spanner" {
-  description = "Provision the Spanner module (Phase 10). Off — the 90-day trial clock only starts on apply."
+  description = "Provision the Spanner module (Phase 10). Off — the instance bills from creation (~$0.09/h): apply, prove, tear down in one session."
   type        = bool
   default     = false
 }

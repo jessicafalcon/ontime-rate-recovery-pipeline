@@ -60,6 +60,7 @@ EXISTING_COLUMNS: tuple[str, ...] = ("user_id", "model_version", "computed_as_of
 
 
 def existing_sql(relation: str) -> str:
+    """The stored-pair read on any target — the select list from EXISTING_COLUMNS."""
     return f"select {', '.join(EXISTING_COLUMNS)} from {relation}"
 
 
@@ -110,34 +111,44 @@ def candidates_sql(scores: str = SCORES, dims: str = DIM_CURRENT) -> str:
     )
 
 
+def rows_by_name(cur: duckdb.DuckDBPyConnection) -> list[dict[str, object]]:
+    """A DuckDB cursor's rows keyed by column name — the ONE DuckDB-side mapping
+    (the readers here and the offline fakes; Spanner's is the library's own
+    `to_dict_list`, BigQuery's its `Row.items()` — Amendment N3)."""
+    names = [d[0] for d in cur.description]
+    return [dict(zip(names, r, strict=True)) for r in cur.fetchall()]
+
+
 def read_candidates(con: duckdb.DuckDBPyConnection) -> list[Candidate]:
     """The served pair from scores_send_time, tz from the open dim_user row
     (dim_user_current) — never the source events or the unclamped centre."""
-    cur = con.execute(candidates_sql())
-    names = [d[0] for d in cur.description]
-    return [candidate_of(dict(zip(names, r, strict=True))) for r in cur.fetchall()]
+    return [candidate_of(r) for r in rows_by_name(con.execute(candidates_sql()))]
 
 
 def read_existing(
     con: duckdb.DuckDBPyConnection,
 ) -> dict[str, tuple[str, datetime]]:
     """user_id → the stored (model_version, computed_as_of) the guard compares."""
-    cur = con.execute(EXISTING_SQL)
-    names = [d[0] for d in cur.description]
-    return dict(existing_of(dict(zip(names, r, strict=True))) for r in cur.fetchall())
+    return dict(existing_of(r) for r in rows_by_name(con.execute(EXISTING_SQL)))
 
 
 def existing_of(row: dict[str, object]) -> tuple[str, tuple[str, datetime]]:
     """One stored row, by column name → (user_id, (model_version, computed_as_of));
-    a row without exactly the EXISTING_COLUMNS keys refuses."""
+    a row without exactly the EXISTING_COLUMNS keys, or a cell of the wrong
+    type, refuses — never coerces (Amendment J's rule, on the read)."""
     if set(row) != set(EXISTING_COLUMNS):
         raise ValueError(
             f"stored row has {sorted(row)}, want {sorted(EXISTING_COLUMNS)}"
         )
-    ts = row["computed_as_of"]
+    user_id, version, ts = row["user_id"], row["model_version"], row["computed_as_of"]
+    if not isinstance(user_id, str) or not isinstance(version, str):
+        raise ValueError(
+            f"user_id/model_version are {type(user_id).__name__}/"
+            f"{type(version).__name__}, want str"
+        )
     if not isinstance(ts, datetime):
         raise ValueError(f"computed_as_of is {type(ts).__name__}, want datetime")
-    return str(row["user_id"]), (str(row["model_version"]), ts)
+    return user_id, (version, ts)
 
 
 def version_key(model_version: str) -> tuple[int]:

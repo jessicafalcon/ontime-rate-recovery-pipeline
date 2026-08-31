@@ -67,9 +67,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   types from `bq_schema.json`, idempotent batch upsert, injectable client),
   `cli.py` (`load`, `bq-load`, `spanner-load`, `dbt-build` — lands by
   target — `drop-db`, `test-int-bigquery`, `test-int-spanner`).
-  `require_confirm` is the ONE cloud gate (CONFIRM origin + the keyfile
-  policy); `confirmed()` its predicate, shared with the integration
-  fixtures' carried gate. Pipeline code — guarded by
+  `require_confirm` is the ONE cloud gate (CONFIRM origin + the cloud-env
+  allowlist, both imported from `infra.cli` — where `confirmed()`, the one
+  origin predicate the integration fixtures' carried gate shares, and
+  `CLOUD_ENV_ALLOW` live). Pipeline code — guarded by
   `test_truth_isolation.py`.
 - `eval/` *(Phase 3+)* — the ONLY code that reads truth: `score.py` (label
   accuracy vs `truth/prompts.jsonl`; Phase 5: reachable-centre MAE and
@@ -137,8 +138,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`/`tf-freeze` on
   `CONFIRM=yes $(origin)`; toggles only as a command-line `VARS` → argv
   `-var`, refuses `TF_VAR_*`/`TF_CLI_ARGS*`, auto-loaded tfvars and any
-  credential-bearing env var (`KEYFILE_ENV_RE` — the one policy every cloud
-  command shares), runs terraform under an env allowlist —
+  `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` variable outside `CLOUD_ENV_ALLOW` (the
+  one allowlist every cloud command shares — Amendment N2; the plan-first
+  apply's action allowlist `SAFE_ACTIONS` is N1), runs terraform under an
+  env allowlist —
   `fix/tf-vars-argv`) drives
   `make tf-validate|tf-plan|tf-apply|tf-destroy|tf-freeze`.
   `terraform.tfvars.example` only (never a `*.tfvars`); `.terraform.lock.hcl`
@@ -182,7 +185,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `OTR_INT=1`, which only the `test-int-*` targets export)
 - `make lint` — ruff via pre-commit (rewrites files; never run inside a gate)
 - `make check-docs` — `scripts/check_docs.py`: every relative link/anchor in
-  CLAUDE.md, README, docs/, PROJECT_BRIEF, DECISIONS, BACKLOG resolves; every
+  CLAUDE.md, README (read only if one is tracked — none today), docs/,
+  PROJECT_BRIEF, DECISIONS, BACKLOG resolves; every
   `make <target>` the LIVING docs name exists in the Makefile (ARCHITECTURE,
   PHASES and PROJECT_BRIEF are plans — link-checked only); every trace token in `TRACES` exists in source as an exact token;
   this file's "Open BACKLOG rows: **N**" equals BACKLOG.md's un-struck rows
@@ -352,9 +356,11 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   deriving `-var project_id=<id>`, parses each `VARS` item into an argv `-var`
   (`name=scalar` or `name=[n,n]`; malformed, whitespace, `project_id`, or an
   env-origin `VARS` → refused — `$(origin VARS)`, like `CONFIRM`), then
-  `terraform -chdir=infra plan` under an ALLOWLISTED environment (`PATH`,
-  `HOME`, `CLOUDSDK_*`, locale/proxy — no `GOOGLE_*CREDENTIALS*`,
-  `TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*`). Reads GCP APIs (your own ADC —
+  `terraform -chdir=infra plan` under an ALLOWLISTED environment (`ENV_ALLOW`,
+  ten exact names: `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`,
+  `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT`, `SSL_CERT_FILE`, `NO_PROXY`,
+  `HTTPS_PROXY` — so no credential name, `TF_WORKSPACE`, `TF_DATA_DIR` or
+  `TF_LOG*` reaches it). Reads GCP APIs (your own ADC —
   never the impersonated SA, §8); shows the diff, creates nothing. EVERY
   `tf-*` REFUSES (exit 2, before terraform) while any `TF_VAR_*` /
   `TF_CLI_ARGS*` is in the environment, and plan/apply/destroy also while an
@@ -364,13 +370,16 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `make tf-destroy PROJECT=<id> CONFIRM=yes [VARS=…]` (no `ALLOW_DESTROY` —
   destruction is its purpose) *(Phase 9a; plan-first apply Phase 10)* — apply
   PLANS FIRST (`plan -out`), reads the saved plan back (`show -json`) and
-  REFUSES to apply one that destroys or replaces anything unless
-  `ALLOW_DESTROY=yes` also has command-line origin (`$(origin
-  ALLOW_DESTROY)`; the toggle-flip teardown passes it; an apply that merely
-  omitted a currently-applied toggle stops with the addresses printed); the
-  saved plan is what gets applied — no `-auto-approve` on apply. Any
-  `GOOGLE_*CREDENTIALS*` / access-token variable in the environment refuses
-  every project-taking `tf-*` (and every other cloud command) loudly. Apply
+  applies it only if every planned action is in `SAFE_ACTIONS = {no-op,
+  read, create, update}` (Amendment N1): a destroy or replace needs
+  `ALLOW_DESTROY=yes` with command-line origin (`$(origin ALLOW_DESTROY)`;
+  the toggle-flip teardown passes it; an apply that merely omitted a
+  currently-applied toggle stops with the addresses printed), and a plan it
+  cannot read back or one carrying any other verb (`forget`, a future one)
+  is refused ALWAYS; the saved plan is what gets applied — no
+  `-auto-approve` on apply. Any `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` variable
+  outside `CLOUD_ENV_ALLOW` in the environment refuses every project-taking
+  `tf-*` (and every other cloud command) loudly, names only (N2). Apply
   creates the free-tier layer: 9 API enablements (free, kept on by destroy),
   two BigQuery datasets, a GCS staging bucket, a least-privilege service
   account with 4 scoped grants, and budget alerts at 50/150 in the billing
@@ -863,7 +872,7 @@ rows`, `test-int-spanner` **`4 passed in 239.42s`**, `writeback OK … 0
 written`; the `ALLOW_DESTROY=yes` toggle-flip `9 destroyed` (02:48 UTC),
 `Listed 0 items.`, state 21, default plan `No changes` (the custom role's
 undelete window runs to 2026-09-07). Nothing billable is up. **Review
-round 3 applied (2026-08-31, 15 findings):** Amendments K (`planned_deletes`
+round 3 applied (2026-08-31, 15 findings):** Amendments K (`planned_deletes` <!-- historical -->
 fails CLOSED — an unreadable `show -json` refuses, never "no deletes"), L
 (the keyfile-env policy covers the google-auth family: `*KEYFILE*`,
 `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`), M (records: the instance is
@@ -871,8 +880,23 @@ fails CLOSED — an unreadable `show -json` refuses, never "no deletes"), L
 the stored-pair read maps by name (missed in round 2); ONE `confirmed`
 predicate in `infra.cli`; the explicit rollback pinned on an open
 connection; the unversioned-tfstate BACKLOG row (accepted, dated trigger);
-records. NEXT: round 4 (the scoped re-review of round 3's diff) and the
-coherence-auditor exit pass, then the PR.
+records. **Review round 4 (2026-08-31, 28 findings) invoked the cap** —
+round 4's correctness findings sat inside round 3's fixes as round 3's sat
+inside round 2's: each fix was a longer denylist at an open-world boundary.
+Three boundaries re-implemented ONCE, denylist → allowlist / real type:
+**Amendments N1** (the plan-first apply is an action allowlist —
+`SAFE_ACTIONS`, `delete` only with `ALLOW_DESTROY`, any other verb or an
+unparseable entry refuses always; supersedes K), **N2** (the Google env
+namespace `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` is allowlisted —
+`CLOUD_ENV_ALLOW`, every other name refuses every cloud command;
+`KEYFILE_ENV_RE` deleted; conftest scrubs with the gate's own function; <!-- historical -->
+supersedes G/L), **N3** (the Spanner read is the library's `to_dict_list`,
+tested offline on real `StreamedResultSet`s through the real adapter;
+`existing_of` refuses non-str; one DuckDB-side `rows_by_name`); M's four
+`infra/*.tf` survivors reworded + re-frozen, PROJECT_BRIEF annotated,
+records. NEXT: the live re-proof `make test-int-spanner` (N3 changed the
+adapter — ask-first), round 5 scoped to N's diff, the coherence-auditor
+exit pass, then the PR.
 Open BACKLOG rows: **13** (Phase 10 struck: the write-back read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /

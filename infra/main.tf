@@ -132,9 +132,10 @@ module "composer" {
 
 # Phase 10: the Spanner serving layer (instance, database DDL, federation
 # connection + view, scoped grants). Still count-gated: a default plan creates
-# zero of these; the trial clock starts only on an explicit
-# `VARS='enable_spanner=true'` apply, and the toggle flipped back is the scoped
-# teardown (docs/DEPLOYMENT.md carries the dates).
+# zero of these; the PROVISIONED instance bills from the minute an explicit
+# `VARS='enable_spanner=true'` apply creates it (Amendment M — no trial clock),
+# and the toggle flipped back is the scoped teardown (docs/DEPLOYMENT.md
+# carries the dates).
 module "spanner" {
   source      = "./modules/spanner"
   count       = var.enable_spanner ? 1 : 0

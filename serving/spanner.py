@@ -50,7 +50,9 @@ class QueryClient(Protocol):
 class Txn(Protocol):
     """What the write path may do INSIDE its one read-write transaction: read
     the stored pairs, upsert the winners. No DDL (Terraform owns the schema),
-    no delete. Rows come back keyed by column NAME (round 3 #3)."""
+    no delete. Rows come back keyed by column NAME (round 3 #3) — the
+    library's own `StreamedResultSet.to_dict_list()`, not a mapping of ours
+    (Amendment N3)."""
 
     def read(self, sql: str) -> list[dict[str, object]]: ...
 
@@ -87,7 +89,7 @@ class _GoogleTxn:
         self._txn = txn
 
     def read(self, sql: str) -> list[dict[str, object]]:
-        return _rows_by_name(self._txn.execute_sql(sql))  # type: ignore[attr-defined]
+        return self._txn.execute_sql(sql).to_dict_list()  # type: ignore[attr-defined]
 
     def upsert(self, table: str, columns: tuple[str, ...], rows: list[tuple]) -> None:
         self._txn.insert_or_update(table=table, columns=columns, values=rows)  # type: ignore[attr-defined]
@@ -111,15 +113,7 @@ class GoogleSpannerClient:
 
     def read(self, sql: str) -> list[dict[str, object]]:
         with self._db.snapshot() as snap:
-            return _rows_by_name(snap.execute_sql(sql))
-
-
-def _rows_by_name(result: object) -> list[dict[str, object]]:
-    """A StreamedResultSet as dicts: its `fields` (the column metadata) are
-    populated once the stream is consumed, so consume first, then key."""
-    rows = [list(r) for r in result]  # type: ignore[attr-defined]
-    names = [f.name for f in result.fields]  # type: ignore[attr-defined]
-    return [dict(zip(names, r, strict=True)) for r in rows]
+            return snap.execute_sql(sql).to_dict_list()
 
 
 QueryFactory = Callable[[str], QueryClient]

@@ -1,7 +1,7 @@
 # Phase 10: the Spanner serving layer, count-gated from the root
 # (`module "spanner" { count = var.enable_spanner ? 1 : 0 }`), so a default
-# plan/apply creates NOTHING here and the 90-day trial clock only starts on an
-# explicit `VARS='enable_spanner=true'` apply (ask-first; the teardown date is
+# plan/apply creates NOTHING here; the PROVISIONED instance bills from the minute
+# an explicit `VARS='enable_spanner=true'` apply creates it (ask-first; the teardown date is
 # recorded in docs/DEPLOYMENT.md the same day). The scoped teardown is the
 # toggle flipped back (`VARS='enable_spanner=false'` re-apply): count → 0
 # destroys exactly these resources — no MODULE variable, no -target.
@@ -35,9 +35,9 @@ resource "google_spanner_instance" "this" {
   name         = "ontime"
   config       = "regional-${var.region}"
   display_name = "ontime"
-  # The smallest provisionable size. Whether a Terraform-created instance sits
-  # inside the 90-day free trial is verified on apply day (stack risk in the
-  # Phase 10 spec); either way the teardown date in docs/DEPLOYMENT.md bounds it.
+  # The smallest provisionable size — a PROVISIONED instance, billing from
+  # creation (~$0.09/h; Amendment M: a free-trial instance is a separate,
+  # console-created kind); the teardown date in docs/DEPLOYMENT.md bounds it.
   processing_units = 100
 
   depends_on = [google_project_service.spanner]

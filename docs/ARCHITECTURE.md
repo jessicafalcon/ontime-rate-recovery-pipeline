@@ -328,7 +328,9 @@ creation (no free-trial instance — Phase 10 Amendment M), `enable_spanner`
 toggle, applied and torn down in one session, dates in `docs/DEPLOYMENT.md`. Composer: `enable_composer` toggle, applied once on
 demo day, destroyed the same hour. Budget alerts do not stop spend — stated,
 with the optional billing-disable function as the real guardrail. Terraform
-state in GCS (bootstrapped manually); WIF for CI, never JSON keys.
+state: a local `infra/terraform.tfstate` today — the GCS backend is
+bootstrap-documented and commented out (BACKLOG row; trigger: before the
+next `enable_spanner=true` apply); WIF for CI, never JSON keys.
 
 Implemented in Phase 9a (`infra/`, behind `enable_*` toggles that default false;
 `project_id` the only required var; one least-privilege service account, with
@@ -467,9 +469,10 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   `TF_CLI_ARGS_<cmd>` are strictly worse (Terraform splices them into the
   argv, `-var-file` included). `infra/cli.py` now refuses to run while any
   `TF_VAR_*` / `TF_CLI_ARGS*` is in its environment, gives the child an
-  ALLOWLISTED environment (so `GOOGLE_*CREDENTIALS*` — a keyfile despite
-  "ADC only" — `TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*` cannot reach it
-  either), and a toggle reaches Terraform only as `VARS='name=value,…'` from
+  ALLOWLISTED environment (so a credential variable — a keyfile despite
+  "ADC only", under any spelling: the Google namespace is allowlisted,
+  Phase 10 Amendment N2 — `TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*` cannot
+  reach it either), and a toggle reaches Terraform only as `VARS='name=value,…'` from
   the command line (`$(origin VARS)`) → argv `-var` (validated, `project_id`
   excluded) — the argv is the whole input by construction.
 - **`partition_by` is a model config BOTH adapters interpret** (Phase 9b, found
@@ -563,4 +566,7 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   teardown), so an apply that omitted `enable_spanner=true` while Spanner
   was up would have destroyed it silently. `tf-apply` now saves a plan,
   reads it back (`show -json`) and refuses any `delete` action unless
-  `ALLOW_DESTROY=yes` has command-line origin (Amendment F).
+  `ALLOW_DESTROY=yes` has command-line origin (Amendment F); round 4's
+  Amendment N1 made the gate an action ALLOWLIST — an unreadable plan or an
+  action outside `{no-op, read, create, update}` (+ `delete` with the flag)
+  is refused always.

@@ -28,7 +28,7 @@ import subprocess
 import sys
 from typing import NoReturn
 
-from infra.cli import confirmed, refuse_keyfile_env, validate_project
+from infra.cli import confirmed, refuse_cloud_env, validate_project
 from loader import bq, spanner
 from loader import load as loader
 
@@ -94,14 +94,15 @@ CLOUD_TARGET = "bigquery"
 
 def require_confirm(what: str, confirm: str, origin: str) -> None:
     """The ONE gate every cloud-cost command passes through, before any
-    client: CONFIRM=yes from the command line, and no credential in the
-    environment (infra.cli's keyfile policy — round 2 #2)."""
+    client: CONFIRM=yes from the command line, and no unlisted Google-namespace
+    variable in the environment (infra.cli's cloud-env allowlist — round 2 #2,
+    round 4 Amendment N2)."""
     if not confirmed(confirm, origin):
         die(
             f"{what}: refused — a cloud-cost command; pass CONFIRM=yes on the "
             "command line (CLAUDE.md: ask first, every time)"
         )
-    refuse_keyfile_env(what)
+    refuse_cloud_env(what)
 
 
 def bq_load(

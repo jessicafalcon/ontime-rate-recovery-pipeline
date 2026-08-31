@@ -243,7 +243,8 @@ annotated **Superseded by …** in place and never deleted.
   VARS text. Scaling note: `show -json` of a large plan is a few MB of
   stdout, parsed once — fine at any size this stack reaches.
 - **A credential in the environment refuses every cloud command, loudly
-  (round 2 #2, Amendment G).** One policy (`infra.cli.KEYFILE_ENV_RE`,
+  (round 2 #2, Amendment G). Mechanism superseded by Amendment N2 (round 4,
+  below) — the rule stands, the name-shape match does not.** One policy (`infra.cli.KEYFILE_ENV_RE`, <!-- historical -->
   name-shape matched), one gate (`loader.cli.require_confirm`, which the
   cloud `dbt-build` now uses too) plus `tf()`. The env allowlist alone
   dropped the key SILENTLY from terraform — an operator who set it believed
@@ -267,7 +268,9 @@ annotated **Superseded by …** in place and never deleted.
   count: `ValueError` with the line. The contract is naive UTC wall times
   (generator/writer.py) and REQUIRED means present; `replace(tzinfo=UTC)`
   on an offset value discarded the offset silently.
-- **`planned_deletes` fails CLOSED (round 3 #1, Amendment K).** Amendment F
+- **`planned_deletes` fails CLOSED (round 3 #1, Amendment K). Superseded by <!-- historical -->
+  Amendment N1 (round 4, below): the gate is an action allowlist —
+  `planned_changes` / `unsafe_changes` / `require_safe_plan`.** Amendment F
   parsed `show -json` with `json.loads(show_json or "{}")` and
   `.get("resource_changes", [])`, so an empty or shape-changed body counted
   as "no deletes" and the gate was skipped. Now an empty, non-JSON,
@@ -275,8 +278,10 @@ annotated **Superseded by …** in place and never deleted.
   reason named, the plan file removed); only a parsed list yields `[]`.
   Rejected: falling back to requiring `ALLOW_DESTROY` on an unreadable plan
   (a gate firing for the wrong reason teaches the operator to pass the flag).
-- **The keyfile-env policy is matched by FAMILY (round 3 #2, Amendment L).**
-  `KEYFILE_ENV_RE` now also matches `(GOOGLE|GCLOUD)_*KEYFILE*` (the
+- **The keyfile-env policy is matched by FAMILY (round 3 #2, Amendment L).
+  Superseded by Amendment N2 (round 4, below): the Google namespace is
+  allowlisted; `KEYFILE_ENV_RE` is deleted.** <!-- historical -->
+  `KEYFILE_ENV_RE` now also matches `(GOOGLE|GCLOUD)_*KEYFILE*` (the <!-- historical -->
   provider's `GOOGLE_CLOUD_KEYFILE_JSON` / `GCLOUD_KEYFILE_JSON`) and
   `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`; still one pattern, read by the
   gate and by `tests/conftest.py`'s scrub. Rejected: `CLOUDSDK_AUTH_*`
@@ -298,6 +303,53 @@ annotated **Superseded by …** in place and never deleted.
   The Spanner stored-pair read maps by column name like the candidate read
   (#3, `EXISTING_COLUMNS` → `existing_sql` / `existing_of`), and the explicit
   rollback is pinned through a still-open injected connection (#5).
+- **The plan-first apply gate is an ACTION ALLOWLIST (round 4 #3–#5,
+  Amendment N1).** K validated the envelope of `show -json`; round 4 found
+  an entry without `actions` read as "no delete" (fail-open), a malformed
+  entry tracebacked, and `forget` (a state drop — the instance keeps
+  billing with no teardown path) passed. The fix is not a fourth branch:
+  `planned_changes` parses strictly (any unreadable envelope or entry
+  refuses), and a plan applies only if every action is in `SAFE_ACTIONS =
+  {no-op, read, create, update}`; `delete` needs `ALLOW_DESTROY=yes` through
+  the one `confirmed` predicate; anything else refuses always. A verb we do
+  not know is not safe by definition, so the next Terraform verb is a
+  refusal, not a finding. Rejected: enumerating the unsafe verbs (the
+  denylist that produced F → K → N1); `prevent_destroy` (blocks the
+  sanctioned toggle-flip).
+- **The Google environment namespace is an ALLOWLIST (round 4 #7/#8,
+  Amendment N2).** G refused two names, L a family regex; round 4 found
+  `CLOUDSDK_AUTH_ACCESS_TOKEN_FILE` outside the family and nothing pinning
+  that conftest's scrub read the same pattern. Now every `GOOGLE_*`,
+  `GCLOUD_*`, `CLOUDSDK_*` name not in `CLOUD_ENV_ALLOW` (five settings the
+  runbook uses: `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT`,
+  `CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT`, `CLOUDSDK_PYTHON`,
+  `GOOGLE_CLOUD_PROJECT`) refuses every cloud command, names only; the
+  terraform child's `ENV_ALLOW` may carry a vendor name only if that set
+  admits it (pinned); conftest scrubs with the gate's own
+  `unlisted_cloud_env` (pinned). The standard from here: a credential is
+  whatever is NOT a listed setting — no spelling, present or future, has to
+  be anticipated; a new vendor is its prefix plus its settings. A false
+  refusal on a benign new variable is loud and one line to fix — the
+  intended direction. Rejected: a generic secret-shape denylist over the
+  whole environment (`*_TOKEN`, `*_KEY`, `*SECRET*` — false refusals on
+  unrelated tools' variables no google client reads, and still a denylist);
+  scrubbing instead of refusing (an operator who set a key believed it was
+  in use — G's own argument).
+- **The Spanner adapter is the library's own by-name call, tested on the
+  real type (round 4 #1/#2/#6/#27, Amendment N3).** `_rows_by_name` <!-- historical -->
+  re-implemented `StreamedResultSet.to_dict_list()` and ran nowhere: the
+  DuckDB-backed fakes mapped rows themselves and the last live run predated
+  it — reversing its zip survived 540 tests. Now `_GoogleTxn.read` and
+  `GoogleSpannerClient.read` return `execute_sql(sql).to_dict_list()`, and
+  the test builds real `StreamedResultSet`s offline from `PartialResultSet`
+  protos (empty table, shuffled columns, zero-response stream) through the
+  real adapter classes into `existing_of` — which now refuses a non-`str`
+  cell instead of `str()`-coercing it. The DuckDB-side mapping is one
+  `rows_by_name` the readers and both fakes share. The lesson, recorded as a
+  rule: a fake belongs UNDER the thinnest adapter over a vendor type, never
+  in its place; an adapter that is more than one library call is tested on
+  the real type, built offline. Rejected: a hand-written fake
+  `StreamedResultSet` (the seam under test would again be ours).
 - **Scaling bounds the Spanner paths carry (round 2 #20).** (1) The dims
   landing is one `insert_or_update` batch of the whole seed (tiny: 22 rows;
   Spanner's per-commit cap is 80,000 mutation cells — a profile past it

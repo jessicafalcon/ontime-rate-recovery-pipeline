@@ -295,20 +295,24 @@ CLOUD_ENTRY_POINTS = [
         "GOOGLE_BACKUP_CREDENTIALS_JSON",
         "GOOGLE_OAUTH_ACCESS_TOKEN",
         "CLOUDSDK_AUTH_ACCESS_TOKEN",
-        "GOOGLE_CLOUD_KEYFILE_JSON",  # Amendment L (round 3 #2): the keyfile family
+        "GOOGLE_CLOUD_KEYFILE_JSON",
         "GCLOUD_KEYFILE_JSON",
         "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
+        "CLOUDSDK_AUTH_ACCESS_TOKEN_FILE",  # round 4 #7: outside L's family
+        "GOOGLE_GHA_CREDS_PATH",
+        "GCLOUD_A_SPELLING_NOBODY_HAS_SEEN_YET",
     ],
 )
 def test_every_cloud_command_refuses_a_credential_in_the_env(
     entry: str, var: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """Round 2 #2: a key file / inline key / bearer token in the environment
-    would silently become the identity of every google client. Every cloud
-    entry point refuses it (exit 2) BEFORE any client factory is resolved —
-    one policy (infra.cli.refuse_keyfile_env) behind the one gate
-    (loader.cli.require_confirm), matched by name shape so a new spelling is
-    caught too."""
+    """Round 2 #2 → round 4 Amendment N2: a key file / inline key / bearer
+    token in the environment would silently become the identity of every
+    google client. Every cloud entry point refuses ANY Google-namespace
+    variable the allowlist does not admit (exit 2) BEFORE any client factory
+    is resolved — one policy (infra.cli.refuse_cloud_env, CLOUD_ENV_ALLOW)
+    behind the one gate (loader.cli.require_confirm); the list here is
+    illustrative, the policy is the allowlist."""
     import subprocess
 
     from serving import cli as scli
@@ -339,3 +343,18 @@ def test_every_cloud_command_refuses_a_credential_in_the_env(
         calls[entry]()
     assert e.value.code == 2
     assert f"refused — {var} in the environment" in capsys.readouterr().out
+
+
+def test_conftest_scrub_uses_the_cloud_env_policy() -> None:
+    """Round 4 #8 (the tester's b3′ survivor): tests/conftest.py scrubs with
+    the gate's own `infra.cli.unlisted_cloud_env` — no second list or pattern
+    that could drift from the policy; and the function itself is an allowlist
+    over the three prefixes (a listed setting stays, anything else goes)."""
+    from infra.cli import CLOUD_ENV_ALLOW, unlisted_cloud_env
+
+    src = (Path(__file__).parent / "conftest.py").read_text()
+    assert "from infra.cli import unlisted_cloud_env" in src
+    assert "unlisted_cloud_env()" in src
+    assert "KEYFILE" not in src and "re.compile" not in src
+    env = {k: "v" for k in CLOUD_ENV_ALLOW} | {"GOOGLE_NEW": "v", "OTHER_TOKEN": "v"}
+    assert unlisted_cloud_env(env) == ["GOOGLE_NEW"]
