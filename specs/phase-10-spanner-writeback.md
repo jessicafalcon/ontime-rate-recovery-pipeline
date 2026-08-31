@@ -611,8 +611,9 @@ user who controls the environment (the threat model's standing carve-out).
   (findings 10, 11).** Restores **invariant 4** on the landing's input side
   (the seed's rows, not just its header): an empty cell in a REQUIRED
   field, a timestamp carrying an offset (the contract is naive UTC), and a
-  row with the wrong number of cells are `ValueError`s with the line, never
-  a coerced value or a positionally shifted row. Pinned by
+  row with the wrong number of cells are `ValueError`s naming the field (the
+  width check also names the CSV line), never a coerced value or a
+  positionally shifted row. Pinned by
   `tests/test_spanner_landing.py::test_cell_refuses_instead_of_coercing`,
   `…::test_row_width_drift_refuses` (the tester's surviving mutation, now
   killed).
@@ -627,6 +628,75 @@ user who controls the environment (the threat model's standing carve-out).
   BACKLOG note extended (#4); CLAUDE status de-contradicted (#16, #18,
   #19); PHASES Delivered paragraph (#17); scaling bounds recorded (#20);
   the default plan recorded (#21).
+
+## Amendments (review round 3, 2026-08-31)
+
+- **K — `planned_deletes` fails CLOSED (findings 1 — code-reviewer #1,
+  security-reviewer #2).** Restores **invariant 6** for the plan-first
+  apply: the `ALLOW_DESTROY` gate must run on EVIDENCE of no deletes, never
+  on the absence of a readable plan. Amendment F parsed `show -json` with
+  `json.loads(show_json or "{}")` and `.get("resource_changes", [])`, so an
+  empty body, a body without `resource_changes`, or a shape change on a
+  provider/terraform upgrade counted as "no deletes" and the saved plan
+  applied without the gate, while a malformed body was an uncaught
+  traceback. Mechanism: `planned_deletes` refuses (`die`, exit 2, the
+  reason named) when the body is empty, is not JSON, is not an object, or
+  has no `resource_changes` list; only a parsed list — possibly empty —
+  yields `[]`. The saved plan file is still removed on that path. Pinned by
+  `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy`
+  (the four bad bodies refuse before `apply`; the `planned_deletes("") ==
+  []` pin is inverted). Rejected: a `try/except` that falls back to
+  requiring `ALLOW_DESTROY` on an unreadable plan (a gate that fires for the
+  wrong reason teaches the operator to pass the flag).
+- **L — the keyfile-env policy covers the whole google-auth family
+  (finding 2 — code-reviewer #2, security-reviewer #1).** Restores
+  **invariant 6** (the identity half, Amendment G): `KEYFILE_ENV_RE` matched
+  `GOOGLE_*CREDENTIALS*` and two tokens, so `GOOGLE_CLOUD_KEYFILE_JSON`,
+  `GCLOUD_KEYFILE_JSON` (the google provider's other two documented
+  credential variables) and `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE` fell
+  through to the allowlist and were dropped SILENTLY — the exact failure G
+  says it removes. Mechanism: ONE pattern still, widened by family —
+  `GOOGLE_.*CREDENTIALS.*`, `(GOOGLE|GCLOUD)_.*KEYFILE.*`,
+  `GOOGLE_OAUTH_ACCESS_TOKEN`, `CLOUDSDK_AUTH_(ACCESS_TOKEN|CREDENTIAL_FILE_OVERRIDE)`;
+  `tests/conftest.py`'s scrub reads the same pattern. Pinned by the widened
+  parametrisations in `tests/test_infra.py::test_cli_refuses_a_credential_in_the_env_loudly`
+  and `tests/test_spanner_landing.py::test_every_cloud_command_refuses_a_credential_in_the_env`.
+  Rejected: refusing every `CLOUDSDK_AUTH_*` (`…_IMPERSONATE_SERVICE_ACCOUNT`
+  is a gcloud setting, not a credential — a false refusal on the runbook's
+  own path).
+- **M — records: the Spanner instance is `PROVISIONED` and bills from
+  creation; there is no trial clock (session finding 11).** Not a design
+  change — a correction of a false premise carried since the architecture
+  review. The module creates a `PROVISIONED` 100-PU instance (live listing
+  `INSTANCE_TYPE PROVISIONED`); a Spanner free-trial instance is a separate
+  kind, created through the console/gcloud, one per project, and never
+  what Terraform makes here (official docs, checked 2026-08-31). So the
+  cost model is ~$0.09/hour while up (~$65/month), from the first minute —
+  the two 2026-08-30/31 sessions cost ~5 cents — and the operating rule is
+  what the runbook already does for the wrong reason: apply, prove, tear
+  down in the same session; never leave it up. The "trial ends
+  2026-11-28" / "free while up" sentences are replaced everywhere
+  (DEPLOYMENT § Spanner and its cost row, this spec's item 5 / Done-when 5 /
+  stack risk, BACKLOG's row retitled, PHASES, CLAUDE, ARCHITECTURE §6,
+  DECISIONS' two mentions). The BACKLOG row stays open with the trigger
+  "every phase exit: no Spanner instance is up".
+- Also applied, no design change: the Spanner stored-pair read maps by
+  column name like the candidate read (#3, missed in round 2 — `EXISTING_COLUMNS`
+  generates `EXISTING_SQL`, `existing_of` maps the row; the Txn `read`
+  returns dicts); ONE `confirmed` predicate — it lives in `infra/cli.py`
+  beside the keyfile policy (loader.cli imports from infra.cli already; the
+  reverse would cycle) and `drop_db`, `loader.cli.require_confirm`,
+  `infra.cli.require_confirm` and the integration fixtures all call it (#4;
+  the mutations line moves with it); the explicit `con.rollback()` pinned
+  through an injected, still-open connection that must see the table
+  unchanged before `close` (#5); the tfstate-bucket row (#6, accepted —
+  BACKLOG, trigger "before the next `enable_spanner=true` apply");
+  DEPLOYMENT's operator-permissions row for the custom role (#7);
+  `main.tf`'s two stale comments (#8, #9); DECISIONS' round-1 #12 entry
+  annotated Superseded by Amendment F (#10); the composer `region` comment
+  (#12); `test_cli_builds_the_expected_argv`'s docstring (#13); Amendment
+  J's "with the line" wording (#14); CLAUDE's `tf-apply | tf-destroy`
+  header (#15).
 
 ## Out of scope (deferred, recorded)
 
