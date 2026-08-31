@@ -111,11 +111,11 @@ refuses a malformed item, whitespace, or `project_id` (PROJECT's), refuses
 to run while ANY `TF_VAR_*` / `TF_CLI_ARGS*` is in its environment or an
 auto-loaded `infra/terraform.tfvars` / `*.auto.tfvars{,.json}` exists
 (Amendment T), and gives the terraform child an ALLOWLISTED environment
-(`ENV_ALLOW`, ten exact names: `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`,
-`CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT`, `SSL_CERT_FILE`, `NO_PROXY`,
-`HTTPS_PROXY` — never a credential name, `TF_WORKSPACE`, `TF_DATA_DIR`,
-`TF_LOG*`; and any name in the cloud-env domain (O1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration test) outside `CLOUD_ENV_ALLOW` in your shell refuses the command outright, names only —
-Phase 10 Amendments N2/O1, `infra.cli.CLOUD_ENV_ALLOW`), so the argv is the whole input by
+(`ENV_ALLOW`, seven exact names: `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`,
+`CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT` — never a credential, proxy or
+trust-anchor name (P2), `TF_WORKSPACE`, `TF_DATA_DIR`,
+`TF_LOG*`; and any name in the cloud-env domain (O1/P1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration-and-scan test) outside `CLOUD_ENV_ALLOW` in your shell refuses the command outright, names only —
+Phase 10 Amendments N2/O1/P1, `infra.cli.CLOUD_ENV_ALLOW`), so the argv is the whole input by
 construction and the `tf-plan` you read is the `tf-apply` you get:
 
 ```

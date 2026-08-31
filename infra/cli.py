@@ -256,13 +256,18 @@ CLOUD_ENV_IGNORED = frozenset(
         "TEMPORARILY_DISABLE_PROTOBUF_VERSION_CHECK",
     }
 )
-# The settings the runbook uses — each a real vendor input, none an identity
-# (O3: the impersonation SETTING is not admitted — the runbook impersonates
-# with the login flag, and a selector of WHO acts is not a setting; nothing
-# here spawns gcloud, so its interpreter path is not admitted either).
+# The settings the runbook uses (O3: the impersonation SETTING is not
+# admitted — the runbook impersonates with the login flag, and a selector of
+# WHO acts is not a setting; nothing here spawns gcloud, so its interpreter
+# path is not admitted either). P4 (round 6 #6): CLOUDSDK_CONFIG is
+# identity-BEARING — it selects the directory the ADC file lives in, i.e.
+# which credential every google client and the terraform child use — and is
+# accepted anyway: ADC must live somewhere, and HOME (outside the domain by
+# construction, inside ENV_ALLOW) redirects it identically, so refusing it
+# removes nothing. The other two are project defaults, not identities.
 CLOUD_ENV_ALLOW = frozenset(
     {
-        "CLOUDSDK_CONFIG",  # the gcloud/ADC config dir — where the ADC file lives
+        "CLOUDSDK_CONFIG",  # the ADC config dir — identity-bearing, accepted (P4)
         "CLOUDSDK_CORE_PROJECT",  # a project default, not an identity
         "GOOGLE_CLOUD_PROJECT",  # a project default, not an identity
     }

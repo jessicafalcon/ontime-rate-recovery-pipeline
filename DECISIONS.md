@@ -384,7 +384,9 @@ annotated **Superseded by …** in place and never deleted.
   to `infra/` and a new round-5 surface, for a session the risk statement
   already covers).
 - **Round 5 — the cap's scoped re-review: the sets were not yet closed;
-  Amendment O closes each by construction (2026-08-31).** O1: N2's three
+  Amendment O closes each by construction (2026-08-31; O1's closure widened
+  over literal env reads in round 6, Amendment P1 — the round-6 entry
+  below).** O1: N2's three
   prefixes were still a hand-picked domain — `SPANNER_EMULATOR_HOST` (the
   client then uses anonymous credentials against a named host),
   `BIGQUERY_`/`STORAGE_EMULATOR_HOST`, `GCE_METADATA_HOST`/`_ROOT`/`_IP`
@@ -411,6 +413,43 @@ annotated **Superseded by …** in place and never deleted.
   satisfiable by a dead call) and reading `ENV_REFUSE_PREFIXES`. Process:
   one correctness finding per commit, as the round-4 rule says — eight
   commits, each with its pin; the amendment first, alone.
+- **Round 6 — security findings fixed on the architect's "only fix security
+  related issues"; Amendment P (2026-08-31).** P1: O1's closure harvested
+  five hand-picked declaration modules, so vendor inputs read as string
+  literals escaped the gate — `SPANNER_ENABLE_EXTENDED_TRACING` /
+  `SPANNER_ENABLE_END_TO_END_TRACING` (literal `os.getenv` in the installed
+  `spanner_v1`) and `GEMINI_API_KEY` (an API key `google-genai` reads — a
+  LOCKED dbt-bigquery transitive via `google-cloud-aiplatform`) — while one
+  member of the same class had been hand-appended to the test. The closure
+  test now also SCANS the installed `google/` tree for literal
+  `os.environ`/`os.getenv` reads (97 names today, floors pinned) and every
+  name classifies exactly once; `SPANNER_` is a refused prefix (its four
+  hand-listed names retired into it), the API key and the `SSL_CERT_FILE`/
+  `SSL_CERT_DIR` trust-anchor overrides are refused names, and the ignored
+  set is recorded classes with reasons (`AWS_`/`AIP_`/`CLOUD_ML_`/`VERTEX_`
+  — external-account ADC and Vertex managed-container inputs with no path
+  here — plus eleven names read by vendored test helpers, the aiplatform
+  prediction server and protobuf's runtime switches). Rejected: narrowing
+  the claim to "declarations" (leaves the gate open to the very names the
+  round found); appending the two spanner names (the cap's forbidden
+  shape). P2: `ENV_ALLOW` drops `SSL_CERT_FILE`/`NO_PROXY`/`HTTPS_PROXY` —
+  an operator-suppliable proxy endpoint plus trust-anchor override on the
+  provider's API calls is the endpoint-redirection class the Credential
+  standard names a secret; seven names remain, and the child test exports
+  the trio and sees none reach the child. Rejected: keeping them for a
+  proxied network nobody here runs (a deliberate one-line widening later
+  beats a standing hole). P3: the child-env vendor pin applies
+  `in_cloud_namespace` and runs every `ENV_ALLOW` name through
+  `unlisted_cloud_env` — the old `startswith(CLOUD_ENV_PREFIXES)` was a
+  hand-picked subset of the domain. P4: `CLOUDSDK_CONFIG` IS
+  identity-bearing (it selects which ADC file acts — a stronger selector
+  than the impersonation setting O3 dropped); accepted, with the reason,
+  because ADC must live somewhere and `HOME` (outside the domain, in
+  `ENV_ALLOW`) redirects it identically — the "none an identity" comment
+  corrected in place. The round's OTHER findings — the vacuous
+  `unlisted_cloud_env({})` pin (a SURVIVED hand-mutation), the cell-type
+  rule implemented twice, the record/wording rows — are undispositioned
+  and OPEN.
 - **Scaling bounds the Spanner paths carry (round 2 #20).** (1) The dims
   landing is one `insert_or_update` batch of the whole seed (tiny: 22 rows;
   Spanner's per-commit cap is 80,000 mutation cells — a profile past it
@@ -482,7 +521,8 @@ annotated **Superseded by …** in place and never deleted.
 - **Review of the fix (code-reviewer, security-reviewer, functionality-tester;
   11 findings, applied 2026-08-30).** Design change: the terraform child gets
   an **allowlisted environment** (`ENV_ALLOW`: `PATH`, `HOME`, two `CLOUDSDK_*`
-  settings — `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT` — locale/proxy) — `TF_CLI_ARGS*` (which Terraform splices into the argv,
+  settings — `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT` — locale/proxy; the
+  proxy/trust-anchor trio dropped in Phase 10 round 6, Amendment P2) — `TF_CLI_ARGS*` (which Terraform splices into the argv,
   `-var-file` included — the same hole, worse), `GOOGLE_*CREDENTIALS*` (a
   keyfile despite "ADC only"), `TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*` cannot
   reach it; the loud refusal covers `TF_VAR_*`/`TF_CLI_ARGS*` on every

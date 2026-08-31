@@ -138,7 +138,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`/`tf-freeze` on
   `CONFIRM=yes $(origin)`; toggles only as a command-line `VARS` → argv
   `-var`, refuses `TF_VAR_*`/`TF_CLI_ARGS*`, auto-loaded tfvars and
-  any name in the cloud-env domain (O1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration test) outside `CLOUD_ENV_ALLOW` (the
+  any name in the cloud-env domain (O1/P1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration-and-scan test) outside `CLOUD_ENV_ALLOW` (the
   one allowlist every cloud command shares — Amendments N2/O1; the plan-first
   apply's action allowlist `SAFE_ACTIONS` is N1/O2), runs terraform under an
   env allowlist —
@@ -357,10 +357,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   (`name=scalar` or `name=[n,n]`; malformed, whitespace, `project_id`, or an
   env-origin `VARS` → refused — `$(origin VARS)`, like `CONFIRM`), then
   `terraform -chdir=infra plan` under an ALLOWLISTED environment (`ENV_ALLOW`,
-  ten exact names: `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`,
-  `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT`, `SSL_CERT_FILE`, `NO_PROXY`,
-  `HTTPS_PROXY` — so no credential name, `TF_WORKSPACE`, `TF_DATA_DIR` or
-  `TF_LOG*` reaches it). Reads GCP APIs (your own ADC —
+  seven exact names: `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`,
+  `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT` — so no credential, proxy or
+  trust-anchor name, `TF_WORKSPACE`, `TF_DATA_DIR` or
+  `TF_LOG*` reaches it; P2). Reads GCP APIs (your own ADC —
   never the impersonated SA, §8); shows the diff, creates nothing. EVERY
   `tf-*` REFUSES (exit 2, before terraform) while any `TF_VAR_*` /
   `TF_CLI_ARGS*` is in the environment, and plan/apply/destroy also while an
@@ -378,7 +378,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   cannot read back or one carrying any other verb (`forget`, a future one)
   is refused ALWAYS; the saved plan is what gets applied — no
   `-auto-approve` on apply; an entry with no action refuses too (O2). In the
-  environment, any name in the cloud-env domain (O1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration test) outside `CLOUD_ENV_ALLOW` refuses every project-taking
+  environment, any name in the cloud-env domain (O1/P1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration-and-scan test) outside `CLOUD_ENV_ALLOW` refuses every project-taking
   `tf-*` (and every other cloud command) loudly, names only (N2/O1). Apply
   creates the free-tier layer: 9 API enablements (free, kept on by destroy),
   two BigQuery datasets, a GCS staging bucket, a least-privilege service
@@ -575,10 +575,10 @@ DECISIONS.md or fix it.
   `_EMULATOR_HOST` suffix, the prefix-less names the libraries read) that
   is not a listed SETTING in `CLOUD_ENV_ALLOW` is a credential by
   definition, whenever it was introduced, and the domain is closed by a
-  test over the installed libraries' own declarations, not by a list of
-  ours. A new vendor is its declarations classified + a DECISIONS entry; a
-  benign new variable refusing is the intended direction (one line to
-  admit it).
+  test over the installed libraries' own declarations AND a scan of their
+  literal env reads (P1), not by a list of ours. A new vendor is its
+  declarations and reads classified + a DECISIONS entry; a benign new
+  variable refusing is the intended direction (one line to admit it).
 - Adapter contract: a fake stands UNDER the thinnest adapter over a vendor
   type — it replaces the client, never the adapter. An adapter that is
   more than one library call is tested on the REAL type, built offline
@@ -969,8 +969,25 @@ conftest scrub pinned behaviourally (a child pytest) and reading
 `ENV_REFUSE_PREFIXES`; `struct_pb2` import gone; records (the retired
 tfstate trigger in three places, the role detour retired, DEPLOYMENT's
 token check off the argv, F/G/K/L annotated Superseded, the Makefile
-comment). NEXT: round 6 scoped to `review-round-5..HEAD`, the
-coherence-auditor exit pass, then the PR.
+comment). **Review round 6 ran (2026-08-31, 17 findings — gate 6/6,
+mutate 11/11, suite 575; tagged `review-round-6`):** the architect's
+disposition was security-only; **Amendment P applied**, one fix per
+commit — P1 the cloud-env domain closed over what the installed
+libraries READ (the closure test scans `google/**` for literal
+`os.environ`/`os.getenv` reads — 97 names classified exactly once;
+`SPANNER_` a refused prefix; `GEMINI_API_KEY` — google-genai is a locked
+dbt-bigquery transitive — and `SSL_CERT_FILE`/`_DIR` refused; the ignored
+classes recorded with reasons), P2 `ENV_ALLOW` = seven names (the
+proxy/trust-anchor trio out — the endpoint-redirection class), P3 the
+child-env pin through `in_cloud_namespace` + every `ENV_ALLOW` name
+through `unlisted_cloud_env`, P4 `CLOUDSDK_CONFIG` recorded
+identity-bearing, accepted (HOME redirects it identically). Round 6's
+OTHER findings are OPEN, undispositioned — notably #2, a SURVIVED
+hand-mutation (`unlisted_cloud_env({})`'s pin is vacuous under the
+conftest scrub) and #10 (the cell-type rule implemented twice), plus the
+record/wording rows. NEXT: the security re-review of the Amendment P
+diff, dispositions on the open rows, the coherence-auditor exit pass,
+then the PR.
 Open BACKLOG rows: **13** (Phase 10 struck: the write-back read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /
