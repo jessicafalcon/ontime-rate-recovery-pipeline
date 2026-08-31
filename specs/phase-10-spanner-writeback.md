@@ -702,6 +702,104 @@ user who controls the environment (the threat model's standing carve-out).
   J's "with the line" wording (#14); CLAUDE's `tf-apply | tf-destroy`
   header (#15).
 
+## Amendments (review round 4, 2026-08-31)
+
+Round 4 found correctness defects inside round 3's fixes for the second
+round running (K → #3–#5, L → #7, the by-name read → #1/#2): the review cap.
+The cause is structural, not a missed case — each fix was a longer DENYLIST
+at an open-world boundary (Terraform's plan JSON, Google's env-var namespace,
+Spanner's result set), and a denylist at such a boundary has no last fix.
+Per the cap rule, the three boundaries are re-implemented ONCE against a
+closed set or the real type; no per-case patch is applied.
+
+- **N1 — the apply gate is an ACTION ALLOWLIST (findings 3, 4, 5 —
+  code-reviewer #2, security-reviewer #1/#2/#3).** Restores **invariant 6**
+  for the plan-first apply and supersedes Amendment K: the saved plan
+  applies iff every `resource_changes[]` entry parses to `(address: str,
+  actions: list[str])` and every action is inside `SAFE_ACTIONS = {no-op,
+  read, create, update}`; `delete` (a replace is a delete) is admitted only
+  by `ALLOW_DESTROY=yes` with command-line origin (through the one
+  `confirmed` predicate); ANY other verb — `forget` (a state drop that
+  leaves the instance billing), a verb a later Terraform adds — and any
+  entry that does not parse is a refusal ALWAYS, the addresses named, the
+  plan file removed. A shape we do not recognise is not safe. Mechanism:
+  `infra/cli.py::planned_changes` (strict parse, refuses on any unreadable
+  shape — K's envelope checks and the per-entry ones in one place) →
+  `unsafe_changes(changes, allowed)` → `require_safe_plan`. Pinned by
+  `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy`
+  (bad envelopes AND bad entries refuse before `apply`; `SAFE_ACTIONS`
+  pinned as the exact set) and
+  `…::test_apply_refuses_unknown_actions_even_with_allow_destroy`; the
+  mutations line becomes `unsafe_changes constant-return:[]`. Rejected: one
+  more per-verb branch (the next verb is the next finding); `prevent_destroy`
+  (blocks the sanctioned toggle-flip).
+- **N2 — the Google env namespace is an ALLOWLIST (finding 7 —
+  security-reviewer #4; the tester's b3′ survivor, finding 8).** Restores
+  **invariant 6**'s identity half and supersedes Amendments G and L: a
+  cloud command runs only if every environment variable whose name starts
+  `GOOGLE_`, `GCLOUD_` or `CLOUDSDK_` is in `CLOUD_ENV_ALLOW` — the settings
+  the runbook actually uses (`CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT`,
+  `CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT`, `CLOUDSDK_PYTHON`,
+  `GOOGLE_CLOUD_PROJECT`). Every other name in the namespace is treated as
+  a credential until listed and refused loudly, names only, before any
+  client or child — so a key, token or credential-file variable under ANY
+  spelling, present or future, can never become a client's identity
+  silently; the standard for a new vendor is its prefix plus its allowed
+  settings, one line and a DECISIONS entry. `KEYFILE_ENV_RE` is deleted;
+  `refuse_keyfile_env` becomes `refuse_cloud_env` (same call sites: the one
+  gate `loader.cli.require_confirm`, `tf()`); the terraform child's
+  `ENV_ALLOW` may name a vendor variable only if `CLOUD_ENV_ALLOW` admits it
+  (pinned); `tests/conftest.py`'s scrub calls the same `unlisted_cloud_env`
+  and a test pins that it does. A false refusal on a benign new setting is
+  the intended failure direction. Pinned by the widened
+  `tests/test_infra.py::test_cli_refuses_a_credential_in_the_env_loudly`
+  (unlisted names refuse, listed settings pass),
+  `tests/test_spanner_landing.py::test_every_cloud_command_refuses_a_credential_in_the_env`
+  and `…::test_conftest_scrub_uses_the_cloud_env_policy`. Rejected: a
+  generic secret-shape denylist over the whole environment (`*_TOKEN`,
+  `*_KEY` — false refusals on unrelated tools, and still a denylist); the
+  family regex widened once more.
+- **N3 — the Spanner adapter is the library's own by-name call, tested on
+  the real type (findings 1, 2, 6 — code-reviewer #1/#9,
+  functionality-tester #1/#2).** Restores **invariants 1 and 2** on the
+  served path: `_rows_by_name` re-implemented `StreamedResultSet.to_dict_list()`
+  (google-cloud-spanner 3.70.0) and executed nowhere — the DuckDB-backed
+  fakes re-mapped rows themselves, and the last live run predates it.
+  Mechanism: `_GoogleTxn.read` / `GoogleSpannerClient.read` return
+  `execute_sql(sql).to_dict_list()`; `_rows_by_name` is deleted; the test
+  builds `StreamedResultSet`s offline from `PartialResultSet` protos
+  (metadata + zero rows, one row with a shuffled column order, a
+  zero-response stream) and runs them through the REAL adapter classes into
+  `existing_of` — the empty-table read of the first write-back after a
+  fresh apply included. The DuckDB-side mapping is ONE helper
+  (`writeback.rows_by_name(cursor)`) that `read_candidates`, `read_existing`
+  and both fakes share (finding 27), and `existing_of` refuses a non-`str`
+  `user_id`/`model_version` instead of coercing (finding 6 — J's rule on the
+  read). Pinned by `tests/test_writeback.py::test_spanner_rows_come_from_the_library_by_name`;
+  the mutations block gains `serving/writeback.py::existing_of invert-guard`.
+  Live re-proof (`make test-int-spanner`, ask-first) is owed before the PR:
+  the adapter changed. Rejected: a fake `StreamedResultSet` class of our own
+  (the seam under review would again be ours, not the library's).
+- Also applied, no design change: finding 9 is withdrawn (the plan-file
+  removal IS pinned — `test_cli_builds_the_expected_argv`, hand-mutation g1
+  KILLED); Amendment M's four survivors — `infra/main.tf`,
+  `infra/variables.tf`, `infra/modules/spanner/main.tf` (×2) — reworded and
+  re-frozen, PROJECT_BRIEF's four trial sentences annotated (a log —
+  annotated, not rewritten), BACKLOG's Spanner row de-contradicted (#10–#13);
+  ARCHITECTURE §6's "state in GCS" corrected to the local-state fact the
+  BACKLOG row records (#14); CLAUDE's Repo map moves `confirmed()` to
+  `infra/` (#15); the env-allowlist prose names the exact set (#16, CLAUDE +
+  DEPLOYMENT); Evidence row 6's count and the two unlisted round-3 tests
+  (#17, #18); the mutations block (#19); DEPLOYMENT's `roleAdmin` row
+  carries the verification command (#20); the tfstate row's cleartext
+  clause (#21); the `GOOGLE_*CREDENTIALS*` shorthand replaced by the
+  allowlist wording wherever an operator would test their env against it
+  (#22); K/N1's unreadable-plan refusal stated in the runbook (#23);
+  `confirmed`'s docstring names its scope — the pipeline CLIs; `make
+  freeze` is the generator's own literal (#24); the composer `region`
+  comment (#25); `existing_sql`'s docstring (#26); the untracked README
+  named as such (#28).
+
 ## Out of scope (deferred, recorded)
 
 - The `computed_as_of` discriminator redesign — BACKLOG, re-deferred with the
