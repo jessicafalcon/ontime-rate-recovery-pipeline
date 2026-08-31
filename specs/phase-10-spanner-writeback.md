@@ -898,6 +898,69 @@ Amendment O closes each set by construction; nothing here is a longer list.
   credential at rest, outside the repo (#23); PROJECT_BRIEF's two undated
   annotations dated (#24).
 
+## Amendments (review round 6, 2026-08-31)
+
+Round 6 reported 17 findings; the architect's disposition was "only fix
+security related issues". Amendment P covers the four security-boundary
+findings (rows 1, 3, 5, 6 of the round table — the security-reviewer's two
+should-fixes plus the two allowlist gaps); the round's other findings (the
+surviving `unlisted_cloud_env({})` pin, the duplicated cell-type rule, the
+records rows) are undispositioned and stay open.
+
+- **P1 — the cloud-env domain is closed over what the installed libraries
+  READ, not only what they declare (round 6 #1 — code-reviewer #1,
+  security-reviewer #1, functionality-tester #1).** Restores **invariant
+  6**'s identity half. O1's closure test harvested five hand-picked
+  declaration modules, so a vendor input read as a string literal escaped
+  it: `SPANNER_ENABLE_EXTENDED_TRACING` / `SPANNER_ENABLE_END_TO_END_TRACING`
+  (literal `os.getenv` in the installed `spanner_v1`) and `GEMINI_API_KEY`
+  (an API key the installed `google-genai` client reads — a locked
+  dbt-bigquery transitive via `google-cloud-aiplatform`) all passed every
+  cloud gate, while one member of the same class
+  (`SPANNER_DISABLE_AFE_SERVER_TIMING`) had been hand-appended to the test —
+  the append-the-case shape the cap forbids. Mechanism: the closure test
+  unions the declaration modules with a SCAN of the installed `google/`
+  namespace tree for literal `os.environ` / `os.getenv` reads (97 names
+  today, floor pinned) and demands each classified exactly once — refused,
+  admitted, or ignored with a recorded reason. `SPANNER_` joins
+  `CLOUD_ENV_PREFIXES` (the spanner client's own settings namespace; its
+  four hand-listed names retire into the prefix); `GEMINI_API_KEY` and
+  `SSL_CERT_FILE` / `SSL_CERT_DIR` (trust-anchor overrides `google-genai`
+  reads — the class P2 names) join `CLOUD_ENV_NAMES`; the ignored
+  classification becomes recorded classes — `CLOUD_ENV_IGNORED_PREFIXES`
+  (`AWS_` external-account ADC; `AIP_` / `CLOUD_ML_` / `VERTEX_`, set by
+  Vertex inside its managed containers — aiplatform is on no path here)
+  plus eleven names read by vendored test helpers, the aiplatform
+  prediction server and protobuf's runtime switches. Rejected: narrowing
+  the claim to "declarations" (the gate would stay open to the very names
+  round 6 found); appending the two spanner names (the same shape again).
+- **P2 — `ENV_ALLOW` drops `SSL_CERT_FILE`, `NO_PROXY`, `HTTPS_PROXY`
+  (round 6 #3 — code-reviewer, missed in round 5).** The terraform child
+  ran every Google API call under an operator-suppliable proxy endpoint
+  and trust-anchor override — exactly the endpoint-redirection class the
+  Credential standard names a secret — while the gate refused a harmless
+  `GOOGLE_CLOUD_QUOTA_PROJECT`. Seven names remain (`PATH`, `HOME`,
+  `TMPDIR`, `LANG`, `LC_ALL`, `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT`).
+  The runbook's network is direct (no proxy variable is set on the
+  operator machine); a proxied network is a deliberate widening — one
+  line plus a DECISIONS entry — not a default.
+- **P3 — the child-env vendor pin uses `in_cloud_namespace` (round 6 #5 —
+  security-reviewer, missed in round 5).** The pin at
+  `tests/test_infra.py` checked `k.startswith(CLOUD_ENV_PREFIXES)` — a
+  hand-picked subset of the domain O1 defined — so a prefix-less domain
+  name added to `ENV_ALLOW` would never have been checked against
+  `CLOUD_ENV_ALLOW`. It now applies the domain function itself; with
+  P1 + P2 it proves the child sees no refused name at all.
+- **P4 — `CLOUDSDK_CONFIG` is recorded as identity-BEARING, accepted
+  (round 6 #6 — security-reviewer #2).** It selects the directory the ADC
+  file lives in — which credential every google client and the terraform
+  child use — a stronger selector of who acts than the impersonation
+  setting O3 dropped for that reason. It stays admitted: ADC must live
+  somewhere, and `HOME` (outside the domain by construction, inside
+  `ENV_ALLOW`) redirects it identically, so refusing it removes nothing.
+  The "none an identity" comment is corrected in place and the acceptance
+  recorded in DECISIONS with this reason.
+
 ## Out of scope (deferred, recorded)
 
 - The `computed_as_of` discriminator redesign — BACKLOG, re-deferred with the
