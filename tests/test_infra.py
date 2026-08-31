@@ -1368,9 +1368,13 @@ def test_cli_child_env_is_an_allowlist(
     assert not any(k.startswith(("GOOGLE_", "TF_")) for k in env)
     assert "NO_PROXY" not in env and "HTTPS_PROXY" not in env
     assert "SSL_CERT_FILE" not in cli.ENV_ALLOW
-    # Amendment N2: a vendor name the child may see is one the gate admits
-    vendor = {k for k in cli.ENV_ALLOW if k.startswith(cli.CLOUD_ENV_PREFIXES)}
+    # Amendment N2 → P3 (round 6 #5): a name the child may see is never one
+    # the gate refuses — checked with the domain function itself, not a
+    # prefix subset of it (a prefix-less domain name added to ENV_ALLOW
+    # would have passed the old startswith check unexamined)
+    vendor = {k for k in cli.ENV_ALLOW if cli.in_cloud_namespace(k)}
     assert vendor and vendor <= cli.CLOUD_ENV_ALLOW
+    assert cli.unlisted_cloud_env(dict.fromkeys(cli.ENV_ALLOW, "x")) == []
 
 
 # Google-namespace names that are NOT settings the runbook uses: every one is
