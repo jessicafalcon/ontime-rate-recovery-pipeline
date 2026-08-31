@@ -1,7 +1,7 @@
 """Phase 10 (specs/phase-10-spanner-writeback.md): Spanner dims + write-back.
 
 Behind OTR_INT — only `make test-int-spanner PROJECT=<id> CONFIRM=yes` runs it
-(loader/cli.py validates PROJECT and gates CONFIRM before spawning this; CI
+(pipeline/cli.py validates PROJECT and gates CONFIRM before spawning this; CI
 never runs it). Cloud-cost, ask-first, as the impersonated SA, and it needs a
 spanner-enabled stack (`make tf-apply … VARS='enable_spanner=true'` — the
 teardown date goes in docs/DEPLOYMENT.md the same day; tear down after with
@@ -27,8 +27,8 @@ import pytest
 
 from eval import golden
 from infra.cli import PROJECT_RE, confirmed
-from loader import cli as loader_cli
-from loader import spanner as dims
+from landing import spanner as dims
+from pipeline import cli as pipeline_cli
 from serving import spanner as spanner_wb
 from tests import pins
 from tests.test_writeback import SEND_SCHEDULE_GOLDEN
@@ -37,19 +37,19 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "fixtures" / "tiny"
 MODELS_DATASET = "ontime"
 GOLDENS = (golden.ATTRIBUTION, golden.ONTIME_RATE_DAILY, golden.SCORES_SEND_TIME)
-SWAP = "dim_user_spanner"  # loader.cli.dbt_build's one var seam (dim_user_identifier)
+SWAP = "dim_user_spanner"  # pipeline.cli.dbt_build's one var seam (dim_user_identifier)
 MANIFEST = ROOT / "dbt" / "target" / "manifest.json"
 
 
 def _project() -> str:
     project = os.environ.get("OTR_GCP_PROJECT", "")
-    assert PROJECT_RE.match(project), "OTR_GCP_PROJECT is set by loader.cli only"
+    assert PROJECT_RE.match(project), "OTR_GCP_PROJECT is set by pipeline.cli only"
     return project
 
 
 def carried_gate() -> tuple[str, str]:
     """The Amendment V shape: the CONFIRM gate is CARRIED from
-    loader.cli::int_spanner (the make target), never forged here."""
+    pipeline.cli::int_spanner (the make target), never forged here."""
     confirm = os.environ.get("OTR_CONFIRM", "")
     origin = os.environ.get("OTR_CONFIRM_ORIGIN", "")
     # The pair is CARRIED, and re-checked with the make target's own predicate
@@ -66,9 +66,9 @@ def built() -> Iterator[str]:
     project = _project()
     assert os.environ.get("OTR_PROFILE", "tiny") == "tiny"  # tiny by definition
     confirm, origin = carried_gate()
-    rc = loader_cli.spanner_load("tiny", project, confirm, origin)
+    rc = pipeline_cli.spanner_load("tiny", project, confirm, origin)
     assert rc == 0, "make spanner-load failed"
-    rc = loader_cli.dbt_build(
+    rc = pipeline_cli.dbt_build(
         "tiny", "bigquery", confirm, origin, project=project, dim_user_identifier=SWAP
     )
     assert rc == 0, "dbt-build TARGET=bigquery with the federated dims failed"

@@ -58,7 +58,7 @@ def test_golden_reports_a_planted_difference(
     planted[0] = (*planted[0][:3], "unattributed")
     fix.joinpath("attribution.csv").write_text(golden.render(planted))
     monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     assert cli.golden_cmd("tiny") == 1
     assert (
         "attribution-golden FAIL: tiny, 140 rows, 1 differ" in capsys.readouterr().out
@@ -72,7 +72,7 @@ def test_golden_write_only_on_literal_yes(
 ):  # noqa: F811
     monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
     monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     for bad in ("YES", "true", "1", " yes"):
         with pytest.raises(SystemExit) as e:
             cli.golden_cmd("tiny", bad)
@@ -100,7 +100,7 @@ def test_cli_refuses_bad_profile_before_any_path(monkeypatch) -> None:
 
 
 def test_score_cli_reproduces_the_pin(built: Path, monkeypatch, capsys) -> None:  # noqa: F811
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     assert cli.score_cmd("tiny") == 0
     out = capsys.readouterr().out
     assert "eval OK: tiny, accuracy 1.000 (pin 1.000), 140 prompts" in out
@@ -149,7 +149,7 @@ def test_report_reports_a_planted_difference(
     planted[0] = (*planted[0][:4], "0", *planted[0][5:])  # one on_time count changed
     fix.joinpath("ontime_rate_daily.csv").write_text(golden.render(planted, DAILY))
     monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     assert cli.report_cmd("tiny") == 1
     out = capsys.readouterr().out
     assert f"{rows[0][0]}/{rows[0][1]}: changed" in out
@@ -159,7 +159,7 @@ def test_report_reports_a_planted_difference(
 
 
 def test_report_fails_when_the_rate_is_off_the_pin(built: Path, monkeypatch, capsys):  # noqa: F811
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     assert cli.report_cmd("tiny") == 0
     assert (
         "report OK: tiny, 14 cohort-days, 0 differ, ontime_rate 0.609756 (pin 0.609756)"
@@ -178,7 +178,7 @@ def test_report_write_only_on_literal_yes(
 ):  # noqa: F811
     monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
     monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     for bad in ("YES", "true", "1", " yes"):
         with pytest.raises(SystemExit) as e:
             cli.report_cmd("tiny", bad)
@@ -205,7 +205,7 @@ def test_circular_diff_is_the_short_arc() -> None:
 
 
 def test_score_cli_prints_mae_and_coverage(built: Path, monkeypatch, capsys) -> None:  # noqa: F811
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     assert cli.score_cmd("tiny") == 0
     out = capsys.readouterr().out
     assert "eval truth: fixtures/tiny/truth\n" in out
@@ -234,7 +234,7 @@ def test_planted_center_shift_raises_mae(
         shifted.append(json.dumps(rec))
     fix.joinpath("users.jsonl").write_text("\n".join(shifted) + "\n")
     monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     assert cli.score_cmd("tiny") == 1
     out = capsys.readouterr().out
     assert "accuracy 1.000" in out  # labels untouched
@@ -265,7 +265,7 @@ def test_eval_reads_unfrozen_truth_and_says_so(
     out_dir.joinpath("users.jsonl").write_text(USERS.read_text())
     monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
     monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     assert cli.truth_dir("tiny") == out_dir
     assert cli.score_cmd("tiny") == 0
     out = capsys.readouterr().out
@@ -288,7 +288,7 @@ def test_scores_golden_reports_a_planted_difference(
     planted[0] = (*planted[0][:2], "23", *planted[0][3:])  # one send hour changed
     fix.joinpath("scores_send_time.csv").write_text(golden.render(planted, SCORES))
     monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     assert cli.scores_golden_cmd("tiny") == 1
     out = capsys.readouterr().out
     assert f"{rows[0][0]}: changed" in out
@@ -300,7 +300,7 @@ def test_scores_golden_write_only_on_literal_yes(
 ):  # noqa: F811
     monkeypatch.setattr(cli, "DATA_OUT", tmp_path / "out")
     monkeypatch.setattr(cli, "FIXTURES", tmp_path / "fix")
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     for bad in ("YES", "true", "1", " yes"):
         with pytest.raises(SystemExit) as e:
             cli.scores_golden_cmd("tiny", bad)
@@ -337,7 +337,7 @@ def test_simulate_check_mode_matches_and_exits_1_on_drift(
     built: Path, tmp_path: Path, monkeypatch, capsys
 ) -> None:  # noqa: F811
     res, _ = _tmp_docs(tmp_path, monkeypatch)
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     assert cli.simulate_cmd("tiny") == 0
     out = capsys.readouterr().out
     assert "simulate truth: fixtures/tiny/truth\n" in out
@@ -356,7 +356,7 @@ def test_simulate_write_only_on_literal_yes(
     built: Path, tmp_path: Path, monkeypatch, capsys
 ) -> None:  # noqa: F811
     res, ab = _tmp_docs(tmp_path, monkeypatch)
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     original = res.read_text()
     text = original.replace("| data | 75 |", "| data | 0 |")
     res.write_text(text)
@@ -379,7 +379,7 @@ def test_simulate_refuses_a_missing_marker_pair(
     built: Path, tmp_path: Path, monkeypatch, capsys
 ) -> None:  # noqa: F811
     res, _ = _tmp_docs(tmp_path, monkeypatch)
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     text = res.read_text().replace("<!-- simulate:end tiny -->", "")
     res.write_text(text)
     for write in ("", "yes"):
@@ -405,9 +405,9 @@ def test_simulate_says_unfrozen_for_a_data_out_profile(
     out_truth.mkdir(parents=True)
     for f in ("prompts.jsonl", "users.jsonl"):
         out_truth.joinpath(f).write_bytes(
-            (cli.loader.ROOT / "fixtures" / "tiny" / "truth" / f).read_bytes()
+            (cli.landing.ROOT / "fixtures" / "tiny" / "truth" / f).read_bytes()
         )
-    monkeypatch.setattr(cli.loader, "db_path", lambda p: built)
+    monkeypatch.setattr(cli.landing, "db_path", lambda p: built)
     assert cli.simulate_cmd("tiny") == 0
     assert "(unfrozen)" in capsys.readouterr().out
 

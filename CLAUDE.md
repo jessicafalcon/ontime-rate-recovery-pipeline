@@ -58,20 +58,28 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `generate_schema_name.sql` — a dbt hook override, not a dispatch macro),
   `tests/` (singular data tests), `profiles.yml` (`duckdb`, `bigquery` targets).
   `models/staging/sources.yml` is GENERATED (`make gen-sources`), never edited.
-- `loader/` *(Phase 2; 9b; 10)* — raw landing: `load.py` (fixtures → DuckDB
+- `landing/` *(Phase 2; 9b; 10; renamed from `loader/` in `fix/landing-package`)*
+  — raw landing: `load.py` (fixtures → DuckDB
   `raw` schema, types from the generated `ddl.sql`), `bq.py` (Phase 9b: the
   same files → GCS staging → BigQuery `raw`, schema from the generated
   `bq_schema.json`, `WRITE_TRUNCATE`; every cloud call through an injectable
   `Clients` factory — the offline suite injects fakes), `spanner.py`
   (Phase 10: the same dim seed → the Spanner `dim_user` table, contract
   types from `bq_schema.json`, idempotent batch upsert, injectable client),
-  `cli.py` (`load`, `bq-load`, `spanner-load`, `dbt-build` — lands by
-  target — `drop-db`, `test-int-bigquery`, `test-int-spanner`).
+  `cli.py` (`load`, `bq-load`, `spanner-load`, `drop-db`) and `land` — the
+  TARGET landing dispatcher `pipeline/cli.py` calls.
   `require_confirm` is the ONE cloud gate (CONFIRM origin + the cloud-env
   allowlist, both imported from `infra.cli` — where `confirmed()`, the one
   origin predicate the integration fixtures' carried gate shares, and
   `CLOUD_ENV_ALLOW` live). Pipeline code — guarded by
   `test_truth_isolation.py`.
+- `pipeline/` *(Phase 10; `fix/landing-package`)* — the pipeline plumbing that
+  is not landing: `cli.py` (`dbt-build` — the TARGET-dispatched build that
+  lands via `landing.cli.land` then runs `dbt build` — and the integration-test
+  launchers `test-int-bigquery`, `test-int-spanner`; `full_refresh_args` /
+  `dbt_vars_args` the two build-arg helpers). Imports the validators and the
+  landing dispatcher from `landing.cli`; adds nothing to who-writes-what.
+  Pipeline code — guarded by `test_truth_isolation.py`.
 - `eval/` *(Phase 3+)* — the ONLY code that reads truth: `score.py` (label
   accuracy vs `truth/prompts.jsonl`; Phase 5: reachable-centre MAE and
   coverage vs `truth/users.jsonl`, off the model's own columns — never a
@@ -223,7 +231,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `fixtures/<p>/{raw/events_*.jsonl,dims/dim_user.csv}` into `data/<p>.duckdb`
   schema `raw`; prints `load: source=…` (falls back to `data/out/<p>/`,
   marked `(unfrozen)`), verifies `MANIFEST.sha256` first when one exists
-  (`load DRIFT`, exit 1); types come from the generated `loader/ddl.sql`, never
+  (`load DRIFT`, exit 1); types come from the generated `landing/ddl.sql`, never
   inferred. Idempotent: tables are recreated. `THROUGH` (an upload date
   `YYYY-MM-DD`, validated, never a path) lands only the files uploaded on or
   before it — a landing is the raw-table state (Phase 7); empty loads them all
@@ -249,10 +257,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   the SA (`docs/DEPLOYMENT.md`), ask first. dbt telemetry is off
   (`flags.send_anonymous_usage_stats`, `DO_NOT_TRACK`)
 - `make bq-load PROFILE=<p> PROJECT=<id> CONFIRM=yes [THROUGH=<upload-date>]`
-  *(Phase 9b)* — the BigQuery landing alone (`loader/cli.py bq-load`): the same
+  *(Phase 9b)* — the BigQuery landing alone (`landing/cli.py bq-load`): the same
   files `load` selects → `gs://<id>-ontime/landing/<p>/{raw,dims}/` → `raw.events`
   / `raw.dim_user` with the schema GENERATED from `generator/models.py`
-  (`loader/bq_schema.json`), one `WRITE_TRUNCATE` load job per table — the
+  (`landing/bq_schema.json`), one `WRITE_TRUNCATE` load job per table — the
   only landing mechanism; an empty selection lands a zero-byte
   `_empty.jsonl` through it (BigQuery rejects a job over zero URIs; §8) —
   idempotent; prints `bq-load OK: <p> — N files[, landing ≤ <THROUGH>], E
@@ -261,7 +269,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   ADC (impersonated SA), never a key. Verifies `MANIFEST.sha256` like `load`
 - `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` and its
   `.wal` (nothing else); `CONFIRM=yes` must have command-line origin
-- `make gen-sources` — re-renders `loader/ddl.sql`, `loader/bq_schema.json`
+- `make gen-sources` — re-renders `landing/ddl.sql`, `landing/bq_schema.json`
   (Phase 9b) and `dbt/models/staging/sources.yml` from `generator/models.py`;
   `tests/test_dbt_sources.py` fails on a hand edit
 - `make attribution-golden PROFILE=<p> [WRITE=yes]` — the built `attribution`
@@ -406,24 +414,24 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
 - `make test-int-bigquery PROJECT=<id> CONFIRM=yes [PROFILE=tiny]` *(Phase 9b)*
   — the DuckDB≡BigQuery pin-parity run behind `OTR_INT` (CI never runs it; the
   CI leg needs an explicit `enable_ci_wif = true` apply — BACKLOG, dated):
-  `loader/cli.py test-int-bigquery` validates `PROJECT`/`PROFILE` and gates
+  `pipeline/cli.py test-int-bigquery` validates `PROJECT`/`PROFILE` and gates
   `CONFIRM` FIRST, then runs `tests/integration/test_int_bigquery.py` with
   `OTR_INT=1` + the validated project: lands tiny, builds on `bigquery`, reads
   the three golden tables back through the same `Golden` specs and diffs them
   against `fixtures/tiny/expected/` byte-for-byte, re-asserts the pins, and
   asserts exactly two datasets exist. Cloud-cost, ask first, as the SA
 - `make spanner-load PROFILE=<p> PROJECT=<id> CONFIRM=yes` *(Phase 10)* — the
-  Spanner dims landing (`loader/cli.py spanner-load`): the same
+  Spanner dims landing (`landing/cli.py spanner-load`): the same
   `dims/dim_user.csv` the other landings select → the Spanner `dim_user`
   table (the production dims home BigQuery federates from, §2.3/§3.3),
-  columns/types from the generated `loader/bq_schema.json`, one idempotent
+  columns/types from the generated `landing/bq_schema.json`, one idempotent
   batch `insert_or_update` keyed `(user_id, valid_from)`; prints
   `spanner-load OK: <p> — N dim rows`. Cloud-cost: `CONFIRM=yes` command-line
   origin, `PROJECT` validated before any client, ADC never a key; verifies
   `MANIFEST.sha256` like `load`. Needs an `enable_spanner=true` apply
 - `make test-int-spanner PROJECT=<id> CONFIRM=yes [PROFILE=tiny]` *(Phase 10)*
   — the Spanner/federation run behind `OTR_INT` (CI never runs it):
-  `loader/cli.py test-int-spanner` validates (PROFILE is `tiny` only — the
+  `pipeline/cli.py test-int-spanner` validates (PROFILE is `tiny` only — the
   pins are tiny's; anything else is a CLI refusal) and gates `CONFIRM`
   FIRST, then runs `tests/integration/test_int_spanner.py`: lands the dims
   in Spanner, builds on `bigquery` with the `dim_user` source swapped to the
@@ -519,7 +527,7 @@ DECISIONS.md or fix it.
   write-back twice is a no-op; a `final` label never changes.
 - Truth isolation: `truth/` is never a dbt source, never an input to
   `features`/`scores`. `tests/test_truth_isolation.py` greps every pipeline
-  directory (`loader/`, `dbt/`, `serving/`, `orchestration/`, `infra/`) for the
+  directory (`landing/`, `pipeline/`, `dbt/`, `serving/`, `orchestration/`, `infra/`) for the
   word; in `generator/` only `truth.py` (the writer), `models.py` (record types) and
   `cli.py` (the entry point that calls the writer) may name it — generation
   logic never does.
@@ -820,7 +828,8 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 ## Current status
 
 **Phase 9 complete (9a PR #12, 9b PR #13); `fix/tf-vars-argv` merged (PR #14,
-2026-08-30); Phase 10 in flight.**
+2026-08-30); Phase 10 merged (PR #15, 2026-08-31); `fix/landing-package` in
+flight (the `loader/`→`landing/` rename + the `pipeline/` split).**
 Phases 0–8 merged (PRs #1–#11); **9a merged as PR #12** (2026-08-29, amendments
 A–T, 8 review rounds) — the Terraform foundation, meter off by default, plan-clean
 and destroy-empty proven live; **`fix/tf-vars-argv` merged as PR #14**. **9b** owns Phase 9's two warehouse clauses: `make
@@ -832,7 +841,7 @@ deferred with a dated trigger): the five `bigquery__` macro bodies (no
 `target.type == 'bigquery'` only — **DuckDB keeps `main_<folder>`**, no reader
 changed; the incremental models' overwrite column under
 `overwrite_partition_col` with a dialect-guarded native `partition_by` dict
-(the key collision — §8); the GCS→BigQuery landing `loader/bq.py` on
+(the key collision — §8); the GCS→BigQuery landing `landing/bq.py` on
 dbt-bigquery's transitive google clients (one impersonated-ADC path, generated
 `bq_schema.json`, `WRITE_TRUNCATE`, injectable fake clients); `dbt_build` lands
 by target (Amendment S lifted; `OTR_GCP_PROJECT` from the validated `PROJECT`;
@@ -877,7 +886,7 @@ paragraph below.**
 read seam (`candidates_sql` relation override; `TARGET=spanner` reads
 BigQuery `ontime`, writes Spanner through injectable clients, fakes offline),
 `version_key` numeric order (BACKLOG row 32 struck; contract wording
-unchanged), `loader/spanner.py` dims landing + `make spanner-load`, the
+unchanged), `landing/spanner.py` dims landing + `make spanner-load`, the
 spanner terraform module body (instance 100 PU, database DDL, EXTERNAL_QUERY
 connection + `raw.dim_user_spanner` view, two scoped grants; count-gated,
 default plan still creates nothing), the generated `dim_user_identifier`
@@ -1004,18 +1013,30 @@ overclaim wording corrected, the two stale security docs fixed
 (DEPLOYMENT/code-reviewer); the systematic close (proxy → casefold-`_proxy`
 predicate, exact `==` membership pins, in-process entry-point test),
 `APPDATA`/Windows, and the PHASES-narrative trail are three BACKLOG rows.
-Gate green (575, ruff, check-docs; mutate 14/14 unaffected). NEXT: push +
-PR (developer merges).
-Open BACKLOG rows: **16** (the security re-review of P opened three: the
+Gate green (575, ruff, check-docs; mutate 14/14 unaffected). Phase 10 merged
+as PR #15 (2026-08-31).
+**`fix/landing-package` (2026-08-31):** the mechanical `loader/`→`landing/`
+rename + the `pipeline/` split — `pipeline/cli.py` owns the dbt-build
+dispatcher (`dbt_build`, which lands via `landing.cli.land`) and the `int_*`
+launchers; `landing/` keeps the three landing engines, `land`, and
+`load`/`bq-load`/`spanner-load`/`drop-db`. Zero behaviour: every `make` target
+NAME is unchanged, only the `-m` module path differs (landing.cli vs
+pipeline.cli). `tests/test_loader.py`→`tests/test_landing.py`; the tree-derived
+truth-isolation guard covers both new packages with no edit. Suite 575 green,
+mutate/review-gate/check-docs clean; struck the `loader/` package-shape BACKLOG
+row. NEXT: run the review agents (code + functionality + coherence; sensitive
+surface → security too, for the Makefile/serving diff), report verdicts, then
+push + PR (developer merges).
+Open BACKLOG rows: **15** (the security re-review of P opened three: the
 cloud-env redirection gate's residual — proxy-spelling/exact-pin/entry-point
 test, `grpc_proxy` closed now — the `APPDATA`/Windows classification, and the
 `docs/PHASES.md` Delivered-narrative trail. Phase 10 struck: the write-back
 read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /
-a dim change mid-schedule / two live versions), the `loader/`→`landing/`
-rename (trigger: `fix/landing-package` after Phase 10 merges, before
-Phase 11); the Spanner row retitled 2026-08-31 — `PROVISIONED`, bills
+a dim change mid-schedule / two live versions); the `loader/`→`landing/`
+rename / `loader/`-package-shape row is **struck by `fix/landing-package`**
+(2026-08-31); the Spanner row retitled 2026-08-31 — `PROVISIONED`, bills
 from creation, no trial clock (Amendment M; trigger: every phase exit,
 `Listed 0 items.`); opened: the local unversioned tfstate row (round 3 #6;
 re-deferred round 4 — trigger: the first apply NOT torn down in the same
@@ -1026,7 +1047,7 @@ row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
 null vs missing key, `|` in a value), the
 project-id/SA-email-in-records note (round 2), the write-back's DuckDB-only
 relation/connection seam for Phase 10 (exit audit), the `loader/` package
-shape (exit questions); the
+shape (exit questions — struck by `fix/landing-package`); the
 CI-drift row re-deferred with the trigger "the first `enable_ci_wif = true`
 apply"; THROUGH-calendar, Spanner, argmax-bins re-deferred with 9b notes).
 

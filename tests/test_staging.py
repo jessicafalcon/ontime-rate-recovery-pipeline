@@ -16,7 +16,7 @@ import pytest
 
 from generator.dims import tz_at
 from generator.models import DimUserRow
-from loader import load as loader
+from landing import load as landing
 from tests import pins
 
 ROOT = Path(__file__).parent.parent
@@ -27,7 +27,7 @@ def build(db: Path) -> bool:
     os.environ.setdefault("DO_NOT_TRACK", "1")
     from dbt.cli.main import dbtRunner
 
-    loader.load("tiny", db)
+    landing.load("tiny", db)
     args = ["build", "--project-dir", str(DBT), "--profiles-dir", str(DBT)]
     args += ["--target", "duckdb", "--quiet", "--target-path", str(db.parent / "t")]
     with pytest.MonkeyPatch.context() as mp:  # never leaks into later tests
@@ -201,16 +201,16 @@ def test_tokyo_day_one_lands_on_the_previous_utc_day(built: Path) -> None:
 
 
 def test_conflicting_duplicate_fails_the_dbt_test(tmp_path: Path) -> None:
-    """Phase 9b invariant 6 (closes the BACKLOG row): the loader's Python
+    """Phase 9b invariant 6 (closes the BACKLOG row): the landing's Python
     conflicting-duplicate predicate is restated as a singular dbt test over the
-    source, so a landing the DuckDB loader never sees (BigQuery's) fails the
+    source, so a landing the DuckDB landing never sees (BigQuery's) fails the
     build. Here: land tiny, plant one insert_id with two payloads on one clock
     triple after load() (bypassing the Python refusal) → the test is red; the
     clean landing is green."""
     from dbt.cli.main import dbtRunner
 
     db = tmp_path / "planted.duckdb"
-    loader.load("tiny", db)
+    landing.load("tiny", db)
     args = ["test", "--select", "assert_no_conflicting_duplicates"]
     args += ["--project-dir", str(DBT), "--profiles-dir", str(DBT)]
     args += ["--target", "duckdb", "--quiet", "--target-path", str(tmp_path / "t")]
@@ -230,7 +230,7 @@ def test_conflicting_duplicate_fails_the_dbt_test(tmp_path: Path) -> None:
     # a null, so an unmarked null would read as "" — the null marker is the
     # load-bearing part on this engine)
     db2 = tmp_path / "planted2.duckdb"
-    loader.load("tiny", db2)
+    landing.load("tiny", db2)
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("OTR_DUCKDB_PATH", str(db2))
         con = duckdb.connect(str(db2))

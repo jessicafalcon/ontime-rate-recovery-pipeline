@@ -23,9 +23,9 @@ from typing import get_type_hints
 
 import duckdb
 
-from loader import load as loader
+from landing import load as landing
 
-DDL = loader.ROOT / "serving" / "ddl.sql"
+DDL = landing.ROOT / "serving" / "ddl.sql"
 SCORES = "main_scores.scores_send_time"
 DIM_CURRENT = "main_marts.dim_user_current"
 SEND_SCHEDULE = "serving.send_schedule"
@@ -231,7 +231,7 @@ def write_back(profile: str, db: Path | None = None) -> tuple[int, int]:
     (a second process cannot open it while this one holds it — pinned by
     `tests/test_writeback.py::test_duckdb_target_is_single_writer`), so two
     write-backs cannot interleave on the stand-in at all."""
-    con = loader.connect(db or loader.db_path(profile))
+    con = landing.connect(db or landing.db_path(profile))
     try:
         ensure_table(con)
         con.begin()

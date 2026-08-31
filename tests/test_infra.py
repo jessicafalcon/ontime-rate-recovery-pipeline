@@ -302,9 +302,9 @@ SPANNER_INSTANCE_NAME_RE = r'^\s*name\s*=\s*"([a-z0-9-]+)"'
 
 def test_spanner_names_pin_the_python_constants() -> None:
     """Round 1 #14: the instance/database names and the models dataset the
-    Python clients open are literals in loader/spanner.py + serving/spanner.py;
+    Python clients open are literals in landing/spanner.py + serving/spanner.py;
     they are pinned to the `.tf` here so an infra rename reddens offline."""
-    from loader import spanner as dims
+    from landing import spanner as dims
     from serving import spanner as wb_sp
 
     text = _stripped("modules", "spanner", "main.tf")

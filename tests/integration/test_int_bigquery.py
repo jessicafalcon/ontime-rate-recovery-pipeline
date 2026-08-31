@@ -1,7 +1,7 @@
 """Phase 9b (specs/phase-9b-bigquery-dialect.md): DuckDB ≡ BigQuery pin parity.
 
 Behind OTR_INT — only `make test-int-bigquery PROJECT=<id> CONFIRM=yes` runs it
-(loader/cli.py validates PROJECT and gates CONFIRM before spawning this; CI
+(pipeline/cli.py validates PROJECT and gates CONFIRM before spawning this; CI
 never runs it — the CI leg needs the opt-in WIF apply, docs/DEPLOYMENT.md).
 Cloud-cost, ask-first, as the impersonated SA.
 
@@ -24,7 +24,7 @@ import pytest
 
 from eval import golden, score
 from infra.cli import PROJECT_RE, confirmed
-from loader import cli as loader_cli
+from pipeline import cli as pipeline_cli
 from tests import pins
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,12 +35,12 @@ GOLDENS = (golden.ATTRIBUTION, golden.ONTIME_RATE_DAILY, golden.SCORES_SEND_TIME
 
 def _project() -> str:
     project = os.environ.get("OTR_GCP_PROJECT", "")
-    assert PROJECT_RE.match(project), "OTR_GCP_PROJECT is set by loader.cli only"
+    assert PROJECT_RE.match(project), "OTR_GCP_PROJECT is set by pipeline.cli only"
     return project
 
 
 def carried_gate() -> tuple[str, str]:
-    """Amendment V: the CONFIRM gate is CARRIED from loader.cli::int_bigquery
+    """Amendment V: the CONFIRM gate is CARRIED from pipeline.cli::int_bigquery
     (the make target), never forged here — a bare pytest with OTR_INT=1 and a
     project in its env finds no confirmation and is refused before any build.
     Offline pin: tests/test_bq_landing.py::
@@ -60,7 +60,7 @@ def built() -> Iterator[str]:
     project = _project()
     assert os.environ.get("OTR_PROFILE", "tiny") == "tiny"  # tiny by definition
     confirm, origin = carried_gate()
-    rc = loader_cli.dbt_build("tiny", "bigquery", confirm, origin, project=project)
+    rc = pipeline_cli.dbt_build("tiny", "bigquery", confirm, origin, project=project)
     assert rc == 0, "make dbt-build TARGET=bigquery PROFILE=tiny failed"
     yield project
 
@@ -139,7 +139,7 @@ def test_planted_conflict_fails_on_bigquery(built: str) -> None:
 
     client = _client(built)
     table = f"`{built}.raw.events`"
-    schema = json.loads((ROOT / "loader" / "bq_schema.json").read_text())
+    schema = json.loads((ROOT / "landing" / "bq_schema.json").read_text())
     columns = ", ".join(f["name"] for f in schema["events"])  # contract order
     common = (
         "'e-planted', 'upload_started', 'u-1', 'd-1', "

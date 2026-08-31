@@ -57,7 +57,7 @@ users × 7 days = 140 prompts, 970 events (incl. duplicates), 13 files.
 
 ## Phase 2 — Staging on DuckDB
 
-**Goal.** dbt project with `duckdb` target; loader `fixtures/<profile>/raw` →
+**Goal.** dbt project with `duckdb` target; landing `fixtures/<profile>/raw` →
 raw tables (`make load PROFILE=<p>`); `stg_events` (dedupe on `insert_id`,
 typed, tz → local via `dim_user` valid-at-time), `stg_prompts`; source tests
 (not-null, accepted values, uniqueness on `dim_user (user_id, valid_from)` —
@@ -358,9 +358,9 @@ only; DuckDB keeps `main_<folder>` and no reader changed — two datasets stays
 9a's pin. The three incremental models name their overwrite column under
 `meta.overwrite_partition_col` and set BigQuery's native `partition_by` dict on that
 dialect only (`partition_by` is a key both adapters interpret — §8). The
-landing `loader/bq.py` (`make bq-load`) uploads the same files `load` selects
+landing `landing/bq.py` (`make bq-load`) uploads the same files `load` selects
 to `gs://<id>-ontime/landing/<p>/` and loads `raw.events`/`raw.dim_user` with
-the schema generated from `generator/models.py` (`loader/bq_schema.json`),
+the schema generated from `generator/models.py` (`landing/bq_schema.json`),
 `WRITE_TRUNCATE`, through dbt-bigquery's transitive google clients on ONE
 impersonated-ADC credential (no `bq`/`gsutil`, no key); `dbt_build` lands by
 target (Amendment S lifted; `OTR_GCP_PROJECT` from the validated `PROJECT`;
@@ -402,7 +402,7 @@ one `candidates_sql` relation seam and writes the Spanner `send_schedule`
 inside ONE read-write transaction (Amendment A; the DuckDB stand-in is one
 transaction too, H); `version_key` orders `model_version` numerically and
 parses BEFORE the insert shortcut (B); `COLUMNS`/`row_of`/`candidate_of` map
-by field name on both the write and the read (I). `loader/spanner.py` — the
+by field name on both the write and the read (I). `landing/spanner.py` — the
 dims landing (contract types, refusing what the contract does not admit, J)
 + `make spanner-load`. The spanner Terraform module — instance (100 PU),
 database DDL pinned to the contract renders, the `EXTERNAL_QUERY` connection

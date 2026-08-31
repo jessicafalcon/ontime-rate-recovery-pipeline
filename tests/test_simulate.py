@@ -17,10 +17,10 @@ from test_scores import build_profile
 
 from eval import blocks, score, simulate
 from generator import cli as gen_cli
-from loader import load as loader
+from landing import load as landing
 from tests import pins
 
-ROOT = loader.ROOT
+ROOT = landing.ROOT
 TRUTH_TINY = ROOT / "fixtures" / "tiny" / "truth"
 RESULTS = ROOT / "docs" / "RESULTS.md"
 

@@ -258,7 +258,7 @@ yields a coherent project).
 |-------|-------|------------------|
 | **0 — Skeleton & workflow machinery** | — | uv/ruff/pytest, Makefile gates (`review-gate`, `mutate`, `check-docs`), CI, review agents, spec template, DECISIONS/BACKLOG, the three load-bearing docs. No pipeline code. |
 | **1 — Event contract, generator, frozen tiny fixture** | A | Pydantic models (Amplitude shape, three clocks, tz, delivery events); seeded generator with fault/late/skew/duplicate knobs; `fixtures/tiny/` committed with a sha256 manifest, read-only after; `medium` profile regenerates §5's validation. |
-| **2 — Staging on DuckDB** | A | dbt project; loader; `stg_*` (dedupe on `insert_id`, tz → local); source tests; the four dispatch macros; **CI: `dbt build`**. |
+| **2 — Staging on DuckDB** | A | dbt project; landing; `stg_*` (dedupe on `insert_id`, tz → local); source tests; the four dispatch macros; **CI: `dbt build`**. |
 | **3 — Attribution** ⭐ | A | Five-label exhaustive set with precedence; dbt unit tests per rule; `expected/attribution.csv` golden diff; label accuracy vs truth pinned; `unattributed` bound. |
 | **4 — On-time marts & metric definitions** | A | `ontime_rate_daily` (denominator = prompts delivered), `ontime_retention`, `docs/METRICS.md`, `make report`. |
 | **5 — Send-time model as a dbt model** | A | Organic-open features; cohort-constrained scores with bounded per-user shift, shrinkage, circular hours; MAE vs truth pinned on tiny + medium. |

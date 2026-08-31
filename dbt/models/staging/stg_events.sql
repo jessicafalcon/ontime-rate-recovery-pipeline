@@ -3,7 +3,7 @@
 -- Dedupe keeps the earliest (server_upload_time, server_received_time,
 -- client_event_time) copy — content-derived, never file or load order
 -- (invariant 1). Copies tying on all three clocks are identical by contract:
--- the loader refuses a landing where they differ in event_properties.
+-- the landing step refuses a landing where they differ in event_properties.
 --
 -- Incremental (Phase 7) on event_date (the local date; an app_opened has no
 -- prompt_id). The dedupe qualify runs over the WHOLE raw source before the

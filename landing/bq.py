@@ -1,9 +1,9 @@
 """The BigQuery landing (Phase 9b): fixtures/<profile>/{raw,dims} → the GCS
 staging bucket → the `raw` dataset, as `bq load` would do it.
 
-The `make load` contract, second dialect: the SAME files the DuckDB loader
+The `make load` contract, second dialect: the SAME files the DuckDB landing
 selects (`load.event_files`, THROUGH-filtered by name), an EXPLICIT schema
-generated from the contract (`loader/bq_schema.json`, never inferred), and one
+generated from the contract (`landing/bq_schema.json`, never inferred), and one
 `WRITE_TRUNCATE` load job per table — the ONLY landing mechanism, so a second
 landing is byte-identical, never appended, and nothing reads prior table state
 (Amendment X: an empty selection lands a zero-byte object through the same
@@ -21,9 +21,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-from loader import load as loader
+from landing import load as landing
 
-SCHEMA_PATH = loader.ROOT / "loader" / "bq_schema.json"
+SCHEMA_PATH = landing.ROOT / "landing" / "bq_schema.json"
 RAW_DATASET = "raw"  # infra/variables.tf raw_dataset default
 LANDING_PREFIX = "landing"  # objects: landing/<profile>/<raw|dims>/<file>
 FILES_PER_TABLE = {"events": "raw", "dim_user": "dims"}  # table → fixture subtree
@@ -84,9 +84,9 @@ def bucket_name(project: str) -> str:
 
 def selected_files(fixture: Path, through: str | None = None) -> dict[str, list[Path]]:
     """Per table, the files to land: the THROUGH-filtered `events_*.jsonl` (the
-    DuckDB loader's own predicate) and the one dim seed."""
+    DuckDB landing's own predicate) and the one dim seed."""
     return {
-        "events": loader.event_files(fixture, through),
+        "events": landing.event_files(fixture, through),
         "dim_user": [fixture / "dims" / "dim_user.csv"],
     }
 
@@ -126,7 +126,7 @@ def bq_load(
     the only landing mechanism (Amendment X): a table with no selected file
     lands a zero-byte object through the same job, so `WRITE_TRUNCATE` + the
     contract schema re-create it empty."""
-    fixture = loader.fixture_dir(profile)
+    fixture = landing.fixture_dir(profile)
     files = selected_files(fixture, through)
     c = (clients or default_clients())(project)
     bucket = bucket_name(project)

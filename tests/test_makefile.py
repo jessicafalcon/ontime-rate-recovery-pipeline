@@ -160,7 +160,9 @@ def test_load_and_dbt_build_pass_profile_and_target_as_one_literal(value: str):
             out = _make_n(
                 target, kv if origin == "cmdline" else {}, kv if origin == "env" else {}
             )
-            assert f"loader.cli {target} {quoted}" in out, (target, origin, out)
+            # dbt-build is pipeline plumbing (pipeline/cli.py); load/drop-db land.
+            mod = "pipeline.cli" if target == "dbt-build" else "landing.cli"
+            assert f"{mod} {target} {quoted}" in out, (target, origin, out)
             if target == "dbt-build":
                 assert f"--target {quoted}" in out
             assert "pwned" not in out.replace(value, "")
@@ -392,8 +394,8 @@ def test_spanner_targets_pass_variables_as_one_literal(value: str) -> None:
     beside them; test-int-spanner defaults PROFILE to tiny."""
     quoted = "'" + value.replace("'", "'\\''") + "'"
     for target, cli in (
-        ("spanner-load", "loader.cli spanner-load"),
-        ("test-int-spanner", "loader.cli test-int-spanner"),
+        ("spanner-load", "landing.cli spanner-load"),
+        ("test-int-spanner", "pipeline.cli test-int-spanner"),
     ):
         for origin in ("cmdline", "env"):
             out = _make_n(
@@ -405,7 +407,7 @@ def test_spanner_targets_pass_variables_as_one_literal(value: str) -> None:
             assert "pwned" not in out.replace(value, "")
             assert "--confirm-origin '" in out
     out = _make_n("test-int-spanner", {}, {})
-    assert "loader.cli test-int-spanner 'tiny'" in out  # PROFILE defaults to tiny
+    assert "pipeline.cli test-int-spanner 'tiny'" in out  # PROFILE defaults to tiny
 
 
 # ----------------------------------- Phase 8b: dbt-build THROUGH, test-int-airflow
@@ -479,8 +481,8 @@ def test_tf_targets_pass_project_as_one_literal(value: str) -> None:
     "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
 )
 def test_bq_targets_pass_project_as_one_literal(value: str) -> None:
-    """Phase 9b threat model: PROJECT (and PROFILE) reach loader.cli as one
-    single-quoted token from either origin on bq-load, dbt-build and
+    """Phase 9b threat model: PROJECT (and PROFILE) reach the landing/pipeline
+    CLI as one single-quoted token from either origin on bq-load, dbt-build and
     test-int-bigquery; Python validates the GCP project-id shape and never
     derives a path from it."""
     quoted = "'" + value.replace("'", "'\\''") + "'"
@@ -491,11 +493,14 @@ def test_bq_targets_pass_project_as_one_literal(value: str) -> None:
                 target, kv if origin == "cmdline" else {}, kv if origin == "env" else {}
             )
             prof = "'tiny'" if target == "test-int-bigquery" and not value else quoted
-            assert f"loader.cli {target} {prof}" in out, (target, origin, out)
+            # bq-load lands (landing/cli.py); dbt-build and test-int-* are
+            # pipeline plumbing (pipeline/cli.py).
+            mod = "landing.cli" if target == "bq-load" else "pipeline.cli"
+            assert f"{mod} {target} {prof}" in out, (target, origin, out)
             assert f"--project {quoted}" in out, (target, origin, out)
             assert "pwned" not in out.replace(value, "")
     out = _make_n("test-int-bigquery", {"PROJECT": "p"}, {})
-    assert "loader.cli test-int-bigquery 'tiny' --project 'p'" in out  # PROFILE default
+    assert "pipeline.cli test-int-bigquery 'tiny' --project 'p'" in out  # PROFILE dflt
 
 
 def test_bq_targets_confirm_from_command_line_only() -> None:

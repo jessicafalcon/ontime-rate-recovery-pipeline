@@ -146,6 +146,43 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/landing-package (after Phase 10, 2026-08-31)
+
+- **`loader/` → `landing/`, and the build/integration plumbing → a new
+  `pipeline/`.** Closes the Phase 9b-exit BACKLOG row (Phase 10 reconciliation
+  item 3). `landing/` is the three landing engines (`load.py`, `bq.py`,
+  `spanner.py`) plus `land` — the TARGET dispatcher — and the four landing
+  commands (`load`, `bq-load`, `spanner-load`, `drop-db`). `pipeline/cli.py`
+  holds the dbt-build dispatcher (`dbt_build`, which lands via
+  `landing.cli.land` then runs `dbt build`) and the integration launchers
+  (`int_bigquery`, `int_spanner`), with the two build-arg helpers
+  (`full_refresh_args`, `dbt_vars_args`). `pipeline.cli` imports the validators
+  and `land` from `landing.cli`; the dependency runs one way, no cycle.
+- **Zero behaviour by construction: the `make` target names never change.**
+  Only the `-m <module>.cli` path differs — `load`/`bq-load`/`spanner-load`/
+  `drop-db` invoke `landing.cli`, `dbt-build`/`test-int-bigquery`/
+  `test-int-spanner` invoke `pipeline.cli`. The DAG (`make dbt-build`,
+  `make writeback`), `make pipeline` (`serving.cli` imports `dbt_build` from
+  `pipeline.cli` now), and every caller are unchanged. Proven by the suite
+  (575 green), the mutation sweep, and `make check-docs`; the live cloud
+  targets were re-proven at Phase 10 and are not re-billed here (the change is
+  a rename, not a new write path).
+- **Test files that span both packages import two aliases; only `test_loader.py`
+  is renamed.** `tests/test_loader.py` → `tests/test_landing.py`
+  (the file the rename is about). The mixed tests (landing + build) keep `cli`
+  = `landing.cli` and add `pipeline_cli` = `pipeline.cli`, rather than a wider
+  test reshuffle — minimal churn, and the split is legible at each call site.
+  Rejected: re-exporting the moved functions from `landing.cli` (a rename that
+  leaves the old surface is not the fix); splitting the tests by package (churn
+  the BACKLOG row did not ask for).
+- **Historical specs and prior DECISIONS/BACKLOG entries keep `loader/`.**
+  They record what each phase built, when the package was named `loader/`;
+  rewriting them would falsify the history. Only living docs (CLAUDE.md,
+  ARCHITECTURE, DEPLOYMENT, PHASES, PROJECT_BRIEF) and the still-open BACKLOG
+  rows that point at live code were updated. The truth-isolation guard needed
+  no edit — it derives the pipeline packages from the tree, so `landing/` and
+  `pipeline/` are covered the moment they exist.
+
 ### Phase 10 — Spanner: dims and write-back (2026-08-30)
 
 - **One `TARGET` knob, two named configurations — no read×write matrix.**
@@ -197,6 +234,8 @@ annotated **Superseded by …** in place and never deleted.
   first.** The `landing/`/`pipeline/` split (BACKLOG) is a separate
   `fix/landing-package` branch after this phase merges — mechanical churn
   does not belong in a Spanner diff (reconciliation item 3).
+  **Superseded by `fix/landing-package` (2026-08-31) — done; see the appendix
+  entry.**
 - **The Spanner guard and upsert run in ONE read-write transaction
   (review round 1, Amendment A).** `run_in_transaction(fn)`: the stored
   pairs are read on the transaction, the winners computed by the shared

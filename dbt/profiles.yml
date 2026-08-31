@@ -1,7 +1,7 @@
 # Two targets, one project (ARCHITECTURE §3.2). No credential lives here:
-# duckdb is a local file whose path loader/cli.py sets after validating
+# duckdb is a local file whose path pipeline/cli.py sets after validating
 # PROFILE; bigquery authenticates by ADC/WIF only (impersonate the SA), and
-# loader/cli.py sets OTR_GCP_PROJECT from the validated PROJECT (Phase 9b).
+# pipeline/cli.py sets OTR_GCP_PROJECT from the validated PROJECT (Phase 9b).
 ontime:
   target: duckdb
   outputs:

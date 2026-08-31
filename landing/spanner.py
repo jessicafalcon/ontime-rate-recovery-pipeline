@@ -4,9 +4,9 @@
 
 The `make load` contract, third engine: the SAME seed file the DuckDB and
 BigQuery landings select, columns and types from the GENERATED contract
-(`loader/bq_schema.json` — never inferred, never hand-listed), one idempotent
+(`landing/bq_schema.json` — never inferred, never hand-listed), one idempotent
 batch upsert keyed (user_id, valid_from) — re-landing the same seed rewrites
-identical rows. One injectable client (loader/bq.py's pattern): the offline
+identical rows. One injectable client (landing/bq.py's pattern): the offline
 suite injects a fake; google-cloud-spanner is never constructed there. Auth is
 ADC, never a keyfile."""
 
@@ -18,8 +18,8 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime
 from typing import Protocol
 
-from loader import bq
-from loader import load as loader
+from landing import bq
+from landing import load as landing
 
 TABLE = "dim_user"
 # The ONE place the Spanner instance/database names live in Python
@@ -94,7 +94,7 @@ def read_rows(profile: str) -> tuple[tuple[str, ...], list[tuple]]:
     generated contract — a drifted seed refuses, never lands sideways."""
     fields = dim_fields()
     names = tuple(f["name"] for f in fields)
-    path = loader.fixture_dir(profile) / "dims" / "dim_user.csv"
+    path = landing.fixture_dir(profile) / "dims" / "dim_user.csv"
     with path.open(newline="") as fh:
         reader = csv.reader(fh)
         header = tuple(next(reader))

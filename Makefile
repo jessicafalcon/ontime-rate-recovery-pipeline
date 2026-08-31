@@ -69,12 +69,12 @@ freeze:
 	uv run python -m generator.cli freeze $(call _Q,$(value PROFILE)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
 # ------------------------------------------------------------------ Phase 2
-# Raw landing (loader/cli.py): validates PROFILE, loads fixtures/<PROFILE>/{raw,dims}
+# Raw landing (landing/cli.py): validates PROFILE, loads fixtures/<PROFILE>/{raw,dims}
 # into data/<PROFILE>.duckdb schema `raw`. Idempotent (tables recreated). THROUGH
 # (an upload date YYYY-MM-DD) lands only the files uploaded on or before it — a
 # landing is the raw-table state (Phase 7); empty loads them all.
 load:
-	uv run python -m loader.cli load $(call _Q,$(value PROFILE)) --through $(call _Q,$(value THROUGH))
+	uv run python -m landing.cli load $(call _Q,$(value PROFILE)) --through $(call _Q,$(value THROUGH))
 
 # The TARGET's landing, then `dbt build` (sources tests → staging → attribution
 # → their tests). TARGET selects the dbt target (default duckdb: `load` into
@@ -87,22 +87,22 @@ load:
 # only files uploaded on or before it — a per-interval build (Phase 8b); unset
 # loads all. Names validated in Python before any path.
 dbt-build:
-	uv run python -m loader.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --full $(call _Q,$(value FULL)) --full-origin '$(origin FULL)' --through $(call _Q,$(value THROUGH)) --project $(call _Q,$(value PROJECT))
+	uv run python -m pipeline.cli dbt-build $(call _Q,$(value PROFILE)) --target $(call _Q,$(value TARGET)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --full $(call _Q,$(value FULL)) --full-origin '$(origin FULL)' --through $(call _Q,$(value THROUGH)) --project $(call _Q,$(value PROJECT))
 
-# The BigQuery landing alone (loader/cli.py bq-load, Phase 9b): the same files
+# The BigQuery landing alone (landing/cli.py bq-load, Phase 9b): the same files
 # `load` selects → gs://<PROJECT>-ontime/landing/<PROFILE>/ → raw.events /
 # raw.dim_user with the schema generated from generator/models.py, recreated
 # (WRITE_TRUNCATE — idempotent). Cloud-cost (cents): CONFIRM=yes must have
 # COMMAND-LINE origin; PROJECT validated before any client; ADC, never a key.
 bq-load:
-	uv run python -m loader.cli bq-load $(call _Q,$(value PROFILE)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --through $(call _Q,$(value THROUGH))
+	uv run python -m landing.cli bq-load $(call _Q,$(value PROFILE)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --through $(call _Q,$(value THROUGH))
 
 # Deletes data/<PROFILE>.duckdb and its .wal (gitignored; `make load` recreates it). The only
 # deleter this phase adds: CONFIRM=yes must have COMMAND-LINE origin.
 drop-db:
-	uv run python -m loader.cli drop-db $(call _Q,$(value PROFILE)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
+	uv run python -m landing.cli drop-db $(call _Q,$(value PROFILE)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
-# Re-render loader/ddl.sql, loader/bq_schema.json (Phase 9b) and
+# Re-render landing/ddl.sql, landing/bq_schema.json (Phase 9b) and
 # dbt/models/staging/sources.yml from generator/models.py
 # (scripts/gen_dbt_sources.py). tests/test_dbt_sources.py fails on a hand edit.
 gen-sources:
@@ -194,17 +194,17 @@ test-int-airflow:
 # (ask first); CI never runs it (the CI leg needs the opt-in WIF apply —
 # docs/DEPLOYMENT.md).
 test-int-bigquery:
-	uv run python -m loader.cli test-int-bigquery $(call _Q,$(if $(value PROFILE),$(value PROFILE),tiny)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
+	uv run python -m pipeline.cli test-int-bigquery $(call _Q,$(if $(value PROFILE),$(value PROFILE),tiny)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
 # ------------------------------------------------------------------ Phase 10
-# The Spanner dims landing (loader/cli.py spanner-load): the same dim seed the
+# The Spanner dims landing (landing/cli.py spanner-load): the same dim seed the
 # other landings select → the Spanner `dim_user` table (the production dims
 # home BigQuery federates from, §2.3/§3.3), columns/types from the generated
 # contract, one idempotent batch upsert. Cloud-cost (a spanner-enabled stack):
 # CONFIRM=yes must have COMMAND-LINE origin; PROJECT validated before any
 # client; ADC, never a key.
 spanner-load:
-	uv run python -m loader.cli spanner-load $(call _Q,$(value PROFILE)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
+	uv run python -m landing.cli spanner-load $(call _Q,$(value PROFILE)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
 # Phase 10 integration: the Spanner write-back + federation run. Validates
 # PROFILE (default tiny) + PROJECT and gates CONFIRM in Python FIRST, then runs
@@ -214,7 +214,7 @@ spanner-load:
 # 0, row hash unchanged and equal to the DuckDB pin). Cloud-cost (ask first;
 # needs an `enable_spanner=true` apply); CI never runs it.
 test-int-spanner:
-	uv run python -m loader.cli test-int-spanner $(call _Q,$(if $(value PROFILE),$(value PROFILE),tiny)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
+	uv run python -m pipeline.cli test-int-spanner $(call _Q,$(if $(value PROFILE),$(value PROFILE),tiny)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
 # ------------------------------------------------------------------ Phase 9a
 # Terraform foundation (infra/cli.py): validates PROJECT (a GCP project-id shape)

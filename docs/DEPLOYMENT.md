@@ -209,7 +209,7 @@ datasets — so every BigQuery build runs **as the SA** (below), and
    impersonation setting, no keyfile):
    `gcloud auth application-default login --impersonate-service-account=<pipeline_service_account output>`
 3. Land + build: `make dbt-build TARGET=bigquery PROFILE=tiny PROJECT=<id> CONFIRM=yes`
-   — `loader/cli.py` validates `PROJECT`, exports it to dbt as `OTR_GCP_PROJECT`
+   — `pipeline/cli.py` validates `PROJECT`, exports it to dbt as `OTR_GCP_PROJECT`
    (the `bigquery` output has no default; `location: us-central1`), lands
    `fixtures/tiny` through `gs://<id>-ontime/landing/tiny/` into `raw`
    (`make bq-load` runs it alone), then `dbt build --target bigquery` into

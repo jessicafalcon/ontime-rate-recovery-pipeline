@@ -9,7 +9,7 @@ landing (Phase 7, gaps ≤ lookback_days), and the write-back replaces a row onl
 on a strictly greater — monotone — (model_version, computed_as_of), so the union
 interval's rows win. This is the make-level analogue of the DAG's backfill, which
 test_int_airflow proves in the container. Real in-process builds into tmp DBs
-(loader.DATA redirected); no service, no network."""
+(landing.DATA redirected); no service, no network."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from loader import cli
-from loader import load as loader
+from landing import load as landing
+from pipeline import cli
 from serving import writeback as wb
 from tests import pins
 from tests.test_writeback import send_schedule_hash
@@ -31,11 +31,11 @@ def _run_chain(
 ) -> Path:
     """Redirect the output DB to `data_dir`, then for each landing dbt-build the
     subset and write it back into the same (incremental) DB. Returns the DB path."""
-    monkeypatch.setattr(loader, "DATA", data_dir)
+    monkeypatch.setattr(landing, "DATA", data_dir)
     for through in throughs:
         assert cli.dbt_build("tiny", "", through=through) == 0
         wb.write_back("tiny")
-    return loader.db_path("tiny")
+    return landing.db_path("tiny")
 
 
 def test_three_through_landings_equal_the_union(
@@ -85,11 +85,11 @@ def test_computed_as_of_advances_when_scores_change(
     increases (ties only when the scores are unchanged) — so replace-iff-*greater*
     carries every change forward and the union interval wins. tiny exercises both:
     07→12 changes the scores (strict increase asserted), 12→13 does not (tie ok)."""
-    monkeypatch.setattr(loader, "DATA", tmp_path / "mono")
+    monkeypatch.setattr(landing, "DATA", tmp_path / "mono")
     prev: tuple[str, object] | None = None
     for through in pins.BACKFILL_THROUGHS_TINY:
         assert cli.dbt_build("tiny", "", through=through) == 0
-        state = _scores_state(loader.db_path("tiny"))
+        state = _scores_state(landing.db_path("tiny"))
         if prev is not None:
             (prev_hash, prev_as_of), (cur_hash, cur_as_of) = prev, state
             if cur_hash != prev_hash:

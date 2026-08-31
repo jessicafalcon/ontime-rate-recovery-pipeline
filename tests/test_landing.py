@@ -10,8 +10,9 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from loader import cli
-from loader import load as loader
+from landing import cli
+from landing import load as landing
+from pipeline import cli as pipeline_cli
 from tests import pins
 
 ROOT = Path(__file__).parent.parent
@@ -19,10 +20,10 @@ TINY = ROOT / "fixtures" / "tiny"
 
 
 def test_loader_globs_every_raw_file(tmp_path: Path) -> None:
-    files = loader.event_files(TINY)
+    files = landing.event_files(TINY)
     assert [f.name for f in files][0] == "events_2026-01-04.jsonl"  # the Tokyo day
     assert len(files) == pins.RAW_FILES
-    n_files, n_events, n_dims = loader.load("tiny", tmp_path / "t.duckdb")
+    n_files, n_events, n_dims = landing.load("tiny", tmp_path / "t.duckdb")
     assert (n_files, n_events, n_dims) == (
         pins.RAW_FILES,
         pins.RAW_EVENT_ROWS,
@@ -33,13 +34,13 @@ def test_loader_globs_every_raw_file(tmp_path: Path) -> None:
 
 def test_load_twice_gives_the_same_row_count(tmp_path: Path) -> None:
     db = tmp_path / "t.duckdb"
-    assert loader.load("tiny", db) == loader.load("tiny", db)
+    assert landing.load("tiny", db) == landing.load("tiny", db)
 
 
 def test_through_loads_only_files_on_or_before(tmp_path: Path) -> None:
     """Phase 7: THROUGH filters landing files by upload date (a landing is the
     raw-table state); None loads them all."""
-    kept = loader.event_files(TINY, through=pins.LANDING_SPLIT_TINY)
+    kept = landing.event_files(TINY, through=pins.LANDING_SPLIT_TINY)
     assert [f.name for f in kept] == [
         f"events_{d}.jsonl"
         for d in (
@@ -54,9 +55,9 @@ def test_through_loads_only_files_on_or_before(tmp_path: Path) -> None:
             "2026-01-12",
         )
     ]
-    assert loader.event_files(TINY, through="2025-12-31") == []  # before every file
-    assert loader.event_files(TINY, through=None) == loader.event_files(TINY)
-    n_files, _, _ = loader.load(
+    assert landing.event_files(TINY, through="2025-12-31") == []  # before every file
+    assert landing.event_files(TINY, through=None) == landing.event_files(TINY)
+    n_files, _, _ = landing.load(
         "tiny", tmp_path / "t.duckdb", through=pins.LANDING_SPLIT_TINY
     )
     assert n_files == pins.RAW_FILES - 1  # the late file (01-13) is not landed
@@ -73,17 +74,19 @@ def test_load_refuses_bad_through() -> None:
 def test_full_refresh_only_on_command_line_yes() -> None:
     """FULL=yes adds --full-refresh only from the command line; an env FULL is
     ignored; a non-yes value is refused."""
-    assert cli.full_refresh_args("yes", "command line") == ["--full-refresh"]
-    assert cli.full_refresh_args("yes", "environment") == []
-    assert cli.full_refresh_args("", "command line") == []
-    assert cli.full_refresh_args("no", "command line") == []
+    assert pipeline_cli.full_refresh_args("yes", "command line") == ["--full-refresh"]
+    assert pipeline_cli.full_refresh_args("yes", "environment") == []
+    assert pipeline_cli.full_refresh_args("", "command line") == []
+    assert pipeline_cli.full_refresh_args("no", "command line") == []
     with pytest.raises(SystemExit) as e:  # a non-empty non-yes FULL is refused
-        cli.dbt_build("tiny", "duckdb", full='"; rm', full_origin="command line")
+        pipeline_cli.dbt_build(
+            "tiny", "duckdb", full='"; rm', full_origin="command line"
+        )
     assert e.value.code == 2
 
 
 def test_empty_valid_to_loads_as_null(tmp_path: Path) -> None:
-    loader.load("tiny", tmp_path / "t.duckdb")
+    landing.load("tiny", tmp_path / "t.duckdb")
     con = duckdb.connect(str(tmp_path / "t.duckdb"))
     total, closed = con.execute(
         "select count(*), count(valid_to) from raw.dim_user"
@@ -97,7 +100,7 @@ def test_empty_valid_to_loads_as_null(tmp_path: Path) -> None:
 
 
 def test_json_null_error_code_survives_as_json_null(tmp_path: Path) -> None:
-    loader.load("tiny", tmp_path / "t.duckdb")
+    landing.load("tiny", tmp_path / "t.duckdb")
     con = duckdb.connect(str(tmp_path / "t.duckdb"))
     assert (
         con.execute(
@@ -152,7 +155,7 @@ def test_duplicate_insert_id_across_files_is_loaded_twice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Raw keeps both copies (the source has no unique test by design) — the
-    loader never dedupes and never drops a file. Staging them to one row is
+    landing never dedupes and never drops a file. Staging them to one row is
     the dbt unit test + tests/test_staging.py's job."""
     _mini_fixture(
         tmp_path,
@@ -161,9 +164,9 @@ def test_duplicate_insert_id_across_files_is_loaded_twice(
             "events_2026-01-06.jsonl": [_event("e-1", "2026-01-06 08:01:00.000000")],
         },
     )
-    monkeypatch.setattr(loader, "ROOT", tmp_path)
-    monkeypatch.setattr(loader, "DATA", tmp_path / "data")
-    assert loader.load("mini", tmp_path / "m.duckdb") == (2, 2, 1)
+    monkeypatch.setattr(landing, "ROOT", tmp_path)
+    monkeypatch.setattr(landing, "DATA", tmp_path / "data")
+    assert landing.load("mini", tmp_path / "m.duckdb") == (2, 2, 1)
     con = duckdb.connect(str(tmp_path / "m.duckdb"))
     assert (
         con.execute("select count(distinct insert_id) from raw.events").fetchone()[0]
@@ -174,18 +177,18 @@ def test_duplicate_insert_id_across_files_is_loaded_twice(
 def test_connection_session_is_utc_and_format_is_the_contract(tmp_path: Path) -> None:
     from generator.models import AMPLITUDE_TS
 
-    assert loader.TS_FORMAT == AMPLITUDE_TS
-    con = loader.connect(tmp_path / "t.duckdb")
+    assert landing.TS_FORMAT == AMPLITUDE_TS
+    con = landing.connect(tmp_path / "t.duckdb")
     assert con.execute("select current_setting('TimeZone')").fetchone() == ("UTC",)
     con.close()
 
 
 def test_column_spec_refuses_a_quoted_identifier(tmp_path: Path) -> None:
-    con = loader.connect(tmp_path / "t.duckdb")
-    loader.create_raw_tables(con)
+    con = landing.connect(tmp_path / "t.duckdb")
+    landing.create_raw_tables(con)
     con.execute('alter table raw.dim_user add column "x\'y" varchar')
     with pytest.raises(ValueError, match="refusing column spec"):
-        loader.column_spec(con, "dim_user")
+        landing.column_spec(con, "dim_user")
     con.close()
 
 
@@ -198,16 +201,16 @@ def test_cloud_target_requires_confirm_from_the_command_line(
         ("no", "command line"),
     ):
         with pytest.raises(SystemExit) as e:
-            cli.dbt_build("tiny", "bigquery", confirm, origin)
+            pipeline_cli.dbt_build("tiny", "bigquery", confirm, origin)
         assert e.value.code == 2
     # duckdb needs no confirmation (the validation error proves we got past the gate)
     with pytest.raises(SystemExit) as e:
-        cli.dbt_build("nosuchprofile", "duckdb")
+        pipeline_cli.dbt_build("nosuchprofile", "duckdb")
     assert e.value.code == 2
 
 
 class _FakeClients:
-    """The two cloud calls, recorded (loader/bq.py Clients)."""
+    """The two cloud calls, recorded (landing/bq.py Clients)."""
 
     calls: list[tuple] = []
 
@@ -237,12 +240,16 @@ def test_bigquery_target_needs_a_validated_project(
     os.environ.pop("OTR_GCP_PROJECT")
     for bad in ("", "../x", "Bad Id", "my-proj\n", "x"):
         with pytest.raises(SystemExit) as e:
-            cli.dbt_build("tiny", "bigquery", "yes", "command line", project=bad)
+            pipeline_cli.dbt_build(
+                "tiny", "bigquery", "yes", "command line", project=bad
+            )
         assert e.value.code == 2, bad
         assert "PROJECT" in capsys.readouterr().out
         assert "OTR_GCP_PROJECT" not in os.environ
     with pytest.raises(SystemExit) as e:  # no third target
-        cli.dbt_build("tiny", "spanner", "yes", "command line", project="my-project")
+        pipeline_cli.dbt_build(
+            "tiny", "spanner", "yes", "command line", project="my-project"
+        )
     assert e.value.code == 2
 
 
@@ -272,7 +279,7 @@ def test_bigquery_build_lands_through_bq_not_duckdb(
     monkeypatch.setattr(dbt_main, "dbtRunner", Runner)
     monkeypatch.setattr(cli, "load", duckdb_never)
     _FakeClients.calls = []
-    rc = cli.dbt_build(
+    rc = pipeline_cli.dbt_build(
         "tiny",
         "bigquery",
         "yes",
@@ -288,15 +295,15 @@ def test_bigquery_build_lands_through_bq_not_duckdb(
     assert kinds[0] == "init" and "upload" in kinds and kinds.count("load") == 2
     uploads = [c for c in _FakeClients.calls if c[0] == "upload"]
     assert all(c[1] == "my-project-ontime" for c in uploads)
-    # THROUGH selected the same subset the DuckDB loader would (4 files ≤ 01-07)
+    # THROUGH selected the same subset the DuckDB landing would (4 files ≤ 01-07)
     assert len([u for u in uploads if u[3].startswith("events_")]) == len(
-        loader.event_files(loader.fixture_dir("tiny"), "2026-01-07")
+        landing.event_files(landing.fixture_dir("tiny"), "2026-01-07")
     )
     assert "bq-load OK: tiny — 4 files, landing ≤ 2026-01-07" in capsys.readouterr().out
     # the duckdb build: load() runs, no client is built
     monkeypatch.setattr(cli, "load", lambda p, t="": 0)
     _FakeClients.calls = []
-    assert cli.dbt_build("tiny", "duckdb", clients=_FakeClients) == 0
+    assert pipeline_cli.dbt_build("tiny", "duckdb", clients=_FakeClients) == 0
     assert _FakeClients.calls == []
 
 
@@ -307,9 +314,9 @@ def test_load_reports_its_source_and_refuses_manifest_drift(
 
     root = tmp_path / "repo"
     shutil.copytree(TINY, root / "fixtures" / "tiny")
-    monkeypatch.setattr(loader, "ROOT", root)
-    monkeypatch.setattr(loader, "DATA", root / "data")
-    assert loader.manifest_drift(root / "fixtures" / "tiny") == []
+    monkeypatch.setattr(landing, "ROOT", root)
+    monkeypatch.setattr(landing, "DATA", root / "data")
+    assert landing.manifest_drift(root / "fixtures" / "tiny") == []
     assert cli.load("tiny") == 0
     out = capsys.readouterr().out
     assert "load: source=fixtures/tiny\n" in out and "(unfrozen)" not in out
@@ -335,19 +342,19 @@ def test_manifest_check_reads_only_raw_and_dims(
     root = tmp_path / "repo"
     fx = root / "fixtures" / "tiny"
     shutil.copytree(TINY, fx)
-    monkeypatch.setattr(loader, "ROOT", root)
-    monkeypatch.setattr(loader, "DATA", root / "data")
+    monkeypatch.setattr(landing, "ROOT", root)
+    monkeypatch.setattr(landing, "DATA", root / "data")
     other = next(
         d for d in fx.iterdir() if d.is_dir() and d.name not in ("raw", "dims")
     )
     victim = next(other.iterdir())
     victim.write_text(victim.read_text() + "\n")
-    assert loader.manifest_drift(fx) == []
+    assert landing.manifest_drift(fx) == []
     assert cli.load("tiny") == 0
     (fx / "dims" / "dim_user.csv").write_text(
         (fx / "dims" / "dim_user.csv").read_text().replace("Europe/London", "UTC", 1)
     )
-    assert loader.manifest_drift(fx) == ["dims/dim_user.csv: changed"]
+    assert landing.manifest_drift(fx) == ["dims/dim_user.csv: changed"]
     assert cli.load("tiny") == 1
 
 
@@ -360,10 +367,10 @@ def test_conflicting_duplicate_is_refused_at_landing(
     b = dict(a, event_properties={"x": 1}, event_type="app_opened")
     same = dict(a)  # an exact copy is fine
     _mini_fixture(tmp_path, {"events_2026-01-05.jsonl": [a, b, same]})
-    monkeypatch.setattr(loader, "ROOT", tmp_path)
-    monkeypatch.setattr(loader, "DATA", tmp_path / "data")
-    with pytest.raises(loader.ConflictingDuplicates, match="e-1"):
-        loader.load("mini", tmp_path / "m.duckdb")
+    monkeypatch.setattr(landing, "ROOT", tmp_path)
+    monkeypatch.setattr(landing, "DATA", tmp_path / "data")
+    with pytest.raises(landing.ConflictingDuplicates, match="e-1"):
+        landing.load("mini", tmp_path / "m.duckdb")
     con = duckdb.connect(str(tmp_path / "m.duckdb"))
     tables = {
         r[0]
@@ -376,11 +383,11 @@ def test_conflicting_duplicate_is_refused_at_landing(
     assert cli.load("mini") == 1
     assert "load CONFLICT" in capsys.readouterr().out
     # make dbt-build reaches the same refusal and never starts dbt
-    assert cli.dbt_build("mini", "duckdb") == 1
+    assert pipeline_cli.dbt_build("mini", "duckdb") == 1
     assert "dbt-build" not in capsys.readouterr().out
     _mini_fixture(tmp_path / "ok", {"events_2026-01-05.jsonl": [a, same]})
-    monkeypatch.setattr(loader, "ROOT", tmp_path / "ok")
-    assert loader.load("mini", tmp_path / "ok.duckdb") == (1, 2, 1)
+    monkeypatch.setattr(landing, "ROOT", tmp_path / "ok")
+    assert landing.load("mini", tmp_path / "ok.duckdb") == (1, 2, 1)
 
 
 def test_distinct_insert_ids_sharing_all_clocks_are_not_a_conflict(
@@ -392,11 +399,11 @@ def test_distinct_insert_ids_sharing_all_clocks_are_not_a_conflict(
     a = _event("e-1", "2026-01-05 08:01:00.000000")
     b = dict(_event("e-2", "2026-01-05 08:01:00.000000"), event_properties={"x": 1})
     _mini_fixture(tmp_path, {"events_2026-01-05.jsonl": [a, b]})
-    monkeypatch.setattr(loader, "ROOT", tmp_path)
-    monkeypatch.setattr(loader, "DATA", tmp_path / "data")
-    assert loader.load("mini", tmp_path / "m.duckdb") == (1, 2, 1)
+    monkeypatch.setattr(landing, "ROOT", tmp_path)
+    monkeypatch.setattr(landing, "DATA", tmp_path / "data")
+    assert landing.load("mini", tmp_path / "m.duckdb") == (1, 2, 1)
     con = duckdb.connect(str(tmp_path / "m.duckdb"))
-    assert loader.conflicting_duplicates(con) == []
+    assert landing.conflicting_duplicates(con) == []
     con.close()
 
 
@@ -406,7 +413,7 @@ def test_profile_and_target_are_validated() -> None:
             cli.load(bad)
         assert e.value.code == 2
         with pytest.raises(SystemExit) as e:
-            cli.dbt_build("tiny", bad or "../x", "yes", "command line")
+            pipeline_cli.dbt_build("tiny", bad or "../x", "yes", "command line")
         assert e.value.code == 2
     with pytest.raises(SystemExit) as e:
         cli.load("nosuchprofile")
@@ -416,7 +423,7 @@ def test_profile_and_target_are_validated() -> None:
 def test_drop_db_removes_only_the_named_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(loader, "DATA", tmp_path)
+    monkeypatch.setattr(landing, "DATA", tmp_path)
     (tmp_path / "tiny.duckdb").write_bytes(b"x")
     (tmp_path / "other.duckdb").write_bytes(b"y")
     for confirm, origin in (

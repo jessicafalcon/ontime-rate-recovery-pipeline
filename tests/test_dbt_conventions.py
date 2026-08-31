@@ -292,7 +292,7 @@ def test_telemetry_is_off() -> None:
     """No services, no network: dbt's usage tracking is disabled in the
     project, and the two in-process entry points set DO_NOT_TRACK first."""
     assert "send_anonymous_usage_stats: false" in (DBT / "dbt_project.yml").read_text()
-    for rel in ("loader/cli.py", "tests/test_staging.py"):
+    for rel in ("pipeline/cli.py", "tests/test_staging.py"):
         text = (ROOT / rel).read_text()
         assert text.index("DO_NOT_TRACK") < text.index("from dbt.cli.main import"), rel
 
