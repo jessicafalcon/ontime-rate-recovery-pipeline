@@ -78,11 +78,11 @@ def confirmed(confirm: str, origin: str) -> bool:
     """THE rule: a `yes` with command-line origin (`$(origin <VAR>)`). ONE
     predicate for every gate in the pipeline CLIs — CONFIRM on the tf-*
     targets, loader.cli's cloud commands and drop-db, the integration
-    fixtures' carried gate, and ALLOW_DESTROY on tf-apply (round 2 #7, round
-    3 #4, round 4) — so none can drift from it. `make freeze` (generator/cli.py)
-    keeps its own literal: the generator does not import the pipeline. It lives
-    beside the cloud-env policy because loader.cli imports from here (the
-    reverse would cycle)."""
+    fixtures' carried gate, ALLOW_DESTROY on tf-apply and FULL on dbt-build
+    (round 2 #7, round 3 #4, rounds 4–5) — so none can drift from it. `make
+    freeze` (generator/cli.py) keeps its own literal: the generator does not
+    import the pipeline. It lives beside the cloud-env policy because
+    loader.cli imports from here (the reverse would cycle)."""
     return origin == "command line" and confirm == "yes"
 
 

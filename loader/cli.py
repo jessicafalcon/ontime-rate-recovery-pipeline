@@ -196,8 +196,9 @@ def full_refresh_args(full: str, origin: str) -> list[str]:
     """['--full-refresh'] only when FULL=yes comes from the command line — a
     rebuild-from-scratch of the incremental tables (Phase 7). An env FULL is
     ignored (the $(origin) gate), so a stray one leaves a normal incremental
-    build, visible in the console."""
-    if full == "yes" and origin == "command line":
+    build, visible in the console. The origin rule is `infra.cli.confirmed`
+    (round 5 O5: one predicate, no inlined copy)."""
+    if confirmed(full, origin):
         return ["--full-refresh"]
     return []
 
