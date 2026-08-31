@@ -48,7 +48,8 @@ When invoked:
   version or timestamp is a correctness finding.
 - **Boundary contract (CLAUDE.md Engineering contracts).** A guard over an
   input the repo does not own — a vendor's JSON, the cloud-env domain
-  (`infra.cli.in_cloud_namespace`, closed by the vendor-declaration-and-scan test), a
+  (`infra.cli.in_cloud_namespace`, an enumerated closed set — prefixes, suffix,
+  names, the redirection class — the vendor scan a coverage aid), a
   library's result type, a CLI's output —
   must be an allowlist over a closed set or a strict parse to a declared
   shape, with a test pinning the set EXACTLY. A regex of bad names, a

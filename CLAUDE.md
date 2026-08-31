@@ -995,8 +995,22 @@ non-security rows were fixed in the same batch: B2 (the vacuous
 `_typed_cells` for both reads), B12 (conftest calls `env_tf_vars()`), B13 (the
 scrub control arm asserts the probe's own failure), plus the record/wording
 rows. Amendment Q was committed alone; one correctness finding per commit.
-NEXT: the coherence-auditor exit pass, then verdicts and the PR.
-Open BACKLOG rows: **13** (Phase 10 struck: the write-back read-seam row and
+**Scoped re-review of the Q diff ran (four agents): functionality-tester
+WORKS (round-6 SURVIVED mutation now KILLED), code-reviewer 2 should-fix + 1
+suggestion, security-reviewer 1 should-fix + 2 notes, coherence-auditor 2
+drift + 1 note.** Dispositioned (developer's call, "backlog and push"):
+`grpc_proxy` added (the one concrete redirect on the Spanner path), the
+overclaim wording corrected, the two stale security docs fixed
+(DEPLOYMENT/code-reviewer); the systematic close (proxy → casefold-`_proxy`
+predicate, exact `==` membership pins, in-process entry-point test),
+`APPDATA`/Windows, and the PHASES-narrative trail are three BACKLOG rows.
+Gate green (575, ruff, check-docs; mutate 14/14 unaffected). NEXT: push +
+PR (developer merges).
+Open BACKLOG rows: **16** (the security re-review of P opened three: the
+cloud-env redirection gate's residual — proxy-spelling/exact-pin/entry-point
+test, `grpc_proxy` closed now — the `APPDATA`/Windows classification, and the
+`docs/PHASES.md` Delivered-narrative trail. Phase 10 struck: the write-back
+read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /
 a dim change mid-schedule / two live versions), the `loader/`→`landing/`

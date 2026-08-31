@@ -478,7 +478,19 @@ annotated **Superseded by …** in place and never deleted.
   commands refuse until it is unset; a proxied path to GCP is a deliberate
   one-line widening (drop the name from `REDIRECTION_NAMES` + a DECISIONS
   entry), not a default — P2's stance for the terraform child, now on every
-  path.
+  path. **Scoped re-review residual (accepted, BACKLOG):** the proxy sub-class
+  is enumerated by spelling, which is open-world — `grpc_proxy` (grpc's own, on
+  the Spanner path) is added so that concrete redirect is closed now, but
+  mixed-case `<scheme>_proxy` variants `requests` honors still pass, and
+  `REDIRECTION_NAMES`/`CLOUD_ENV_NAMES` carry no exact `==` membership pin.
+  Deferred (one BACKLOG row): upgrade the proxy half to the
+  casefold-`_proxy` predicate the libraries themselves use, add the membership
+  pins, and add an in-process-entry-point refusal test. Accepted because the
+  gate REFUSES (does not scrub — the standard's stance) and the residual is
+  exotic proxy spellings on a local operator env, not a remote path. Also
+  recorded: `APPDATA` is refused as an identity name though P4 accepts its
+  siblings `CLOUDSDK_CONFIG`/`HOME` — inert on the macOS-only runbook, a
+  BACKLOG row if a Windows runbook is ever supported.
 - **Scaling bounds the Spanner paths carry (round 2 #20).** (1) The dims
   landing is one `insert_or_update` batch of the whole seed (tiny: 22 rows;
   Spanner's per-commit cap is 80,000 mutation cells — a profile past it
