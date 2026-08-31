@@ -929,7 +929,6 @@ def _streamed(fields: list[tuple[str, str]], rows: list[list[str]]) -> object:
         TypeCode,
     )
     from google.cloud.spanner_v1.streamed import StreamedResultSet
-    from google.protobuf import struct_pb2
 
     md = ResultSetMetadata(
         row_type=StructType(
@@ -941,7 +940,8 @@ def _streamed(fields: list[tuple[str, str]], rows: list[list[str]]) -> object:
     )
     first = PartialResultSet(metadata=md)
     for row in rows:
-        first.values.extend(struct_pb2.Value(string_value=v) for v in row)
+        for v in row:  # the proto's own repeated field — no protobuf import of ours
+            PartialResultSet.pb(first).values.add(string_value=v)
     return StreamedResultSet(iter([first]))
 
 
