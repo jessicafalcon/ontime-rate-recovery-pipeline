@@ -159,12 +159,14 @@ VAR_ITEM_RE = re.compile(
 _ITEM_SPLIT = re.compile(r",(?![^\[]*\])")
 
 
-def parse_vars(vars_: str, origin: str = "command line") -> list[str]:
+def parse_vars(vars_: str, origin: str = "") -> list[str]:
     """`VARS='k=v,k2=[50,150]'` → `['-var', 'k=v', '-var', 'k2=[50,150]']`
     (fix/tf-vars-argv). The ONLY way a toggle reaches Terraform, and only from
     the command line (`$(origin VARS)`, like CONFIRM — an exported VARS would
     toggle a typed apply with nothing in the typed line); `project_id` is
-    PROJECT's alone. Empty → no `-var` beyond project_id."""
+    PROJECT's alone. Empty → no `-var` beyond project_id. `origin` defaults to
+    the REFUSING `""` (round 6 #4): a caller with a non-empty VARS must state
+    the origin, like `confirmed`; only `main()` (from `$(origin VARS)`) does."""
     if not vars_:
         return []
     if origin != "command line":
@@ -534,7 +536,7 @@ def tf(
     origin: str = "",
     runner: Runner = subprocess.run,
     vars_: str = "",
-    vars_origin: str = "command line",
+    vars_origin: str = "",
     allow_destroy: str = "",
     allow_destroy_origin: str = "",
 ) -> int:
