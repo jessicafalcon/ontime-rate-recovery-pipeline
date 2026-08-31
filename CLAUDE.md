@@ -853,9 +853,15 @@ DuckDB write-back is one transaction; single-writer pinned), I (the read
 maps by name), J (the landing refuses instead of coercing); `region`
 validated in every module; the metrics pin over the tracked tree;
 `carried_gate` through `loader.cli.confirmed`; records de-contradicted.
-**E and F are unverified live** — NEXT: an ask-first `enable_spanner=true`
-re-apply (proves the custom role and the plan-first apply; `test-int-spanner`
-under the narrower role) + its `ALLOW_DESTROY=yes` teardown, then round 3
+**E and F verified live 2026-08-31:** an apply omitting the applied
+`operator_principal` was refused (`tf-apply: refused — the plan destroys
+module.iam…operator_token_creator[0]`, exit 2, nothing changed); the
+re-apply with both toggles `9 added`, re-plan `No changes`, the live role =
+the module's 11 permissions; as the SA under it `spanner-load OK … 22 dim
+rows`, `test-int-spanner` **`4 passed in 239.42s`**, `writeback OK … 0
+written`; the `ALLOW_DESTROY=yes` toggle-flip `9 destroyed` (02:48 UTC),
+`Listed 0 items.`, state 21, default plan `No changes` (the custom role's
+undelete window runs to 2026-09-07). Nothing billable is up. NEXT: round 3
 (scoped) and the coherence-auditor exit pass, then the PR.
 Open BACKLOG rows: **12** (Phase 10 struck: the write-back read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`

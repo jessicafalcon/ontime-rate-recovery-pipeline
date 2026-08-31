@@ -292,7 +292,13 @@ to the same working session as the apply.
    now REFUSES any plan that destroys something unless `ALLOW_DESTROY=yes`
    is on the command line (it prints the addresses; Amendment F), so the
    mistake stops before the cloud. `make tf-plan PROJECT=<id>
-   VARS='enable_spanner=true'` first is still the habit.
+   VARS='enable_spanner=true'` first is still the habit. **Live
+   2026-08-31:** an apply whose `VARS` carried `enable_spanner=true` but
+   omitted the applied `operator_principal` planned `9 to add, 0 to change,
+   1 to destroy` and stopped — `tf-apply: refused — the plan destroys
+   module.iam.google_service_account_iam_member.operator_token_creator[0]
+   …`, exit 2, nothing created, state unchanged (Amendment F's live proof;
+   carry EVERY applied toggle in `VARS`).
 2. **Land the dims** (as the SA):
    `make spanner-load PROFILE=tiny PROJECT=<id> CONFIRM=yes`.
 3. **Prove it**: `make test-int-spanner PROJECT=<id> CONFIRM=yes` — the
@@ -304,7 +310,12 @@ to the same working session as the apply.
    PROFILE's build). `PROFILE` is `tiny` only (a CLI refusal otherwise).
    **Live 2026-08-30:** `spanner-load OK: tiny — 22 dim rows`; `4 passed
    in 221.01s`; `writeback OK: ontime-rate-recovery.ontime → spanner, 20
-   users, 0 written`.
+   users, 0 written`. **Live 2026-08-31, under the custom role
+   `ontimeSpannerDataUser` (Amendment E; the live role's permission set is
+   the module's 11, no `updateDdl`; the database's one binding):**
+   `spanner-load OK: tiny — 22 dim rows`; `4 passed in 239.42s`;
+   `writeback OK: ontime-rate-recovery.ontime → spanner, 20 users, 0
+   written`.
 4. **Tear down the same day** — the SCOPED destroy is the toggle flipped
    back: `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=false'
    ALLOW_DESTROY=yes` (count → 0 destroys exactly the module's resources —
@@ -328,3 +339,14 @@ Dated lines (fill on apply day — the BACKLOG trial row's trigger):
   keeps the 21 free-tier entries (two datasets, bucket, SA + grants, budget,
   API enablements). **Nothing billable is up.** The two Spanner-side API
   enablements stay on (free, like the root set).
+- Second apply (Amendments E–F's live proof): **2026-08-31** (02:30 UTC,
+  operator ADC, no detour — the SA was in state): `Plan: 9 to add, 0 to
+  change, 0 to destroy` → `Apply complete! Resources: 9 added, 0 changed,
+  0 destroyed`; toggled re-plan `No changes`. Instance type `PROVISIONED`
+  (100 PU, `regional-us-central1`).
+- Second teardown (`enable_spanner=false … ALLOW_DESTROY=yes`):
+  **2026-08-31** (02:48 UTC): `Plan: 0 to add, 0 to change, 9 to destroy`
+  (the module's 8 + the custom role) → `Apply complete! Resources: 0 added,
+  0 changed, 9 destroyed`; `Listed 0 items.`; state 21; default plan `No
+  changes`. The custom role is soft-deleted — its undelete + import detour
+  (step 1) applies to any re-apply before **2026-09-07**.

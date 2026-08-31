@@ -420,9 +420,11 @@ resolved the source to the view, three goldens byte-identical, write-back
 idempotent with the DuckDB hash), `writeback OK: ontime-rate-recovery.ontime
 → spanner, 20 users, 0 written`, then the same-day toggle-flip teardown
 (`8 destroyed`, `Listed 0 items.`, default plan `No changes`); the trial
-clock runs to 2026-11-28 (DEPLOYMENT). Amendments E and F are unverified
-live at the round-2 head — the next `enable_spanner=true` apply is their
-proof.
+clock runs to 2026-11-28 (DEPLOYMENT). Amendments E and F verified live
+2026-08-31: an apply omitting an applied toggle refused with the address
+printed (F); the re-apply created the custom role with the module's exact
+permission set and `test-int-spanner` passed `4 passed` under it (E); the
+`ALLOW_DESTROY=yes` toggle-flip destroyed exactly the module's 9.
 
 ---
 

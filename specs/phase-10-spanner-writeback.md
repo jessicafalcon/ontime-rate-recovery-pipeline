@@ -227,13 +227,29 @@ Done-when 1, 4 and 5 ran after the ask-first apply:
   default, operator grant kept): `No changes. Your infrastructure matches the
   configuration.` — zero Spanner resources (Done-when 5's first clause,
   round 2 #21). **Done-when 1–6 are met, live and offline** at that HEAD.
-- **Unverified live at THIS head (review round 2, Amendments E–F):** the
-  custom data-plane role (`ontimeSpannerDataUser`) replacing
-  `databaseUser`, and the plan-first `tf-apply` with `ALLOW_DESTROY`. The
-  offline pins are green; the next ask-first `enable_spanner=true` apply
-  (permissions valid? the custom role applies? `test-int-spanner` still
-  `4 passed` under the narrower role?) and its `ALLOW_DESTROY=yes` teardown
-  are the live proof, recorded here on that day.
+- **Amendments E–F verified live (2026-08-31, `ontime-rate-recovery`):**
+  - F first, by accident: `make tf-apply … CONFIRM=yes
+    VARS='enable_spanner=true'` (the applied `operator_principal` omitted)
+    planned `9 to add, 0 to change, 1 to destroy` and was refused — `tf-apply:
+    refused — the plan destroys
+    module.iam.google_service_account_iam_member.operator_token_creator[0]; …
+    the VARS you passed omit a toggle that is currently applied`, exit 2,
+    `Listed 0 items.`, state 21 — the omitted-toggle scenario the amendment
+    was written for.
+  - E: the apply carrying both toggles (02:30 UTC, operator ADC, no detour):
+    `Plan: 9 to add, 0 to change, 0 to destroy` → `Apply complete! 9 added`;
+    re-plan `No changes`; `gcloud iam roles describe ontimeSpannerDataUser`
+    = the module's 11 permissions exactly (GA, no `updateDdl`); the database's
+    IAM policy holds that one binding → the pipeline SA. As the SA under it:
+    `spanner-load OK: tiny — 22 dim rows`; `make test-int-spanner …` →
+    **`4 passed in 239.42s`**; `writeback OK: ontime-rate-recovery.ontime →
+    spanner, 20 users, 0 written`.
+  - Teardown (02:48 UTC, operator ADC): `make tf-apply … CONFIRM=yes
+    VARS='enable_spanner=false,operator_principal=…' ALLOW_DESTROY=yes` →
+    `Plan: 0 to add, 0 to change, 9 to destroy` (the module's 8 + the custom
+    role) → `Apply complete! 0 added, 0 changed, 9 destroyed`; `Listed 0
+    items.`; state 21; default plan `No changes`. The role's 7-day undelete
+    window runs to 2026-09-07 (DEPLOYMENT step 1).
 
 ## Invariants (REQUIRED)
 
@@ -528,8 +544,9 @@ user who controls the environment (the threat model's standing carve-out).
   anywhere, the role only in the module). Rejected: recording the residual
   (the review asked for the tightening); Spanner fine-grained access
   control (database roles + `databaseRoleUser` — a second access model the
-  clients would have to name on every call). **Unverified live at this
-  head** (spec Live status).
+  clients would have to name on every call). **Verified live 2026-08-31**
+  (spec Live status: the live permission set is the module's, `4 passed`
+  under it).
 - **F — `tf-apply` plans first, applies the SAVED plan, and refuses a plan
   that destroys anything unless `ALLOW_DESTROY=yes` has command-line origin
   (finding 3; a new argv surface).** Restores **invariant 5**'s operational
@@ -549,7 +566,9 @@ user who controls the environment (the threat model's standing carve-out).
   `tests/test_makefile.py::test_tf_apply_allow_destroy_from_command_line_only`.
   Rejected: `prevent_destroy` (blocks the sanctioned toggle-flip too);
   inferring intent from the VARS content (a heuristic on the toggle names).
-  **Unverified live at this head.**
+  **Verified live 2026-08-31** (spec Live status: the omitted-toggle apply
+  refused with the address printed; the `ALLOW_DESTROY=yes` toggle-flip
+  destroyed exactly the module's 9).
 - **G — a credential-bearing environment variable refuses EVERY cloud
   command, loudly, before any client or child (finding 2).** Restores
   **invariant 6** for the identity, not just the confirmation: the google
