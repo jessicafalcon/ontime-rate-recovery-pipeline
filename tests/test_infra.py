@@ -1352,6 +1352,12 @@ def test_cli_child_env_is_an_allowlist(
         "TF_LOG": "TRACE",
         "TF_LOG_PATH": "/tmp/l",
         "HOME": "/tmp/h",
+        # P2 (round 6 #3): the proxy/trust-anchor trio is out of ENV_ALLOW —
+        # NO_PROXY and HTTPS_PROXY are outside the refused domain (nothing
+        # google-namespace reads them), so they pass the gate yet must not
+        # reach the child; SSL_CERT_FILE is refused by the gate itself (P1)
+        "NO_PROXY": "*",
+        "HTTPS_PROXY": "http://mitm.example:3128",
     }.items():
         monkeypatch.setenv(k, v)
     fake = _FakeRunner()
@@ -1360,6 +1366,8 @@ def test_cli_child_env_is_an_allowlist(
     assert set(env) <= set(cli.ENV_ALLOW)
     assert env["HOME"] == "/tmp/h" and "PATH" in env
     assert not any(k.startswith(("GOOGLE_", "TF_")) for k in env)
+    assert "NO_PROXY" not in env and "HTTPS_PROXY" not in env
+    assert "SSL_CERT_FILE" not in cli.ENV_ALLOW
     # Amendment N2: a vendor name the child may see is one the gate admits
     vendor = {k for k in cli.ENV_ALLOW if k.startswith(cli.CLOUD_ENV_PREFIXES)}
     assert vendor and vendor <= cli.CLOUD_ENV_ALLOW

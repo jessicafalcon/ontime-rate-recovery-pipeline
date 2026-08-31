@@ -270,9 +270,14 @@ CLOUD_ENV_ALLOW = frozenset(
 # What the terraform child may see (fix/tf-vars-argv): the argv is the whole
 # input BY CONSTRUCTION — no TF_VAR_*, TF_CLI_ARGS*, credential variable,
 # TF_WORKSPACE, TF_DATA_DIR or TF_LOG* can reach it. Auth is the ADC file in
-# CLOUDSDK_CONFIG / HOME; the rest is process hygiene. A vendor name here
-# must also be in CLOUD_ENV_ALLOW (pinned): the child never sees a name the
-# gate refuses.
+# CLOUDSDK_CONFIG / HOME; the rest is process hygiene. A name here must not
+# be one the gate refuses (pinned through in_cloud_namespace): the child
+# never sees a refused name. P2 (round 6 #3) dropped SSL_CERT_FILE /
+# NO_PROXY / HTTPS_PROXY — an operator-suppliable proxy endpoint plus
+# trust-anchor override on every Google API call the provider makes is the
+# endpoint-redirection class the Credential standard names a secret; the
+# runbook's network is direct, and a proxied one is a deliberate widening
+# (one line + a DECISIONS entry), not a default.
 ENV_ALLOW = (
     "PATH",
     "HOME",
@@ -281,9 +286,6 @@ ENV_ALLOW = (
     "LC_ALL",
     "CLOUDSDK_CONFIG",
     "CLOUDSDK_CORE_PROJECT",
-    "SSL_CERT_FILE",
-    "NO_PROXY",
-    "HTTPS_PROXY",
 )
 ENV_REFUSE_PREFIXES = ("TF_VAR_", "TF_CLI_ARGS")
 
