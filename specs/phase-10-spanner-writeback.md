@@ -198,10 +198,10 @@ make test && make lint && make review-gate SPEC=specs/phase-10-spanner-writeback
 |---|---|
 | 1 | `tests/test_writeback.py::test_spanner_writeback_second_run_writes_zero`, `…::test_spanner_guard_and_write_are_one_retried_transaction` (fakes that EXECUTE the SQL on in-process DuckDB; Amendment A); live: `make test-int-spanner …` output `writeback OK: <project>.ontime → spanner, 20 users, 0 written` on run 2 + equal row hash |
 | 2 | `tests/test_writeback.py::test_version_orders_numerically_v10_beats_v2`, `…::test_malformed_version_refuses`, `…::test_malformed_version_refuses_on_the_insert_path_too` (Amendment B), `…::test_duckdb_writeback_is_one_transaction` + `…::test_duckdb_target_is_single_writer` (Amendment H — the DuckDB half of "across runs"), `…::test_duckdb_writeback_rolls_back_before_close` (round 3 #5 — the explicit rollback on the still-open connection), `…::test_spanner_rows_come_from_the_library_by_name` (Amendment N3 — the REAL Spanner read path, offline, into the guard); mutation lines 1–2, 9 |
-| 3 | `tests/test_writeback.py::test_reader_relations_per_target`, `…::test_writeback_reads_only_scores_and_dim_current` (the two read statements), `…::test_fakes_execute_the_read_contract`, `…::test_columns_are_the_golden_nine_and_row_of_maps_by_name` (ONE column tuple, values by name), `…::test_candidates_are_read_by_column_name` (Amendment I — the read by name too), `…::test_existing_pairs_are_read_by_column_name` (round 3 #3 — the stored pair by name; a non-str cell refuses, N3), `…::test_spanner_rows_come_from_the_library_by_name` (N3 — `to_dict_list` on real `StreamedResultSet`s), `tests/test_pipeline.py` (existing `SEND_SCHEDULE_SHA256_TINY` pin unchanged), `tests/test_truth_isolation.py` |
+| 3 | `tests/test_writeback.py::test_reader_relations_per_target`, `…::test_writeback_reads_only_scores_and_dim_current` (the two read statements), `…::test_fakes_execute_the_read_contract`, `…::test_columns_are_the_golden_nine_and_row_of_maps_by_name` (ONE column tuple, values by name), `…::test_candidates_are_read_by_column_name` (Amendment I — the read by name too), `…::test_existing_pairs_are_read_by_column_name` (round 3 #3 — the stored pair by name; a non-str cell refuses, N3), `…::test_spanner_rows_come_from_the_library_by_name` (N3 — `to_dict_list` on real `StreamedResultSet`s), `…::test_bigquery_rows_come_from_the_library_by_name` (O4 — `Row.items()` on real bigquery `Row`s; `candidate_of` refuses a wrong-typed cell), `tests/test_pipeline.py` (existing `SEND_SCHEDULE_SHA256_TINY` pin unchanged), `tests/test_truth_isolation.py` |
 | 4 | `tests/integration/test_int_spanner.py::test_goldens_match_with_federated_dims`, `…::test_federated_view_rows_equal_seed`, `…::test_build_read_dims_through_the_federation_view` (dbt's manifest resolved the source to the view — the falsifier, Amendment C; live, behind `OTR_INT`); offline: `tests/test_dbt_sources.py` (identifier var + view SQL rendered with casts, hand edit fails), `tests/test_spanner_landing.py::test_dbt_build_admits_exactly_one_var_override`, `…::test_cell_refuses_instead_of_coercing` + `…::test_row_width_drift_refuses` (Amendment J — the landing refuses what the contract does not admit) |
 | 5 | `tests/test_infra.py::test_spanner_module_is_count_gated_and_default_off`, `…::test_every_declared_resource_type_is_on_the_allowlist` (the gated modules' own exact allowlists), `…::test_spanner_grants_are_scoped_to_the_one_database_and_connection`, `…::test_spanner_custom_role_is_the_exact_data_plane_set` (Amendment E), `…::test_spanner_names_pin_the_python_constants`, `…::test_input_shape_validations_exist` + `…::test_region_is_validated_wherever_it_is_declared` (`region`, root and every module) (static), live `tf-plan` outputs (default: `No changes` — no spanner resource; toggled: only the module's), the dated `docs/DEPLOYMENT.md` lines, teardown apply output |
-| 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `…::test_spanner_targets_pass_variables_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter` (the whole tracked tree), `…::test_every_cloud_command_refuses_a_credential_in_the_env` (Amendment G → N2: six entry points × eleven unlisted names — illustrative; the policy is the `CLOUD_ENV_ALLOW` allowlist), `…::test_conftest_scrub_uses_the_cloud_env_policy` (N2 — the scrub is the gate's own function), `…::test_int_spanner_fixture_refuses_without_the_carried_gate` (origin re-checked through `infra.cli.confirmed`, the one predicate — round 3 #4), `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy` + `…::test_apply_refuses_unknown_actions_even_with_allow_destroy` (Amendments F → K → N1: the action allowlist, `SAFE_ACTIONS` pinned exactly), `…::test_cli_refuses_a_credential_in_the_env_loudly` (N2: unlisted names refuse, listed settings pass, the child's vendor names ⊆ the allowlist); the audited table in Threat model |
+| 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `…::test_spanner_targets_pass_variables_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter` (the whole tracked tree), `…::test_every_cloud_command_refuses_a_credential_in_the_env` (Amendments G → N2 → O1: six entry points × thirteen unlisted names — illustrative; the policy is the `CLOUD_ENV_ALLOW` allowlist over the closed domain), `…::test_conftest_scrub_uses_the_cloud_env_policy` (N2/O6 — a child pytest proves the scrub, and that the probe bites without it), `…::test_int_spanner_fixture_refuses_without_the_carried_gate` (origin re-checked through `infra.cli.confirmed`, the one predicate — round 3 #4), `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy` + `…::test_apply_refuses_unknown_actions_even_with_allow_destroy` (Amendments F → K → N1: the action allowlist, `SAFE_ACTIONS` pinned exactly), `…::test_cli_refuses_a_credential_in_the_env_loudly` (N2/O3: unlisted names refuse, the three listed settings pass, the child's vendor names ⊆ the allowlist), `…::test_cloud_env_policy_covers_every_vendor_declared_name` (O1 — the closure: every name the installed libraries declare is classified exactly once); the audited table in Threat model |
 
 **Live status (2026-08-30, `ontime-rate-recovery`; re-proven 2026-08-31 —
 02:30 UTC for Amendments E–F and 06:07 UTC for N3, those amendments carry
@@ -253,8 +253,9 @@ Done-when 1, 4 and 5 ran after the ask-first apply:
     VARS='enable_spanner=false,operator_principal=…' ALLOW_DESTROY=yes` →
     `Plan: 0 to add, 0 to change, 9 to destroy` (the module's 8 + the custom
     role) → `Apply complete! 0 added, 0 changed, 9 destroyed`; `Listed 0
-    items.`; state 21; default plan `No changes`. The role's 7-day undelete
-    window runs to 2026-09-07 (DEPLOYMENT step 1).
+    items.`; state 21; default plan `No changes`. The role is soft-deleted
+    for 7 days; the third apply re-created it with no detour (the provider
+    undeletes on create).
 
 ## Invariants (REQUIRED)
 
@@ -273,7 +274,9 @@ serving/writeback.py::version_key           constant-return:(0,)
 serving/spanner.py::apply_writeback         delete-call
 loader/spanner.py::load_dims                constant-return:0
 loader/cli.py::dbt_vars_args                constant-return:[]
+infra/cli.py::planned_changes               constant-return:[]
 infra/cli.py::unsafe_changes                constant-return:[]
+infra/cli.py::unlisted_cloud_env            constant-return:[]
 infra/cli.py::refuse_cloud_env              delete-call
 infra/cli.py::confirmed                     constant-return:True
 serving/writeback.py::existing_of           invert-guard
@@ -368,6 +371,12 @@ per the TEMPLATE's SQL rule.)
 - [ ] `docs/DEPLOYMENT.md` — Spanner apply/teardown runbook; the dated apply/teardown
       lines (apply day); MODULE wording corrected
 - [ ] README — none (no README is tracked; `check-docs` reads one only if present)
+- [ ] `PROJECT_BRIEF.md` — Amendment M annotations only (a log: annotated,
+      never rewritten)
+- [ ] `.claude/agents/code-reviewer.md`, `.claude/agents/security-reviewer.md`,
+      `.claude/agents/functionality-tester.md`, `.claude/commands/review-round.md`
+      — the round-4 process rules (Boundary / Credential / Adapter contracts,
+      the cap's disposition)
 - [ ] docs/RESULTS.md / docs/METRICS.md — none (no metric, no simulation
       change)
 
@@ -379,10 +388,10 @@ any path/client):
 
 | Target | empty | `../x` | `"; ` | env-exported | `$(origin)` on CONFIRM | Pinned by |
 |---|---|---|---|---|---|---|
-| `make writeback TARGET=spanner PROJECT=<id> CONFIRM=yes` | empty TARGET → `duckdb` (today's behaviour); empty PROJECT with TARGET=spanner → refusal before any client; empty PROFILE is allowed on the Spanner target only (the read is the warehouse's) | PROFILE/TARGET validated `[a-z0-9_]+`, PROJECT by GCP shape — `../x` refused, no path derived from user input | reaches Python as one literal, fails validation (pinned on TARGET and PROJECT — round 2 #15) | TARGET/PROJECT from env reach Python (stated residual, validated the same); CONFIRM counts only command-line; any Google-namespace variable outside `CLOUD_ENV_ALLOW` in the env refuses (Amendment G → N2) | required for TARGET≠duckdb, `$(origin CONFIRM)` | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `tests/test_writeback.py::test_cloud_writeback_refuses_before_any_client`, `tests/test_spanner_landing.py::test_every_cloud_command_refuses_a_credential_in_the_env` |
+| `make writeback TARGET=spanner PROJECT=<id> CONFIRM=yes` | empty TARGET → `duckdb` (today's behaviour); empty PROJECT with TARGET=spanner → refusal before any client; empty PROFILE is allowed on the Spanner target only (the read is the warehouse's) | PROFILE/TARGET validated `[a-z0-9_]+`, PROJECT by GCP shape — `../x` refused, no path derived from user input | reaches Python as one literal, fails validation (pinned on TARGET and PROJECT — round 2 #15) | TARGET/PROJECT from env reach Python (stated residual, validated the same); CONFIRM counts only command-line; any name in the closed cloud-env domain outside `CLOUD_ENV_ALLOW` in the env refuses (Amendments G → N2 → O1) | required for TARGET≠duckdb, `$(origin CONFIRM)` | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `tests/test_writeback.py::test_cloud_writeback_refuses_before_any_client`, `tests/test_spanner_landing.py::test_every_cloud_command_refuses_a_credential_in_the_env` |
 | `make spanner-load PROFILE=<p> PROJECT=<id> CONFIRM=yes` | empty PROFILE/PROJECT → refusal | refused by shape validation | one literal, fails validation | same residual; CONFIRM command-line only | `$(origin CONFIRM)` | `tests/test_makefile.py::test_spanner_targets_pass_variables_as_one_literal` |
 | `make test-int-spanner PROJECT=<id> CONFIRM=yes [PROFILE=tiny]` | empty → refusal before `OTR_INT` export | refused | one literal | same residual; CONFIRM command-line only | `$(origin CONFIRM)` | same test; gating mirrors `test-int-bigquery` (CONFIRM first, then env) |
-| `make tf-apply … VARS='enable_spanner=…' [ALLOW_DESTROY=yes]` | existing target; Amendment F: it plans FIRST and applies the saved plan, and a plan that destroys anything is refused unless `ALLOW_DESTROY=yes` — so an apply that omits a currently-applied toggle cannot tear Spanner down (round 1 #12 → round 2 #3); a plan that cannot be read back — envelope or entry — or one carrying an action outside `SAFE_ACTIONS ∪ {delete}` (`forget`, a future verb) is refused ALWAYS (K → N1); empty ALLOW_DESTROY → refusal on destroys only | n/a (VARS items validated `name=value`; ALLOW_DESTROY takes the literal `yes` only) | refused by VARS item validation; ALLOW_DESTROY compared as a literal | env-origin VARS refused (`$(origin VARS)`); env-origin ALLOW_DESTROY reads `environment` and is refused (`$(origin ALLOW_DESTROY)`); `TF_VAR_*` refuses every `tf-*`; any `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` name outside `CLOUD_ENV_ALLOW` refuses every `tf-*` (Amendment G → N2) | `$(origin CONFIRM)` | `tests/test_makefile.py::test_tf_targets_pass_vars_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy`, `…::test_cli_refuses_a_credential_in_the_env_loudly` |
+| `make tf-apply … VARS='enable_spanner=…' [ALLOW_DESTROY=yes]` | existing target; Amendment F: it plans FIRST and applies the saved plan, and a plan that destroys anything is refused unless `ALLOW_DESTROY=yes` — so an apply that omits a currently-applied toggle cannot tear Spanner down (round 1 #12 → round 2 #3); a plan that cannot be read back — envelope or entry — or one carrying an action outside `SAFE_ACTIONS ∪ {delete}` (`forget`, a future verb) is refused ALWAYS (K → N1); empty ALLOW_DESTROY → refusal on destroys only | n/a (VARS items validated `name=value`; ALLOW_DESTROY takes the literal `yes` only) | refused by VARS item validation; ALLOW_DESTROY compared as a literal | env-origin VARS refused (`$(origin VARS)`); env-origin ALLOW_DESTROY reads `environment` and is refused (`$(origin ALLOW_DESTROY)`); `TF_VAR_*` refuses every `tf-*`; any name in the closed cloud-env domain outside `CLOUD_ENV_ALLOW` refuses every `tf-*` (Amendments G → N2 → O1) | `$(origin CONFIRM)` | `tests/test_makefile.py::test_tf_targets_pass_vars_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy`, `…::test_cli_refuses_a_credential_in_the_env_loudly` |
 
 Cloud cost twice / destroys: `writeback TARGET=spanner` twice is the
 idempotence proof (writes 0; cents of reads); `spanner-load` twice
@@ -554,7 +563,7 @@ user who controls the environment (the threat model's standing carve-out).
   clients would have to name on every call). **Verified live 2026-08-31**
   (spec Live status: the live permission set is the module's, `4 passed`
   under it).
-- **F — `tf-apply` plans first, applies the SAVED plan, and refuses a plan
+- *(Mechanism superseded by Amendment N1, round 4, and O2, round 5 — the gate is an action allowlist; the plan-first shape stands.)* **F — `tf-apply` plans first, applies the SAVED plan, and refuses a plan
   that destroys anything unless `ALLOW_DESTROY=yes` has command-line origin
   (finding 3; a new argv surface).** Restores **invariant 5**'s operational
   half (a default-toggle apply creates — and now DESTROYS — nothing Spanner)
@@ -576,7 +585,7 @@ user who controls the environment (the threat model's standing carve-out).
   **Verified live 2026-08-31** (spec Live status: the omitted-toggle apply
   refused with the address printed; the `ALLOW_DESTROY=yes` toggle-flip
   destroyed exactly the module's 9).
-- **G — a credential-bearing environment variable refuses EVERY cloud
+- *(Mechanism superseded by Amendment N2, round 4, and O1, round 5 — the domain is allowlisted and closed by the vendors' declarations; the rule stands.)* **G — a credential-bearing environment variable refuses EVERY cloud
   command, loudly, before any client or child (finding 2).** Restores
   **invariant 6** for the identity, not just the confirmation: the google
   clients honour `GOOGLE_APPLICATION_CREDENTIALS`/`GOOGLE_CREDENTIALS`/
@@ -638,7 +647,7 @@ user who controls the environment (the threat model's standing carve-out).
 
 ## Amendments (review round 3, 2026-08-31)
 
-- **K — `planned_deletes` fails CLOSED (findings 1 — code-reviewer #1,
+- *(Superseded by Amendment N1, round 4.)* **K — `planned_deletes` fails CLOSED (findings 1 — code-reviewer #1,
   security-reviewer #2).** Restores **invariant 6** for the plan-first
   apply: the `ALLOW_DESTROY` gate must run on EVIDENCE of no deletes, never
   on the absence of a readable plan. Amendment F parsed `show -json` with
@@ -655,7 +664,7 @@ user who controls the environment (the threat model's standing carve-out).
   []` pin is inverted). Rejected: a `try/except` that falls back to
   requiring `ALLOW_DESTROY` on an unreadable plan (a gate that fires for the
   wrong reason teaches the operator to pass the flag).
-- **L — the keyfile-env policy covers the whole google-auth family
+- *(Superseded by Amendment N2, round 4, and O1, round 5.)* **L — the keyfile-env policy covers the whole google-auth family
   (finding 2 — code-reviewer #2, security-reviewer #1).** Restores
   **invariant 6** (the identity half, Amendment G): `KEYFILE_ENV_RE` matched
   `GOOGLE_*CREDENTIALS*` and two tokens, so `GOOGLE_CLOUD_KEYFILE_JSON`,

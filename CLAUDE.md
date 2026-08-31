@@ -137,10 +137,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   Spanner is up is REFUSED by the plan-first apply (DEPLOYMENT).
   `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`/`tf-freeze` on
   `CONFIRM=yes $(origin)`; toggles only as a command-line `VARS` → argv
-  `-var`, refuses `TF_VAR_*`/`TF_CLI_ARGS*`, auto-loaded tfvars and any
-  `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` variable outside `CLOUD_ENV_ALLOW` (the
-  one allowlist every cloud command shares — Amendment N2; the plan-first
-  apply's action allowlist `SAFE_ACTIONS` is N1), runs terraform under an
+  `-var`, refuses `TF_VAR_*`/`TF_CLI_ARGS*`, auto-loaded tfvars and
+  any name in the cloud-env domain (O1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration test) outside `CLOUD_ENV_ALLOW` (the
+  one allowlist every cloud command shares — Amendments N2/O1; the plan-first
+  apply's action allowlist `SAFE_ACTIONS` is N1/O2), runs terraform under an
   env allowlist —
   `fix/tf-vars-argv`) drives
   `make tf-validate|tf-plan|tf-apply|tf-destroy|tf-freeze`.
@@ -377,9 +377,9 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   currently-applied toggle stops with the addresses printed), and a plan it
   cannot read back or one carrying any other verb (`forget`, a future one)
   is refused ALWAYS; the saved plan is what gets applied — no
-  `-auto-approve` on apply. Any `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` variable
-  outside `CLOUD_ENV_ALLOW` in the environment refuses every project-taking
-  `tf-*` (and every other cloud command) loudly, names only (N2). Apply
+  `-auto-approve` on apply; an entry with no action refuses too (O2). In the
+  environment, any name in the cloud-env domain (O1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration test) outside `CLOUD_ENV_ALLOW` refuses every project-taking
+  `tf-*` (and every other cloud command) loudly, names only (N2/O1). Apply
   creates the free-tier layer: 9 API enablements (free, kept on by destroy),
   two BigQuery datasets, a GCS staging bucket, a least-privilege service
   account with 4 scoped grants, and budget alerts at 50/150 in the billing
@@ -564,15 +564,21 @@ DECISIONS.md or fix it.
   (the Google env namespace), `ENV_ALLOW` (the terraform child), the
   strict `planned_changes` parse. A fix that adds the case a finding names
   to an existing check is not a fix (Workflow rules, "Fix the class").
-- Credential standard (the same round): auth is ADC/WIF. A secret — key
-  file, inline key, access token, credential-file override — exists only
-  as an environment variable, never in a file, code, a log or a message
-  (refusals print NAMES, never values), and the pipeline refuses to run
-  with one present: every `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` name that is
-  not a listed SETTING in `CLOUD_ENV_ALLOW` is a credential by definition,
-  whenever it was introduced. A new vendor is its prefix + its settings +
-  a DECISIONS entry; a benign new variable refusing is the intended
-  direction (one line to admit it).
+- Credential standard (the same round; domain closed in round 5, O1): auth
+  is ADC/WIF. A secret — key file, inline key, access token, credential-file
+  override, an endpoint or metadata-host redirection — never sits in a file
+  the repo controls, in code, a log or a message (refusals print NAMES,
+  never values); the one credential at rest is gcloud's own ADC file under
+  `CLOUDSDK_CONFIG`/`HOME`, outside the repo. If one reaches the pipeline's
+  ENVIRONMENT the pipeline refuses to run: every name in the cloud-env
+  domain (`infra.cli.in_cloud_namespace` — the vendor prefixes, the
+  `_EMULATOR_HOST` suffix, the prefix-less names the libraries read) that
+  is not a listed SETTING in `CLOUD_ENV_ALLOW` is a credential by
+  definition, whenever it was introduced, and the domain is closed by a
+  test over the installed libraries' own declarations, not by a list of
+  ours. A new vendor is its declarations classified + a DECISIONS entry; a
+  benign new variable refusing is the intended direction (one line to
+  admit it).
 - Adapter contract: a fake stands UNDER the thinnest adapter over a vendor
   type — it replaces the client, never the adapter. An adapter that is
   more than one library call is tested on the REAL type, built offline
@@ -911,8 +917,9 @@ re-apply with both toggles `9 added`, re-plan `No changes`, the live role =
 the module's 11 permissions; as the SA under it `spanner-load OK … 22 dim
 rows`, `test-int-spanner` **`4 passed in 239.42s`**, `writeback OK … 0
 written`; the `ALLOW_DESTROY=yes` toggle-flip `9 destroyed` (02:48 UTC),
-`Listed 0 items.`, state 21, default plan `No changes` (the custom role's
-undelete window runs to 2026-09-07). Nothing billable is up. **Review
+`Listed 0 items.`, state 21, default plan `No changes` (the custom role is
+soft-deleted; the provider undeletes it on re-create — no detour, proven
+06:07 the next session). Nothing billable is up. **Review
 round 3 applied (2026-08-31, 15 findings):** Amendments K (`planned_deletes` <!-- historical -->
 fails CLOSED — an unreadable `show -json` refuses, never "no deletes"), L
 (the keyfile-env policy covers the google-auth family: `*KEYFILE*`,
@@ -948,8 +955,22 @@ step 5) — re-login as the operator, toggle-flip `9 destroyed` (06:42),
 the first apply NOT torn down in the same session). Process rules from
 the round recorded (Engineering contracts: Boundary / Credential /
 Adapter; Workflow: Fix the class, Fix commits; DONE item 8; the agents).
-NEXT: round 5 scoped to `review-round-4..HEAD`, the coherence-auditor exit
-pass, then the PR.
+**Review round 5 (2026-08-31, 24 findings — the cap's scoped re-review):**
+the kind was right, the SETS were not yet closed. **Amendment O**, one fix
+per commit: O1 the cloud-env domain closed by the vendors' own declarations
+(`in_cloud_namespace`: prefixes + `_EMULATOR_HOST` + the prefix-less names;
+`AWS_*` ignored by record; `test_cloud_env_policy_covers_every_vendor_declared_name`
+imports google.auth / google.cloud / spanner / bigquery / storage constants
+and demands each is classified — `SPANNER_EMULATOR_HOST`, `GCE_METADATA_HOST`
+were passing), O2 an empty action set refuses, O3 `CLOUD_ENV_ALLOW` = three
+settings, O4 `candidate_of` refuses wrong-typed cells + the BigQuery adapter
+tested on real `Row`s, O5 `full_refresh_args` through `confirmed`, O6 the
+conftest scrub pinned behaviourally (a child pytest) and reading
+`ENV_REFUSE_PREFIXES`; `struct_pb2` import gone; records (the retired
+tfstate trigger in three places, the role detour retired, DEPLOYMENT's
+token check off the argv, F/G/K/L annotated Superseded, the Makefile
+comment). NEXT: round 6 scoped to `review-round-5..HEAD`, the
+coherence-auditor exit pass, then the PR.
 Open BACKLOG rows: **13** (Phase 10 struck: the write-back read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /
@@ -957,8 +978,9 @@ a dim change mid-schedule / two live versions), the `loader/`→`landing/`
 rename (trigger: `fix/landing-package` after Phase 10 merges, before
 Phase 11); the Spanner row retitled 2026-08-31 — `PROVISIONED`, bills
 from creation, no trial clock (Amendment M; trigger: every phase exit,
-`Listed 0 items.`); opened: the local unversioned tfstate row (round 3 #6,
-trigger: before the next `enable_spanner=true` apply).
+`Listed 0 items.`); opened: the local unversioned tfstate row (round 3 #6;
+re-deferred round 4 — trigger: the first apply NOT torn down in the same
+session, and the Phase 12 exit for its confidentiality half).
 Earlier: `fix/tf-vars-argv` struck the env-`TF_VAR_*` row; 9b struck: the two-datasets row, the DAG-landing
 row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
 (first 9b apply 2026-08-30); opened: the guard's contract residual (JSON

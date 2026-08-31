@@ -47,14 +47,16 @@ When invoked:
   `(model_version, computed_as_of)`, keyed `user_id`; a caller-supplied
   version or timestamp is a correctness finding.
 - **Boundary contract (CLAUDE.md Engineering contracts).** A guard over an
-  input the repo does not own — a vendor's JSON, the `GOOGLE_*`/`GCLOUD_*`/
-  `CLOUDSDK_*` env namespace, a library's result type, a CLI's output —
+  input the repo does not own — a vendor's JSON, the cloud-env domain
+  (`infra.cli.in_cloud_namespace`, closed by the vendor-declaration test), a
+  library's result type, a CLI's output —
   must be an allowlist over a closed set or a strict parse to a declared
   shape, with a test pinning the set EXACTLY. A regex of bad names, a
   search for one bad verb, a `.get(…, default)` on foreign JSON, a fix that
   appends the previous round's case to an existing check: correctness
   finding, and say which allowlist replaces it. A `die` that prints a
-  variable's VALUE is a security finding.
+  CREDENTIAL's value — any cloud-env name's value — is a security finding
+  (a rejected `PROJECT` or `VARS` item echoing its input is by design).
 - **Adapter contract.** A fake replaces the client, never the adapter. An
   adapter over a vendor type that is more than one library call must have a
   test on the REAL type built offline; a mapping that only the fakes

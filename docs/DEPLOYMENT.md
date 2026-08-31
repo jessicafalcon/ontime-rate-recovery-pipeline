@@ -41,7 +41,7 @@ is in Owner but not in Editor + Project IAM Admin — and one post-apply path
 | `user_project_override` (every API call is quota'd on `project_id`) | `serviceusage.services.use` on the project | `roles/serviceusage.serviceUsageConsumer` (in Owner/Editor) |
 | `data.google_billing_account` (the budget's currency) | `billing.accounts.get` on the billing account | `roles/billing.viewer` on the billing account |
 | `google_billing_budget` create/delete | `billing.budgets.create` / `.delete` on the billing account | `roles/billing.costsManager` on the billing account |
-| `google_project_iam_custom_role` (the spanner module's data-plane role, Amendment E — only on an `enable_spanner=true` apply) | `iam.roles.create` / `.update` / `.delete` on the project, plus `iam.roles.undelete` for the 7-day detour | `roles/iam.roleAdmin` on the project (NOT inside `projectIamAdmin`; before granting, check whether the operator's base role already carries them — `gcloud iam roles describe roles/editor` and look for `iam.roles.create` — and grant only if it does not) |
+| `google_project_iam_custom_role` (the spanner module's data-plane role, Amendment E — only on an `enable_spanner=true` apply) | `iam.roles.create` / `.update` / `.delete` on the project, plus `iam.roles.undelete` — the provider undeletes a soft-deleted role on re-create within its 7-day window | `roles/iam.roleAdmin` on the project (NOT inside `projectIamAdmin`; before granting, check whether the operator's base role already carries them — `gcloud iam roles describe roles/editor` and look for `iam.roles.create` — and grant only if it does not) |
 | Impersonating the SA for manual BigQuery builds (9b on) | `iam.serviceAccounts.getAccessToken` on `ontime-pipeline` | `roles/iam.serviceAccountTokenCreator` ON the SA — Terraform grants it to `operator_principal` when set (Amendment Q) |
 
 The billing-account read is deferred to apply (the budget module `depends_on`
@@ -114,9 +114,8 @@ auto-loaded `infra/terraform.tfvars` / `*.auto.tfvars{,.json}` exists
 (`ENV_ALLOW`, ten exact names: `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`,
 `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT`, `SSL_CERT_FILE`, `NO_PROXY`,
 `HTTPS_PROXY` — never a credential name, `TF_WORKSPACE`, `TF_DATA_DIR`,
-`TF_LOG*`; and any other `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` name in your
-shell refuses the command outright, names only — Phase 10 Amendment N2:
-the Google namespace is an allowlist, `infra.cli.CLOUD_ENV_ALLOW`), so the argv is the whole input by
+`TF_LOG*`; and any name in the cloud-env domain (O1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration test) outside `CLOUD_ENV_ALLOW` in your shell refuses the command outright, names only —
+Phase 10 Amendments N2/O1, `infra.cli.CLOUD_ENV_ALLOW`), so the argv is the whole input by
 construction and the `tf-plan` you read is the `tf-apply` you get:
 
 ```
@@ -222,8 +221,10 @@ datasets — so every BigQuery build runs **as the SA** (below), and
    login` (no `--impersonate-service-account`), and pick the GCP account in
    the browser — a login as any other Google account fails the next `tf-*`
    at refresh with the same 403 shape as the SA case below (round 4's first
-   teardown attempt; nothing changed). Verify before a `tf-*`:
-   `curl -s "https://oauth2.googleapis.com/tokeninfo?access_token=$(gcloud auth application-default print-access-token)"`
+   teardown attempt; nothing changed). The login prints the account it
+   selected — read it. To verify without putting a token on any argv or
+   URL (round 5 #4), POST it on stdin:
+   `gcloud auth application-default print-access-token | sed 's/^/access_token=/' | curl -s -d @- https://oauth2.googleapis.com/tokeninfo`
    → `"email"` is the operator. The impersonated SA has no
    `serviceusage` permission, so `tf-plan`/`tf-apply`/`tf-destroy` fail at
    refresh with `Permission denied to list services for consumer container`
@@ -285,11 +286,11 @@ the apply: never leave it up.
 1. **Apply** (your operator ADC — Terraform never runs as the SA, §8. The
    SA detour applies only when the SA is NOT in state: after a full
    `tf-destroy` within its 30-day reservation. After a toggle-flip teardown
-   the SA stays live and in state — no detour. The custom role has the same
-   shape with a 7-day window: after a toggle-flip teardown within 7 days,
-   `gcloud iam roles undelete ontimeSpannerDataUser --project=<id>` then
-   `terraform -chdir=infra import 'module.spanner[0].google_project_iam_custom_role.data_user' projects/<id>/roles/ontimeSpannerDataUser`
-   before the re-apply):
+   the SA stays live and in state — no detour. The custom role needs NO
+   detour either: the google provider undeletes a soft-deleted custom role
+   on create (third apply 2026-08-31, `Creation complete after 2s` inside
+   its 7-day window) — its `iam.roles.undelete` is why the operator
+   permission row lists it):
    `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=true'` —
    adds exactly the spanner module's 9 resources (2 kept-on API enablements,
    instance, database with the `dim_user` + `send_schedule` DDL, the BigQuery

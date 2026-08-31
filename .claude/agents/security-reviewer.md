@@ -44,11 +44,13 @@ When invoked:
       defaulting to `false`; nothing billable created by a plain `apply`.
 - [ ] Terraform state backend is GCS with versioning; state never in git
       (today: local `infra/terraform.tfstate`, gitignored — the BACKLOG row's
-      trigger is "before the next `enable_spanner=true` apply"; FLAG a Spanner
-      apply planned without it).
+      trigger is "the first apply NOT torn down in the same session" and the
+      Phase 12 exit; a prove-and-teardown session is accepted; FLAG a
+      long-lived Spanner apply planned without the migration).
 - [ ] Credential standard (CLAUDE.md Engineering contracts): every cloud
-      command refuses any `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` name outside
-      `infra.cli.CLOUD_ENV_ALLOW`, names only (Amendment N2). FLAG a new
+      command refuses any name in the cloud-env domain (O1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration test) outside
+      `infra.cli.CLOUD_ENV_ALLOW`, names only (Amendments N2/O1;
+      `test_cloud_env_policy_covers_every_vendor_declared_name` is the closure). FLAG a new
       denylist or regex of credential names, an allowlist widened without a
       DECISIONS entry, a refusal or log that prints a value, a secret in a
       file. The plan-first apply is an action allowlist (`SAFE_ACTIONS`,

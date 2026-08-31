@@ -341,7 +341,7 @@ annotated **Superseded by …** in place and never deleted.
   denylist that produced F → K → N1); `prevent_destroy` (blocks the
   sanctioned toggle-flip).
 - **The Google environment namespace is an ALLOWLIST (round 4 #7/#8,
-  Amendment N2).** G refused two names, L a family regex; round 4 found
+  Amendment N2; its DOMAIN closed by Amendment O1, round 5, below).** G refused two names, L a family regex; round 4 found
   `CLOUDSDK_AUTH_ACCESS_TOKEN_FILE` outside the family and nothing pinning
   that conftest's scrub read the same pattern. Now every `GOOGLE_*`,
   `GCLOUD_*`, `CLOUDSDK_*` name not in `CLOUD_ENV_ALLOW` (five settings the
@@ -383,6 +383,34 @@ annotated **Superseded by …** in place and never deleted.
   demo)". Rejected: bootstrapping the GCS backend mid-phase (a design change
   to `infra/` and a new round-5 surface, for a session the risk statement
   already covers).
+- **Round 5 — the cap's scoped re-review: the sets were not yet closed;
+  Amendment O closes each by construction (2026-08-31).** O1: N2's three
+  prefixes were still a hand-picked domain — `SPANNER_EMULATOR_HOST` (the
+  client then uses anonymous credentials against a named host),
+  `BIGQUERY_`/`STORAGE_EMULATOR_HOST`, `GCE_METADATA_HOST`/`_ROOT`/`_IP`
+  and `NO_GCE_CHECK` passed. Now the domain is `in_cloud_namespace` —
+  prefixes (+ `GCE_METADATA_`), the `_EMULATOR_HOST` suffix, the prefix-less
+  names the libraries read — and its CLOSURE is a test that imports
+  `google.auth.environment_vars`, `google.cloud.environment_vars` and the
+  spanner / bigquery / storage client constants and demands every declared
+  name is classified exactly once (refused / admitted / `CLOUD_ENV_IGNORED`
+  = the five `AWS_*` inputs read only for an AWS external-account ADC this
+  project has no path to); a library upgrade that adds an input reddens
+  the suite. Rejected: adding `GCE_` and the emulator names by hand (the
+  fourth list at this boundary). O2: an empty action set is not evidence —
+  `planned_changes` refuses it (`frozenset() <= allowed` was vacuously
+  true). O3: `CLOUD_ENV_ALLOW` is the three runbook settings — the
+  impersonation SETTING (an identity selector; the runbook uses the login
+  flag) and `CLOUDSDK_PYTHON` (nothing spawns gcloud) dropped. O4: the
+  Adapter contract applied to the second client and the second read —
+  `candidate_of` checks each cell against `Candidate`'s declared type;
+  `GoogleQueryClient.query` runs in a test over real
+  `google.cloud.bigquery.table.Row`s built offline. O5: `full_refresh_args`
+  through `confirmed` (the last inlined copy of the origin rule). O6: the
+  conftest scrub pinned by a child pytest (the source-grep pin was
+  satisfiable by a dead call) and reading `ENV_REFUSE_PREFIXES`. Process:
+  one correctness finding per commit, as the round-4 rule says — eight
+  commits, each with its pin; the amendment first, alone.
 - **Scaling bounds the Spanner paths carry (round 2 #20).** (1) The dims
   landing is one `insert_or_update` batch of the whole seed (tiny: 22 rows;
   Spanner's per-commit cap is 80,000 mutation cells — a profile past it
@@ -453,8 +481,8 @@ annotated **Superseded by …** in place and never deleted.
   value, is the smuggling path — T's own argument).
 - **Review of the fix (code-reviewer, security-reviewer, functionality-tester;
   11 findings, applied 2026-08-30).** Design change: the terraform child gets
-  an **allowlisted environment** (`ENV_ALLOW`: `PATH`, `HOME`, `CLOUDSDK_*`,
-  locale/proxy) — `TF_CLI_ARGS*` (which Terraform splices into the argv,
+  an **allowlisted environment** (`ENV_ALLOW`: `PATH`, `HOME`, two `CLOUDSDK_*`
+  settings — `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT` — locale/proxy) — `TF_CLI_ARGS*` (which Terraform splices into the argv,
   `-var-file` included — the same hole, worse), `GOOGLE_*CREDENTIALS*` (a
   keyfile despite "ADC only"), `TF_WORKSPACE`, `TF_DATA_DIR`, `TF_LOG*` cannot
   reach it; the loud refusal covers `TF_VAR_*`/`TF_CLI_ARGS*` on every

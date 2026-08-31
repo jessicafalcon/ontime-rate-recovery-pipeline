@@ -250,7 +250,7 @@ Authoritative plan: `docs/PHASES.md` (re-cut by verifiable capability on
 when" whose proof is a command). Spec: `docs/ARCHITECTURE.md`. The table below
 is the same plan in the brief's track view.
 
-**Track A = local pipeline (free). Track B = real GCP (free tier/trial — *Spanner: no trial, bills while up; Amendment M*).
+**Track A = local pipeline (free). Track B = real GCP (free tier/trial — *corrected 2026-08-31, Amendment M: Spanner has no trial, it bills while up*).
 Composer is last and torn down after one run.** ⭐ = checkpoint (stopping there
 yields a coherent project).
 
@@ -333,7 +333,7 @@ Elegance improvements adopted: Amplitude three-clock attribution; model-as-dbt-
 model; organic opens + production jitter; Spanner federation instead of Dataflow
 for demo; `dbt build` as the gate; dbt unit tests; enforced truth isolation.
 
-Risk register: budget alerts don't stop spend; Spanner trial expiry *(→ Spanner bills from creation, Amendment M)*; Dataflow
+Risk register: budget alerts don't stop spend; Spanner trial expiry *(corrected 2026-08-31, Amendment M: → Spanner bills from creation)*; Dataflow
 cost; Composer demo-day failure; cross-warehouse dialect drift; synthetic
 numbers mistaken for findings; §5 validation not reproducible until Phase 1
 commits the generator.
