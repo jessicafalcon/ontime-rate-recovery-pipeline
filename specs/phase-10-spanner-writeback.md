@@ -961,6 +961,60 @@ records rows) are undispositioned and stay open.
   The "none an identity" comment is corrected in place and the acceptance
   recorded in DECISIONS with this reason.
 
+## Amendments (security re-review of Amendment P, 2026-08-31)
+
+The security re-review of the Amendment P diff reported six findings; the
+first three are the cap firing a third time on the cloud-env domain (rounds
+4→N, 5→O, 6→P have each re-worked it). The cause is the same each time: P1's
+mechanism — PROVING the domain is closed by SCANNING the installed `google/`
+tree for env reads — is itself an open-world boundary. It leaves the
+transport-redirection class open on the IN-PROCESS cloud paths (A1), and any
+constant-keyed read escapes the scan entirely (A3). Per the cap, the boundary
+is re-implemented ONCE, and the architect's call (2026-08-31) is to **narrow
+the claim**: the refuse domain is a declared, enumerated, pinned CLOSED set;
+the scan is demoted from a closure PROOF to a coverage aid.
+
+- **Q — the cloud-env gate refuses a declared closed domain on every path;
+  the scan is a discovery aid, not the proof (security re-review of P,
+  findings A1–A6).** Restores **invariant 6**'s identity half and narrows
+  P1. Retires the claim "the domain is closed over what the installed
+  libraries READ" (the scan never closed the gate — the enumerated refuse
+  domain does — and it silently misses the redirection class and every
+  constant-keyed read) and the universal "a library upgrade reddens this
+  test" over-claim.
+  - **A1 (the real gap):** the transport-redirection class the Credential
+    standard names a secret — `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
+    `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH`,
+    `SSLKEYLOGFILE`, `OAUTHLIB_INSECURE_TRANSPORT`, and `SSL_CERT_FILE` /
+    `SSL_CERT_DIR` (moved from `CLOUD_ENV_NAMES`) — becomes a declared closed
+    set `REDIRECTION_NAMES` inside `in_cloud_namespace`, so it refuses on the
+    IN-PROCESS cloud commands (`bq-load`, `test-int-bigquery`, `writeback
+    TARGET=spanner`), not only the terraform child (P2 closed it for the
+    child alone). P1 rejected "narrow to declarations" because it "leaves the
+    gate open to the very names round 6 found" — Q does not: the refuse
+    domain stays enumerated and now covers the redirection class the scan
+    never did, so demoting the scan removes no protection. `APPDATA` (the
+    Windows ADC config root — CLOUDSDK_CONFIG's sibling, the identity class)
+    joins `CLOUD_ENV_NAMES` (A3's named escapee). The domain is pinned
+    exactly; widening it is a visible edit.
+  - **A2/A3:** the closure test splits. Its STRICT half asserts every name in
+    the vendor DECLARATION modules (a bounded set) is classified exactly once;
+    the SCAN of literal reads is a coverage aid whose newly-found names are
+    checked against a RECORDED residual — `ENABLE_GCS_PYTHON_CLIENT_OTEL_TRACES`
+    and the container / external-account prefixes (`AWS_` / `AIP_` /
+    `CLOUD_ML_` / `VERTEX_`, inputs of tools on no path here) — never asserted
+    to be closed. The over-claim "a library upgrade reddens this test" is
+    dropped for the scanned/ignored prefixes; the residual is enumerated in
+    DECISIONS, not asserted away. The test is renamed to what it does.
+  - **A4/A5/A6:** the refusal message drops "would become the identity of
+    every google client" for the redirection / non-identity part of the
+    domain (names only, unchanged); the round-5 O1 paragraph and Evidence
+    row 6 are annotated "narrowed by Q".
+
+  Rejected: broadening the scan's ROOT to the transports (`requests` /
+  `urllib3` / `grpc`) — the same open-world mechanism, one more package deep,
+  with the next transitive the next finding.
+
 ## Out of scope (deferred, recorded)
 
 - The `computed_as_of` discriminator redesign — BACKLOG, re-deferred with the
