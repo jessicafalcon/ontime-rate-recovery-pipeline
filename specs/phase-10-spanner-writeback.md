@@ -203,7 +203,9 @@ make test && make lint && make review-gate SPEC=specs/phase-10-spanner-writeback
 | 5 | `tests/test_infra.py::test_spanner_module_is_count_gated_and_default_off`, `…::test_every_declared_resource_type_is_on_the_allowlist` (the gated modules' own exact allowlists), `…::test_spanner_grants_are_scoped_to_the_one_database_and_connection`, `…::test_spanner_custom_role_is_the_exact_data_plane_set` (Amendment E), `…::test_spanner_names_pin_the_python_constants`, `…::test_input_shape_validations_exist` + `…::test_region_is_validated_wherever_it_is_declared` (`region`, root and every module) (static), live `tf-plan` outputs (default: `No changes` — no spanner resource; toggled: only the module's), the dated `docs/DEPLOYMENT.md` lines, teardown apply output |
 | 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `…::test_spanner_targets_pass_variables_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter` (the whole tracked tree), `…::test_every_cloud_command_refuses_a_credential_in_the_env` (Amendment G → N2: six entry points × eleven unlisted names — illustrative; the policy is the `CLOUD_ENV_ALLOW` allowlist), `…::test_conftest_scrub_uses_the_cloud_env_policy` (N2 — the scrub is the gate's own function), `…::test_int_spanner_fixture_refuses_without_the_carried_gate` (origin re-checked through `infra.cli.confirmed`, the one predicate — round 3 #4), `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy` + `…::test_apply_refuses_unknown_actions_even_with_allow_destroy` (Amendments F → K → N1: the action allowlist, `SAFE_ACTIONS` pinned exactly), `…::test_cli_refuses_a_credential_in_the_env_loudly` (N2: unlisted names refuse, listed settings pass, the child's vendor names ⊆ the allowlist); the audited table in Threat model |
 
-**Live status (2026-08-30, `ontime-rate-recovery`):** the live halves of
+**Live status (2026-08-30, `ontime-rate-recovery`; re-proven 2026-08-31 —
+02:30 UTC for Amendments E–F and 06:07 UTC for N3, those amendments carry
+the lines):** the live halves of
 Done-when 1, 4 and 5 ran after the ask-first apply:
 - Apply (operator ADC, after `gcloud iam service-accounts undelete
   <sa-unique-id>` (the numeric id, read from the local gitignored state backup — not a record) + `terraform import module.iam.google_service_account.pipeline …`):
@@ -778,8 +780,16 @@ closed set or the real type; no per-case patch is applied.
   `user_id`/`model_version` instead of coercing (finding 6 — J's rule on the
   read). Pinned by `tests/test_writeback.py::test_spanner_rows_come_from_the_library_by_name`;
   the mutations block gains `serving/writeback.py::existing_of invert-guard`.
-  Live re-proof (`make test-int-spanner`, ask-first) is owed before the PR:
-  the adapter changed. Rejected: a fake `StreamedResultSet` class of our own
+  **Re-proven live 2026-08-31** (06:07–06:42 UTC, the third session, operator
+  ADC for `tf-*`, the SA for the data path): toggled apply `9 added`
+  (the custom role re-created with no undelete detour), re-plan `No
+  changes`; `spanner-load OK: tiny — 22 dim rows`; `test-int-spanner`
+  `4 passed in 248.70s`; `writeback OK: ontime-rate-recovery.ontime →
+  spanner, 20 users, 0 written`; toggle-flip `9 destroyed`, `Listed 0
+  items.`, state 21, re-plan `No changes` — the `to_dict_list` adapter is
+  the read path that ran. (A first teardown attempt failed at refresh: the
+  ADC login had picked the git-only account — DEPLOYMENT step 5, §8.)
+  Rejected: a fake `StreamedResultSet` class of our own
   (the seam under review would again be ours, not the library's).
 - Also applied, no design change: finding 9 is withdrawn (the plan-file
   removal IS pinned — `test_cli_builds_the_expected_argv`, hand-mutation g1

@@ -460,7 +460,12 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   `Permission denied to list services for consumer container` (the SA holds
   no `serviceusage` role by design, invariant 4 of 9a). Harmless — no
   resource and no state file changed (refresh fails before any plan); the
-  runbook's step 5 is to re-login as yourself before any `tf-*`.
+  runbook's step 5 is to re-login as yourself before any `tf-*`. The same
+  403 (`Caller does not have required permission to use project …
+  serviceusage.services.use`) appears when that re-login picked a Google
+  account with no role on the project (Phase 10 round 4's first teardown
+  attempt: the git-only account) — check the ADC email (tokeninfo, step 5)
+  before chasing the SA case; again nothing changed.
 - **`TF_VAR_*` from the environment reaches Terraform unseen**
   (`fix/tf-vars-argv`, after Phase 9b). Amendment T refused auto-loaded
   tfvars but 9a's runbook still said "or `TF_VAR_*`": an exported

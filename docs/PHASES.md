@@ -425,7 +425,10 @@ never left up (DEPLOYMENT, Amendment M). Amendments E and F verified live
 2026-08-31: an apply omitting an applied toggle refused with the address
 printed (F); the re-apply created the custom role with the module's exact
 permission set and `test-int-spanner` passed `4 passed` under it (E); the
-`ALLOW_DESTROY=yes` toggle-flip destroyed exactly the module's 9.
+`ALLOW_DESTROY=yes` toggle-flip destroyed exactly the module's 9. Round 4
+(the cap: Amendments N1–N3, denylist → allowlist / the library's call)
+re-proven live 2026-08-31 06:07–06:42 UTC: `9 added`, `4 passed in
+248.70s`, `0 written`, `9 destroyed`, `Listed 0 items.`.
 
 ---
 

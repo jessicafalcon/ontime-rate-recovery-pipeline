@@ -935,9 +935,21 @@ supersedes G/L), **N3** (the Spanner read is the library's `to_dict_list`,
 tested offline on real `StreamedResultSet`s through the real adapter;
 `existing_of` refuses non-str; one DuckDB-side `rows_by_name`); M's four
 `infra/*.tf` survivors reworded + re-frozen, PROJECT_BRIEF annotated,
-records. NEXT: the live re-proof `make test-int-spanner` (N3 changed the
-adapter — ask-first), round 5 scoped to N's diff, the coherence-auditor
-exit pass, then the PR.
+records. **N3 re-proven live 2026-08-31 06:07–06:42 UTC** (third session):
+toggled apply `9 added` (the custom role re-created with NO undelete
+detour — the provider undeletes on create), re-plan `No changes`; as the
+SA `spanner-load OK … 22 dim rows`, `test-int-spanner` **`4 passed in
+248.70s`**, `writeback OK … 20 users, 0 written`; the first teardown
+attempt (06:38) failed at refresh — the ADC browser login had picked the
+git-only account (403 `serviceusage`, nothing changed; §8, DEPLOYMENT
+step 5) — re-login as the operator, toggle-flip `9 destroyed` (06:42),
+`Listed 0 items.`, state 21, re-plan `No changes`; ~35 min up ≈ 5¢.
+**Nothing billable is up.** The tfstate BACKLOG row re-deferred (trigger:
+the first apply NOT torn down in the same session). Process rules from
+the round recorded (Engineering contracts: Boundary / Credential /
+Adapter; Workflow: Fix the class, Fix commits; DONE item 8; the agents).
+NEXT: round 5 scoped to `review-round-4..HEAD`, the coherence-auditor exit
+pass, then the PR.
 Open BACKLOG rows: **13** (Phase 10 struck: the write-back read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /

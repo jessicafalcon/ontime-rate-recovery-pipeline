@@ -374,6 +374,15 @@ annotated **Superseded by …** in place and never deleted.
   in its place; an adapter that is more than one library call is tested on
   the real type, built offline. Rejected: a hand-written fake
   `StreamedResultSet` (the seam under test would again be ours).
+- **The tfstate row re-deferred at round 4's live re-proof (2026-08-31,
+  developer's call).** Its trigger read "before the next
+  `enable_spanner=true` apply" and was written expecting that apply to be
+  Phase 12's; N3's re-proof was a 35-minute apply → prove → teardown session
+  — exactly what the row's acceptance rationale covers — so the trigger now
+  reads "the first apply NOT torn down in the same session (the Phase 12
+  demo)". Rejected: bootstrapping the GCS backend mid-phase (a design change
+  to `infra/` and a new round-5 surface, for a session the risk statement
+  already covers).
 - **Scaling bounds the Spanner paths carry (round 2 #20).** (1) The dims
   landing is one `insert_or_update` batch of the whole seed (tiny: 22 rows;
   Spanner's per-commit cap is 80,000 mutation cells — a profile past it

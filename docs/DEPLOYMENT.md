@@ -219,7 +219,12 @@ datasets — so every BigQuery build runs **as the SA** (below), and
    off the BigQuery tables byte-for-byte against `fixtures/tiny/expected/`, the
    pins, and `bq ls` = exactly `raw`, `ontime`.
 5. **Switch ADC back before any `tf-*`:** `gcloud auth application-default
-   login` (no `--impersonate-service-account`). The impersonated SA has no
+   login` (no `--impersonate-service-account`), and pick the GCP account in
+   the browser — a login as any other Google account fails the next `tf-*`
+   at refresh with the same 403 shape as the SA case below (round 4's first
+   teardown attempt; nothing changed). Verify before a `tf-*`:
+   `curl -s "https://oauth2.googleapis.com/tokeninfo?access_token=$(gcloud auth application-default print-access-token)"`
+   → `"email"` is the operator. The impersonated SA has no
    `serviceusage` permission, so `tf-plan`/`tf-apply`/`tf-destroy` fail at
    refresh with `Permission denied to list services for consumer container`
    — found live on the first `tf-destroy` after 9b (ARCHITECTURE §8). No
@@ -362,5 +367,22 @@ Dated lines (fill on apply day — the BACKLOG Spanner row's trigger):
   **2026-08-31** (02:48 UTC): `Plan: 0 to add, 0 to change, 9 to destroy`
   (the module's 8 + the custom role) → `Apply complete! Resources: 0 added,
   0 changed, 9 destroyed`; `Listed 0 items.`; state 21; default plan `No
-  changes`. The custom role is soft-deleted — its undelete + import detour
-  (step 1) applies to any re-apply before **2026-09-07**.
+  changes`. The custom role is soft-deleted; the third apply (below)
+  re-created it with NO detour — the google provider undeletes a
+  soft-deleted custom role on create — so step 1's undelete + import
+  detour is the SA's alone.
+- Third apply (round 4, Amendment N3's live re-proof — the Spanner read
+  path changed): **2026-08-31** (06:07 UTC, operator ADC): `Plan: 9 to add,
+  0 to change, 0 to destroy` → `Apply complete! Resources: 9 added, 0
+  changed, 0 destroyed`; toggled re-plan `No changes`; `INSTANCE_TYPE
+  PROVISIONED`, `STATE READY`. As the SA: `spanner-load OK: tiny — 22 dim
+  rows`; `test-int-spanner` `4 passed in 248.70s`; `writeback OK:
+  ontime-rate-recovery.ontime → spanner, 20 users, 0 written`.
+- Third teardown: a first attempt at 06:38 UTC failed at refresh with 403
+  `serviceusage.services.use` — the ADC browser login had picked the
+  git-only Google account, not the GCP one (nothing changed; ARCHITECTURE
+  §8, step 5 below) — then, re-logged-in as the operator, **2026-08-31**
+  (06:42 UTC): `Plan: 0 to add, 0 to change, 9 to destroy` → `Apply
+  complete! Resources: 0 added, 0 changed, 9 destroyed`; `Listed 0 items.`;
+  state 21; re-plan `No changes`. ~35 minutes up ≈ 5¢. **Nothing billable
+  is up.**
