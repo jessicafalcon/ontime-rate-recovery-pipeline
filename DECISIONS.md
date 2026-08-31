@@ -341,7 +341,10 @@ annotated **Superseded by …** in place and never deleted.
   denylist that produced F → K → N1); `prevent_destroy` (blocks the
   sanctioned toggle-flip).
 - **The Google environment namespace is an ALLOWLIST (round 4 #7/#8,
-  Amendment N2; its DOMAIN closed by Amendment O1, round 5, below).** G refused two names, L a family regex; round 4 found
+  Amendment N2; its DOMAIN closed by O1 and its SET trimmed to three by O3
+  (round 5), widened over literal reads by P1 and narrowed — the redirection
+  class added, the scan demoted — by Q (round 6), all below; the five settings
+  named here are O3's three today).** G refused two names, L a family regex; round 4 found
   `CLOUDSDK_AUTH_ACCESS_TOKEN_FILE` outside the family and nothing pinning
   that conftest's scrub read the same pattern. Now every `GOOGLE_*`,
   `GCLOUD_*`, `CLOUDSDK_*` name not in `CLOUD_ENV_ALLOW` (five settings the
@@ -447,9 +450,35 @@ annotated **Superseded by …** in place and never deleted.
   because ADC must live somewhere and `HOME` (outside the domain, in
   `ENV_ALLOW`) redirects it identically — the "none an identity" comment
   corrected in place. The round's OTHER findings — the vacuous
-  `unlisted_cloud_env({})` pin (a SURVIVED hand-mutation), the cell-type
-  rule implemented twice, the record/wording rows — are undispositioned
-  and OPEN.
+  `unlisted_cloud_env({})` pin (a SURVIVED hand-mutation, #2), the cell-type
+  rule implemented twice (#10), the origin defaults (#4), the conftest and
+  control-arm test seams (#12/#13) and the record/wording rows — were fixed
+  in the security re-review batch alongside Amendment Q (B2, B4, B10, B12,
+  B13 + records).
+- **Round 6's security re-review — the cloud-env closure narrowed to a
+  DECLARED CLOSED SET; the redirection class refused on every path; Amendment
+  Q (2026-08-31).** The cap fired a THIRD time on the cloud-env domain: P1's
+  scan-proves-closure is itself open-world — it left the transport-redirection
+  class open on the IN-PROCESS cloud paths (A1) and missed constant-keyed
+  reads (A3). Q makes the refuse domain an enumerated, pinned closed set and
+  adds `REDIRECTION_NAMES` — `HTTP(S)_PROXY` / `ALL_PROXY` (upper- and
+  lower-case), `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`,
+  `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH`, `SSLKEYLOGFILE`,
+  `OAUTHLIB_INSECURE_TRANSPORT`, `SSL_CERT_FILE` / `_DIR` — so the
+  endpoint / trust-anchor / key-logging class refuses on `bq-load`,
+  `test-int-bigquery` and `writeback TARGET=spanner`, not only the terraform
+  child. `APPDATA` (the Windows ADC config root) joins the identity names.
+  The scan is demoted from a closure PROOF to a coverage aid; the residual it
+  cannot see (constant-keyed reads) is recorded here: `APPDATA` (refused) and
+  `ENABLE_GCS_PYTHON_CLIENT_OTEL_TRACES` (a benign storage tracing switch —
+  accepted if present, not a credential). Rejected: broadening the scan's ROOT
+  to the transports (`requests` / `urllib3` / `grpc`) — the same open-world
+  mechanism one package deeper, the next transitive the next finding.
+  Operational note: a machine with a proxy variable exported now has its cloud
+  commands refuse until it is unset; a proxied path to GCP is a deliberate
+  one-line widening (drop the name from `REDIRECTION_NAMES` + a DECISIONS
+  entry), not a default — P2's stance for the terraform child, now on every
+  path.
 - **Scaling bounds the Spanner paths carry (round 2 #20).** (1) The dims
   landing is one `insert_or_update` batch of the whole seed (tiny: 22 rows;
   Spanner's per-commit cap is 80,000 mutation cells — a profile past it

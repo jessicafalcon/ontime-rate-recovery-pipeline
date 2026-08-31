@@ -48,9 +48,9 @@ When invoked:
       Phase 12 exit; a prove-and-teardown session is accepted; FLAG a
       long-lived Spanner apply planned without the migration).
 - [ ] Credential standard (CLAUDE.md Engineering contracts): every cloud
-      command refuses any name in the cloud-env domain (O1/P1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration-and-scan test) outside
-      `infra.cli.CLOUD_ENV_ALLOW`, names only (Amendments N2/O1/P1;
-      `test_cloud_env_policy_covers_every_vendor_declared_name` is the closure). FLAG a new
+      command refuses any name in the cloud-env domain (O1/P1/Q: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read, and the transport-redirection class `REDIRECTION_NAMES` — an enumerated closed set, the vendor scan a coverage aid) outside
+      `infra.cli.CLOUD_ENV_ALLOW`, names only (Amendments N2/O1/P1/Q;
+      `test_cloud_env_domain_is_a_declared_closed_set` pins the set). FLAG a new
       denylist or regex of credential names, an allowlist widened without a
       DECISIONS entry, a refusal or log that prints a value, a secret in a
       file. The plan-first apply is an action allowlist (`SAFE_ACTIONS`,

@@ -1462,7 +1462,7 @@ def test_cli_refuses_a_credential_in_the_env_loudly(
     monkeypatch.delenv("GOOGLE_POLLUTE")
 
 
-def test_cloud_env_policy_covers_every_vendor_declared_name() -> None:
+def test_cloud_env_domain_is_a_declared_closed_set() -> None:
     """Amendment Q narrows the closure (O1/P1) to a DECLARED CLOSED SET. The
     security proof is the ENUMERATED refuse domain — the vendor prefixes, the
     _EMULATOR_HOST suffix, CLOUD_ENV_NAMES and the REDIRECTION_NAMES transport

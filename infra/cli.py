@@ -369,8 +369,9 @@ def refuse_cloud_env(what: str) -> None:
     if found:
         die(
             f"{what}: refused — {', '.join(found)} in the environment is not on "
-            "the cloud-env allowlist (infra.cli.CLOUD_ENV_ALLOW) and would become "
-            "the identity of every google client; unset it (auth is ADC, never a key)"
+            "the cloud-env allowlist (infra.cli.CLOUD_ENV_ALLOW); a domain name "
+            "that is not a listed setting is a credential, an identity, or an "
+            "endpoint/trust-anchor redirection — unset it (auth is ADC, never a key)"
         )
 
 

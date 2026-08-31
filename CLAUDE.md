@@ -138,11 +138,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`/`tf-freeze` on
   `CONFIRM=yes $(origin)`; toggles only as a command-line `VARS` → argv
   `-var`, refuses `TF_VAR_*`/`TF_CLI_ARGS*`, auto-loaded tfvars and
-  any name in the cloud-env domain (O1/P1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration-and-scan test) outside `CLOUD_ENV_ALLOW` (the
-  one allowlist every cloud command shares — Amendments N2/O1; the plan-first
-  apply's action allowlist `SAFE_ACTIONS` is N1/O2), runs terraform under an
-  env allowlist —
-  `fix/tf-vars-argv`) drives
+  any name in the cloud-env domain (O1/P1/Q: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read, and the transport-redirection class `REDIRECTION_NAMES` — an enumerated closed set pinned by a test, the vendor scan a coverage aid) outside `CLOUD_ENV_ALLOW` (the
+  one allowlist every cloud command shares — Amendments N2/O1/Q; the plan-first
+  apply's action allowlist `SAFE_ACTIONS` is N1/O2); runs terraform under an
+  env allowlist (`ENV_ALLOW`, seven names — `fix/tf-vars-argv`)) drives
   `make tf-validate|tf-plan|tf-apply|tf-destroy|tf-freeze`.
   `terraform.tfvars.example` only (never a `*.tfvars`); `.terraform.lock.hcl`
   is tracked (the provider pin); ADC/WIF, never a key. A pipeline dir — guarded
@@ -378,7 +377,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   cannot read back or one carrying any other verb (`forget`, a future one)
   is refused ALWAYS; the saved plan is what gets applied — no
   `-auto-approve` on apply; an entry with no action refuses too (O2). In the
-  environment, any name in the cloud-env domain (O1/P1: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read — closed by the vendor-declaration-and-scan test) outside `CLOUD_ENV_ALLOW` refuses every project-taking
+  environment, any name in the cloud-env domain (O1/P1/Q: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read, and the transport-redirection class — an enumerated closed set, the vendor scan a coverage aid) outside `CLOUD_ENV_ALLOW` refuses every project-taking
   `tf-*` (and every other cloud command) loudly, names only (N2/O1). Apply
   creates the free-tier layer: 9 API enablements (free, kept on by destroy),
   two BigQuery datasets, a GCS staging bucket, a least-privilege service
@@ -572,12 +571,13 @@ DECISIONS.md or fix it.
   `CLOUDSDK_CONFIG`/`HOME`, outside the repo. If one reaches the pipeline's
   ENVIRONMENT the pipeline refuses to run: every name in the cloud-env
   domain (`infra.cli.in_cloud_namespace` — the vendor prefixes, the
-  `_EMULATOR_HOST` suffix, the prefix-less names the libraries read) that
+  `_EMULATOR_HOST` suffix, the prefix-less names the libraries read, and the
+  transport-redirection class `REDIRECTION_NAMES`) that
   is not a listed SETTING in `CLOUD_ENV_ALLOW` is a credential by
-  definition, whenever it was introduced, and the domain is closed by a
-  test over the installed libraries' own declarations AND a scan of their
-  literal env reads (P1), not by a list of ours. A new vendor is its
-  declarations and reads classified + a DECISIONS entry; a benign new
+  definition, whenever it was introduced. The domain is an ENUMERATED closed
+  set pinned exactly by a test (Q narrowed P1: the vendor-declaration/read
+  scan is a coverage aid that flags a newly-read name, not the closure proof).
+  A new vendor is its declarations and reads classified + a DECISIONS entry; a benign new
   variable refusing is the intended direction (one line to admit it).
 - Adapter contract: a fake stands UNDER the thinnest adapter over a vendor
   type — it replaces the client, never the adapter. An adapter that is
@@ -959,7 +959,7 @@ Adapter; Workflow: Fix the class, Fix commits; DONE item 8; the agents).
 the kind was right, the SETS were not yet closed. **Amendment O**, one fix
 per commit: O1 the cloud-env domain closed by the vendors' own declarations
 (`in_cloud_namespace`: prefixes + `_EMULATOR_HOST` + the prefix-less names;
-`AWS_*` ignored by record; `test_cloud_env_policy_covers_every_vendor_declared_name`
+`AWS_*` ignored by record; `test_cloud_env_domain_is_a_declared_closed_set`
 imports google.auth / google.cloud / spanner / bigquery / storage constants
 and demands each is classified — `SPANNER_EMULATOR_HOST`, `GCE_METADATA_HOST`
 were passing), O2 an empty action set refuses, O3 `CLOUD_ENV_ALLOW` = three
@@ -981,13 +981,21 @@ classes recorded with reasons), P2 `ENV_ALLOW` = seven names (the
 proxy/trust-anchor trio out — the endpoint-redirection class), P3 the
 child-env pin through `in_cloud_namespace` + every `ENV_ALLOW` name
 through `unlisted_cloud_env`, P4 `CLOUDSDK_CONFIG` recorded
-identity-bearing, accepted (HOME redirects it identically). Round 6's
-OTHER findings are OPEN, undispositioned — notably #2, a SURVIVED
-hand-mutation (`unlisted_cloud_env({})`'s pin is vacuous under the
-conftest scrub) and #10 (the cell-type rule implemented twice), plus the
-record/wording rows. NEXT: the security re-review of the Amendment P
-diff, dispositions on the open rows, the coherence-auditor exit pass,
-then the PR.
+identity-bearing, accepted (HOME redirects it identically).
+**Security re-review of the Amendment P diff applied (2026-08-31, findings
+A1–A6 + round-6's open rows):** the cap fired a THIRD time on the cloud-env
+domain — P1's scan-proves-closure was itself open-world. **Amendment Q**
+narrows the claim: the refuse domain is an ENUMERATED closed set with a new
+`REDIRECTION_NAMES` (proxy/CA/gRPC-roots/keylog/OAuth-downgrade + `SSL_CERT_*`)
+so the redirection class refuses on the IN-PROCESS cloud paths, not just the
+terraform child (A1); `APPDATA` joins the identity names (A3); the vendor scan
+is demoted to a coverage aid with a recorded residual. Round 6's open
+non-security rows were fixed in the same batch: B2 (the vacuous
+`unlisted_cloud_env({})` pin), B4 (origin defaults refuse), B10 (one
+`_typed_cells` for both reads), B12 (conftest calls `env_tf_vars()`), B13 (the
+scrub control arm asserts the probe's own failure), plus the record/wording
+rows. Amendment Q was committed alone; one correctness finding per commit.
+NEXT: the coherence-auditor exit pass, then verdicts and the PR.
 Open BACKLOG rows: **13** (Phase 10 struck: the write-back read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /

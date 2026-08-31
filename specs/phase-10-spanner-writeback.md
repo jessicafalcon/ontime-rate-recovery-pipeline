@@ -198,10 +198,10 @@ make test && make lint && make review-gate SPEC=specs/phase-10-spanner-writeback
 |---|---|
 | 1 | `tests/test_writeback.py::test_spanner_writeback_second_run_writes_zero`, `…::test_spanner_guard_and_write_are_one_retried_transaction` (fakes that EXECUTE the SQL on in-process DuckDB; Amendment A); live: `make test-int-spanner …` output `writeback OK: <project>.ontime → spanner, 20 users, 0 written` on run 2 + equal row hash |
 | 2 | `tests/test_writeback.py::test_version_orders_numerically_v10_beats_v2`, `…::test_malformed_version_refuses`, `…::test_malformed_version_refuses_on_the_insert_path_too` (Amendment B), `…::test_duckdb_writeback_is_one_transaction` + `…::test_duckdb_target_is_single_writer` (Amendment H — the DuckDB half of "across runs"), `…::test_duckdb_writeback_rolls_back_before_close` (round 3 #5 — the explicit rollback on the still-open connection), `…::test_spanner_rows_come_from_the_library_by_name` (Amendment N3 — the REAL Spanner read path, offline, into the guard); mutation lines 1–2, 9 |
-| 3 | `tests/test_writeback.py::test_reader_relations_per_target`, `…::test_writeback_reads_only_scores_and_dim_current` (the two read statements), `…::test_fakes_execute_the_read_contract`, `…::test_columns_are_the_golden_nine_and_row_of_maps_by_name` (ONE column tuple, values by name), `…::test_candidates_are_read_by_column_name` (Amendment I — the read by name too), `…::test_existing_pairs_are_read_by_column_name` (round 3 #3 — the stored pair by name; a non-str cell refuses, N3), `…::test_spanner_rows_come_from_the_library_by_name` (N3 — `to_dict_list` on real `StreamedResultSet`s), `…::test_bigquery_rows_come_from_the_library_by_name` (O4 — `Row.items()` on real bigquery `Row`s; `candidate_of` refuses a wrong-typed cell), `tests/test_pipeline.py` (existing `SEND_SCHEDULE_SHA256_TINY` pin unchanged), `tests/test_truth_isolation.py` |
+| 3 | `tests/test_writeback.py::test_reader_relations_per_target`, `…::test_writeback_reads_only_scores_and_dim_current` (the two read statements), `…::test_fakes_execute_the_read_contract`, `…::test_columns_are_the_golden_nine_and_row_of_maps_by_name` (ONE column tuple, values by name), `…::test_candidates_are_read_by_column_name` (Amendment I — the read by name too; O4 / round 6 #10 — a wrong-typed cell refuses via `_typed_cells`), `…::test_existing_pairs_are_read_by_column_name` (round 3 #3 — the stored pair by name; a non-str cell refuses, N3), `…::test_spanner_rows_come_from_the_library_by_name` (N3 — `to_dict_list` on real `StreamedResultSet`s), `…::test_bigquery_rows_come_from_the_library_by_name` (O4 — `Row.items()` on real bigquery `Row`s), `tests/test_pipeline.py` (existing `SEND_SCHEDULE_SHA256_TINY` pin unchanged), `tests/test_truth_isolation.py` |
 | 4 | `tests/integration/test_int_spanner.py::test_goldens_match_with_federated_dims`, `…::test_federated_view_rows_equal_seed`, `…::test_build_read_dims_through_the_federation_view` (dbt's manifest resolved the source to the view — the falsifier, Amendment C; live, behind `OTR_INT`); offline: `tests/test_dbt_sources.py` (identifier var + view SQL rendered with casts, hand edit fails), `tests/test_spanner_landing.py::test_dbt_build_admits_exactly_one_var_override`, `…::test_cell_refuses_instead_of_coercing` + `…::test_row_width_drift_refuses` (Amendment J — the landing refuses what the contract does not admit) |
 | 5 | `tests/test_infra.py::test_spanner_module_is_count_gated_and_default_off`, `…::test_every_declared_resource_type_is_on_the_allowlist` (the gated modules' own exact allowlists), `…::test_spanner_grants_are_scoped_to_the_one_database_and_connection`, `…::test_spanner_custom_role_is_the_exact_data_plane_set` (Amendment E), `…::test_spanner_names_pin_the_python_constants`, `…::test_input_shape_validations_exist` + `…::test_region_is_validated_wherever_it_is_declared` (`region`, root and every module) (static), live `tf-plan` outputs (default: `No changes` — no spanner resource; toggled: only the module's), the dated `docs/DEPLOYMENT.md` lines, teardown apply output |
-| 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `…::test_spanner_targets_pass_variables_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter` (the whole tracked tree), `…::test_every_cloud_command_refuses_a_credential_in_the_env` (Amendments G → N2 → O1: six entry points × thirteen unlisted names — illustrative; the policy is the `CLOUD_ENV_ALLOW` allowlist over the closed domain), `…::test_conftest_scrub_uses_the_cloud_env_policy` (N2/O6 — a child pytest proves the scrub, and that the probe bites without it), `…::test_int_spanner_fixture_refuses_without_the_carried_gate` (origin re-checked through `infra.cli.confirmed`, the one predicate — round 3 #4), `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy` + `…::test_apply_refuses_unknown_actions_even_with_allow_destroy` (Amendments F → K → N1: the action allowlist, `SAFE_ACTIONS` pinned exactly), `…::test_cli_refuses_a_credential_in_the_env_loudly` (N2/O3: unlisted names refuse, the three listed settings pass, the child's vendor names ⊆ the allowlist), `…::test_cloud_env_policy_covers_every_vendor_declared_name` (O1 — the closure: every name the installed libraries declare is classified exactly once); the audited table in Threat model |
+| 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `…::test_spanner_targets_pass_variables_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter` (the whole tracked tree), `…::test_every_cloud_command_refuses_a_credential_in_the_env` (Amendments G → N2 → O1: six entry points × thirteen unlisted names — illustrative; the policy is the `CLOUD_ENV_ALLOW` allowlist over the closed domain), `…::test_conftest_scrub_uses_the_cloud_env_policy` (N2/O6 — a child pytest proves the scrub, and that the probe bites without it), `…::test_int_spanner_fixture_refuses_without_the_carried_gate` (origin re-checked through `infra.cli.confirmed`, the one predicate — round 3 #4), `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy` + `…::test_apply_refuses_unknown_actions_even_with_allow_destroy` (Amendments F → K → N1: the action allowlist, `SAFE_ACTIONS` pinned exactly), `…::test_cli_refuses_a_credential_in_the_env_loudly` (N2/O3/Q: unlisted names refuse — incl. the redirection class — the three listed settings pass), `…::test_cli_child_env_is_an_allowlist` (P3: the child's vendor names ⊆ the allowlist, via `in_cloud_namespace`), `…::test_cloud_env_domain_is_a_declared_closed_set` (O1/P1/Q — the declared cloud-env domain is a closed set: the enumerated refuse domain + `REDIRECTION_NAMES` pinned exactly, every vendor-declared name classified once, the scan a coverage aid); the audited table in Threat model |
 
 **Live status (2026-08-30, `ontime-rate-recovery`; re-proven 2026-08-31 —
 02:30 UTC for Amendments E–F and 06:07 UTC for N3, those amendments carry
@@ -279,7 +279,10 @@ infra/cli.py::unsafe_changes                constant-return:[]
 infra/cli.py::unlisted_cloud_env            constant-return:[]
 infra/cli.py::refuse_cloud_env              delete-call
 infra/cli.py::confirmed                     constant-return:True
+infra/cli.py::in_cloud_namespace            constant-return:False
 serving/writeback.py::existing_of           invert-guard
+serving/writeback.py::candidate_of          invert-guard
+loader/cli.py::full_refresh_args            constant-return:[]
 ```
 
 (The federation view and Spanner DDL are SQL rendered by
@@ -744,7 +747,8 @@ closed set or the real type; no per-case patch is applied.
   `…::test_apply_refuses_unknown_actions_even_with_allow_destroy`; the
   mutations line becomes `unsafe_changes constant-return:[]`. Rejected: one
   more per-verb branch (the next verb is the next finding); `prevent_destroy`
-  (blocks the sanctioned toggle-flip).
+  (blocks the sanctioned toggle-flip). *(Amended in place: round 5 O2
+  tightened `planned_changes` — an empty action set now refuses, not applies.)*
 - **N2 — the Google env namespace is an ALLOWLIST (finding 7 —
   security-reviewer #4; the tester's b3′ survivor, finding 8).** Restores
   **invariant 6**'s identity half and supersedes Amendments G and L: a
@@ -770,7 +774,11 @@ closed set or the real type; no per-case patch is applied.
   and `…::test_conftest_scrub_uses_the_cloud_env_policy`. Rejected: a
   generic secret-shape denylist over the whole environment (`*_TOKEN`,
   `*_KEY` — false refusals on unrelated tools, and still a denylist); the
-  family regex widened once more.
+  family regex widened once more. *(Amended in place: round 5 O1 closed the
+  DOMAIN — the three prefixes were still a hand-picked subset; O3 trimmed the
+  SET to three settings; round 6 P1 widened over literal reads; Q added
+  `REDIRECTION_NAMES` and narrowed the closure claim. The current domain and
+  set are those amendments, not the five settings named above.)*
 - **N3 — the Spanner adapter is the library's own by-name call, tested on
   the real type (findings 1, 2, 6 — code-reviewer #1/#9,
   functionality-tester #1/#2).** Restores **invariants 1 and 2** on the
@@ -844,8 +852,12 @@ Amendment O closes each set by construction; nothing here is a longer list.
   `API_VERSION_OVERRIDE`, `DATASTORE_DATASET`, the four `SPANNER_*`
   settings); `CLOUD_ENV_IGNORED` names the five `AWS_*` inputs google-auth
   reads only for an AWS external-account ADC file this project has no path
-  to (a false refusal on an unrelated tool's variable). The CLOSURE is a
-  test, not a claim: `tests/test_infra.py::test_cloud_env_policy_covers_every_vendor_declared_name`
+  to (a false refusal on an unrelated tool's variable). **Widened by P1**
+  (`SPANNER_` became a prefix; `GEMINI_API_KEY` / `SSL_CERT_*` joined
+  `CLOUD_ENV_NAMES`; the ignore became recorded classes) **and narrowed by Q**
+  (`REDIRECTION_NAMES` added; `SSL_CERT_*` moved there; the scan demoted from a
+  closure proof to a coverage aid) — see those amendments below. The CLOSURE is
+  a test: `tests/test_infra.py::test_cloud_env_domain_is_a_declared_closed_set`
   imports `google.auth.environment_vars`, `google.cloud.environment_vars`
   and the spanner / bigquery / storage client constants and asserts every
   declared name is classified exactly once — refused, an admitted setting,
@@ -869,7 +881,11 @@ Amendment O closes each set by construction; nothing here is a longer list.
   declared field type (the same rule `existing_of` gained in N3);
   `GoogleQueryClient.query`'s `dict(r.items())` runs in a test over real
   `google.cloud.bigquery.table.Row`s built offline (shuffled field order,
-  an empty result) — the Adapter contract applied to the second client.
+  an empty result) — the Adapter contract applied to the second client. No
+  live re-proof: the refusal fires on an offline-built REAL `Row` (the Adapter
+  contract's "tested on the real type, built offline"), and the live BigQuery
+  read path itself was already exercised by Done-when 4's `4 passed` — the
+  refusal adds a guard on that path, it does not change what the path reads.
 - **O5 — one origin predicate (round 5 #5 — security-reviewer #3).**
   `full_refresh_args` inlined the literal rule; it calls `confirmed` now,
   so the docstring's closure claim is true (the one carve-out is `make
