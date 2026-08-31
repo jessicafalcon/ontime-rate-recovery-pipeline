@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 from eval import golden
-from infra.cli import PROJECT_RE
+from infra.cli import PROJECT_RE, confirmed
 from loader import cli as loader_cli
 from loader import spanner as dims
 from serving import spanner as spanner_wb
@@ -54,7 +54,7 @@ def carried_gate() -> tuple[str, str]:
     origin = os.environ.get("OTR_CONFIRM_ORIGIN", "")
     # The pair is CARRIED, and re-checked with the make target's own predicate
     # (round 2 #7) — never a literal forged here.
-    if not loader_cli.confirmed(confirm, origin):
+    if not confirmed(confirm, origin):
         raise RuntimeError("refused: run via `make test-int-spanner … CONFIRM=yes`")
     return confirm, origin
 
@@ -135,11 +135,12 @@ def test_goldens_match_with_federated_dims(built: str) -> None:
 
 def _send_schedule_rows(project: str) -> list[tuple]:
     client = spanner_wb.GoogleSpannerClient(project)
-    return client.read(
+    rows = client.read(
         "select "
         + ", ".join(SEND_SCHEDULE_GOLDEN.columns)
         + " from send_schedule order by user_id"
     )
+    return [tuple(r[c] for c in SEND_SCHEDULE_GOLDEN.columns) for r in rows]
 
 
 def _rendered_hash(rows: list[tuple]) -> str:

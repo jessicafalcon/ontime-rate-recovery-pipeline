@@ -102,9 +102,10 @@ resource "google_spanner_database" "this" {
   # CONFIRM-gated ($(origin) — infra/cli.py); provider-side protection here
   # would turn that one path into a two-apply dance. The flip side: while
   # Spanner is up, EVERY `tf-apply` must carry VARS='enable_spanner=true' —
-  # the toggle defaults false, so an apply that omits it IS the teardown
-  # (-auto-approve, no protection). docs/DEPLOYMENT.md's runbook says so;
-  # `tf-plan` first shows the `destroy` lines.
+  # the toggle defaults false, so an apply that omits it PLANS the teardown;
+  # tf-apply plans first and refuses any destroying plan without
+  # ALLOW_DESTROY=yes on the command line (Amendment F), so the omission
+  # stops with the addresses printed. docs/DEPLOYMENT.md's runbook says so.
   deletion_protection = false
 }
 
@@ -127,8 +128,9 @@ resource "google_bigquery_connection" "spanner_dims" {
 # live on the first apply, docs checked — ARCHITECTURE §8): EXTERNAL_QUERY over
 # a Cloud Spanner connection runs as the QUERYING principal, which needs
 # spanner.databaseReader on the database and bigquery.connectionUser on the
-# connection. Both are the pipeline SA's grants below (databaseUser ⊇
-# databaseReader). A grant to service-<number>@gcp-sa-bigqueryconnection was
+# connection. Both are the pipeline SA's grants below (the custom data-plane
+# role ⊇ databaseReader's read set, Amendment E). A grant to
+# service-<number>@gcp-sa-bigqueryconnection was
 # a grant to an identity that never participates — and one that does not
 # exist until something else provisions it (the first apply failed on it).
 

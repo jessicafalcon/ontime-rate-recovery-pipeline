@@ -53,7 +53,17 @@ class Candidate:
 # tests/test_writeback.py pins it to SEND_SCHEDULE_GOLDEN.columns.
 CANDIDATE_FIELDS: tuple[str, ...] = tuple(f.name for f in fields(Candidate))
 COLUMNS: tuple[str, ...] = CANDIDATE_FIELDS + ("written_at",)
-EXISTING_SQL = f"select user_id, model_version, computed_as_of from {SEND_SCHEDULE}"
+# The stored pair the guard compares, read by NAME like the candidates (round
+# 3 #3): the select list is generated from this tuple and `existing_of` maps
+# the row back by key, so a reordered select cannot swap two string columns.
+EXISTING_COLUMNS: tuple[str, ...] = ("user_id", "model_version", "computed_as_of")
+
+
+def existing_sql(relation: str) -> str:
+    return f"select {', '.join(EXISTING_COLUMNS)} from {relation}"
+
+
+EXISTING_SQL = existing_sql(SEND_SCHEDULE)
 # Which relation each Candidate field is read from: tz is the open dim_user
 # row's (the `d` side of the join); everything else is the score's (`s`).
 _SOURCE_ALIAS = {name: ("d" if name == "tz" else "s") for name in CANDIDATE_FIELDS}
@@ -112,8 +122,22 @@ def read_existing(
     con: duckdb.DuckDBPyConnection,
 ) -> dict[str, tuple[str, datetime]]:
     """user_id → the stored (model_version, computed_as_of) the guard compares."""
-    rows = con.execute(EXISTING_SQL).fetchall()
-    return {r[0]: (r[1], r[2]) for r in rows}
+    cur = con.execute(EXISTING_SQL)
+    names = [d[0] for d in cur.description]
+    return dict(existing_of(dict(zip(names, r, strict=True))) for r in cur.fetchall())
+
+
+def existing_of(row: dict[str, object]) -> tuple[str, tuple[str, datetime]]:
+    """One stored row, by column name → (user_id, (model_version, computed_as_of));
+    a row without exactly the EXISTING_COLUMNS keys refuses."""
+    if set(row) != set(EXISTING_COLUMNS):
+        raise ValueError(
+            f"stored row has {sorted(row)}, want {sorted(EXISTING_COLUMNS)}"
+        )
+    ts = row["computed_as_of"]
+    if not isinstance(ts, datetime):
+        raise ValueError(f"computed_as_of is {type(ts).__name__}, want datetime")
+    return str(row["user_id"]), (str(row["model_version"]), ts)
 
 
 def version_key(model_version: str) -> tuple[int]:

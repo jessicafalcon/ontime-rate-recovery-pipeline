@@ -360,8 +360,9 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `TF_CLI_ARGS*` is in the environment, and plan/apply/destroy also while an
   auto-loaded `infra/terraform.tfvars` or `*.auto.tfvars{,.json}` exists
   (Amendment T) — the argv is the whole input by construction
-- `make tf-apply | tf-destroy PROJECT=<id> CONFIRM=yes [VARS=…]
-  [ALLOW_DESTROY=yes]` *(Phase 9a; plan-first apply Phase 10)* — apply
+- `make tf-apply PROJECT=<id> CONFIRM=yes [VARS=…] [ALLOW_DESTROY=yes]` /
+  `make tf-destroy PROJECT=<id> CONFIRM=yes [VARS=…]` (no `ALLOW_DESTROY` —
+  destruction is its purpose) *(Phase 9a; plan-first apply Phase 10)* — apply
   PLANS FIRST (`plan -out`), reads the saved plan back (`show -json`) and
   REFUSES to apply one that destroys or replaces anything unless
   `ALLOW_DESTROY=yes` also has command-line origin (`$(origin
@@ -425,8 +426,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   exactly the seed's rows, then runs the Spanner write-back twice — the
   second writes 0 and the read-back hashes to `SEND_SCHEDULE_SHA256_TINY`
   (cross-store byte parity). Cloud-cost, ask-first, as the SA; needs the
-  ask-first `make tf-apply … VARS='enable_spanner=true'` (trial clock — the
-  dated teardown lines in `docs/DEPLOYMENT.md` are filled the same session,
+  ask-first `make tf-apply … VARS='enable_spanner=true'` (bills from creation
+  — the dated apply/teardown lines in `docs/DEPLOYMENT.md` are filled the same session,
   and the scoped teardown is `VARS='enable_spanner=false'` re-applied)
 - Later phases add their targets, each listed here in the same PR.
 
@@ -839,9 +840,9 @@ resources, two grants both to the SA), re-plan `No changes`; as the SA:
 `spanner-load OK: tiny — 22 dim rows`, `make test-int-spanner` **`4 passed`**
 (view ≡ seed, manifest resolved the source to the view, three goldens
 byte-identical, write-back idempotent with the DuckDB hash), `writeback OK:
-ontime-rate-recovery.ontime → spanner, 20 users, 0 written`. Trial clock
-started 2026-08-30 (ends 2026-11-28); torn down the same session (operator
-ADC, `8 destroyed`, `Listed 0 items.`) — dated lines in DEPLOYMENT.
+ontime-rate-recovery.ontime → spanner, 20 users, 0 written`. Torn down the
+same session (operator ADC, `8 destroyed`, `Listed 0 items.`) — dated lines
+in DEPLOYMENT.
 **Nothing billable is up; the free-tier layer (two datasets, bucket, SA +
 grants, budget — cents/month) IS up** — `make tf-destroy … CONFIRM=yes`
 when the phase is done with it. **Phase 10's Done-when is met.** **Review
@@ -852,7 +853,7 @@ G (a credential in the env refuses every cloud command, one policy), H (the
 DuckDB write-back is one transaction; single-writer pinned), I (the read
 maps by name), J (the landing refuses instead of coercing); `region`
 validated in every module; the metrics pin over the tracked tree;
-`carried_gate` through `loader.cli.confirmed`; records de-contradicted.
+`carried_gate` through the one `confirmed` predicate; records de-contradicted.
 **E and F verified live 2026-08-31:** an apply omitting the applied
 `operator_principal` was refused (`tf-apply: refused — the plan destroys
 module.iam…operator_token_creator[0]`, exit 2, nothing changed); the
@@ -861,15 +862,26 @@ the module's 11 permissions; as the SA under it `spanner-load OK … 22 dim
 rows`, `test-int-spanner` **`4 passed in 239.42s`**, `writeback OK … 0
 written`; the `ALLOW_DESTROY=yes` toggle-flip `9 destroyed` (02:48 UTC),
 `Listed 0 items.`, state 21, default plan `No changes` (the custom role's
-undelete window runs to 2026-09-07). Nothing billable is up. NEXT: round 3
-(scoped) and the coherence-auditor exit pass, then the PR.
-Open BACKLOG rows: **12** (Phase 10 struck: the write-back read-seam row and
+undelete window runs to 2026-09-07). Nothing billable is up. **Review
+round 3 applied (2026-08-31, 15 findings):** Amendments K (`planned_deletes`
+fails CLOSED — an unreadable `show -json` refuses, never "no deletes"), L
+(the keyfile-env policy covers the google-auth family: `*KEYFILE*`,
+`CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`), M (records: the instance is
+`PROVISIONED` and bills from creation — there was never a trial clock);
+the stored-pair read maps by name (missed in round 2); ONE `confirmed`
+predicate in `infra.cli`; the explicit rollback pinned on an open
+connection; the unversioned-tfstate BACKLOG row (accepted, dated trigger);
+records. NEXT: round 4 (the scoped re-review of round 3's diff) and the
+coherence-auditor exit pass, then the PR.
+Open BACKLOG rows: **13** (Phase 10 struck: the write-back read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /
 a dim change mid-schedule / two live versions), the `loader/`→`landing/`
 rename (trigger: `fix/landing-package` after Phase 10 merges, before
-Phase 11); the Spanner-trial row re-dated on apply day 2026-08-30 (clock
-runs to 2026-11-28; new trigger: every phase exit).
+Phase 11); the Spanner row retitled 2026-08-31 — `PROVISIONED`, bills
+from creation, no trial clock (Amendment M; trigger: every phase exit,
+`Listed 0 items.`); opened: the local unversioned tfstate row (round 3 #6,
+trigger: before the next `enable_spanner=true` apply).
 Earlier: `fix/tf-vars-argv` struck the env-`TF_VAR_*` row; 9b struck: the two-datasets row, the DAG-landing
 row, the conflicting-duplicate guard, the dialect denylist, the SA-id row
 (first 9b apply 2026-08-30); opened: the guard's contract residual (JSON

@@ -96,7 +96,7 @@ def test_int_spanner_fixture_refuses_without_the_carried_gate(
     monkeypatch.setenv("OTR_CONFIRM_ORIGIN", "command line")
     assert integ.carried_gate() == ("yes", "command line")
     src = (ROOT / "tests" / "integration" / "test_int_spanner.py").read_text()
-    assert '"command line"' not in src  # never forged: loader.cli.confirmed decides
+    assert '"command line"' not in src  # never forged: infra.cli.confirmed decides
 
 
 def test_spanner_load_cli_gates_before_any_client(
@@ -295,6 +295,9 @@ CLOUD_ENTRY_POINTS = [
         "GOOGLE_BACKUP_CREDENTIALS_JSON",
         "GOOGLE_OAUTH_ACCESS_TOKEN",
         "CLOUDSDK_AUTH_ACCESS_TOKEN",
+        "GOOGLE_CLOUD_KEYFILE_JSON",  # Amendment L (round 3 #2): the keyfile family
+        "GCLOUD_KEYFILE_JSON",
+        "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
     ],
 )
 def test_every_cloud_command_refuses_a_credential_in_the_env(

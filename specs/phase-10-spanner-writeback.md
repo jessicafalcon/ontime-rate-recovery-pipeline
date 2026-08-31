@@ -88,7 +88,10 @@ operator ADC, never the impersonated SA (§8). Positions, numbered as posed:
    starts the trial clock (~$65/mo after day 90). The runbook step in
    `docs/DEPLOYMENT.md` § "Spanner trial" is filled in the same working
    session as the apply: apply date, trial end (apply + 90 days), and the
-   destroy-by date; the spec's Evidence carries the actual line. The
+   destroy-by date; the spec's Evidence carries the actual line. *(Corrected
+   2026-08-31, Amendment M: there is no trial clock — the instance is
+   `PROVISIONED` and bills from creation; the dated lines are apply/teardown
+   times.)* The
    integration run's runbook tears Spanner down the same day
    (`VARS='enable_spanner=false'` re-apply), so the steady state stays
    meter-off. And PHASES names the threat-model sweep as a Phase 10 goal:
@@ -182,7 +185,7 @@ make test && make lint && make review-gate SPEC=specs/phase-10-spanner-writeback
 5. **Meter off by default; scoped teardown works and is dated.** A default
    plan creates zero Spanner resources; `VARS='enable_spanner=true'` plans
    exactly the module's; the toggle-flip re-apply destroys them all and
-   `docs/DEPLOYMENT.md` carries the trial dates written on apply day.
+   `docs/DEPLOYMENT.md` carries the apply/teardown dates written on apply day.
    *Evidence: row 5.*
 6. **Every variable-taking/destructive target has a threat model with a
    pin.** The new targets' five columns are pinned in `tests/`; the existing
@@ -198,7 +201,7 @@ make test && make lint && make review-gate SPEC=specs/phase-10-spanner-writeback
 | 3 | `tests/test_writeback.py::test_reader_relations_per_target`, `…::test_writeback_reads_only_scores_and_dim_current` (the two read statements), `…::test_fakes_execute_the_read_contract`, `…::test_columns_are_the_golden_nine_and_row_of_maps_by_name` (ONE column tuple, values by name), `…::test_candidates_are_read_by_column_name` (Amendment I — the read by name too), `tests/test_pipeline.py` (existing `SEND_SCHEDULE_SHA256_TINY` pin unchanged), `tests/test_truth_isolation.py` |
 | 4 | `tests/integration/test_int_spanner.py::test_goldens_match_with_federated_dims`, `…::test_federated_view_rows_equal_seed`, `…::test_build_read_dims_through_the_federation_view` (dbt's manifest resolved the source to the view — the falsifier, Amendment C; live, behind `OTR_INT`); offline: `tests/test_dbt_sources.py` (identifier var + view SQL rendered with casts, hand edit fails), `tests/test_spanner_landing.py::test_dbt_build_admits_exactly_one_var_override`, `…::test_cell_refuses_instead_of_coercing` + `…::test_row_width_drift_refuses` (Amendment J — the landing refuses what the contract does not admit) |
 | 5 | `tests/test_infra.py::test_spanner_module_is_count_gated_and_default_off`, `…::test_every_declared_resource_type_is_on_the_allowlist` (the gated modules' own exact allowlists), `…::test_spanner_grants_are_scoped_to_the_one_database_and_connection`, `…::test_spanner_custom_role_is_the_exact_data_plane_set` (Amendment E), `…::test_spanner_names_pin_the_python_constants`, `…::test_input_shape_validations_exist` + `…::test_region_is_validated_wherever_it_is_declared` (`region`, root and every module) (static), live `tf-plan` outputs (default: `No changes` — no spanner resource; toggled: only the module's), the dated `docs/DEPLOYMENT.md` lines, teardown apply output |
-| 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `…::test_spanner_targets_pass_variables_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter` (the whole tracked tree), `…::test_every_cloud_command_refuses_a_credential_in_the_env` (Amendment G, six entry points × five variable shapes), `…::test_int_spanner_fixture_refuses_without_the_carried_gate` (origin re-checked through `loader.cli.confirmed`), `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy` (Amendment F), `…::test_cli_refuses_a_credential_in_the_env_loudly`; the audited table in Threat model |
+| 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `…::test_spanner_targets_pass_variables_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter` (the whole tracked tree), `…::test_every_cloud_command_refuses_a_credential_in_the_env` (Amendment G, six entry points × five variable shapes), `…::test_int_spanner_fixture_refuses_without_the_carried_gate` (origin re-checked through `infra.cli.confirmed`, the one predicate — round 3 #4), `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy` (Amendment F), `…::test_cli_refuses_a_credential_in_the_env_loudly`; the audited table in Threat model |
 
 **Live status (2026-08-30, `ontime-rate-recovery`):** the live halves of
 Done-when 1, 4 and 5 ran after the ask-first apply:
@@ -270,7 +273,7 @@ loader/spanner.py::load_dims                constant-return:0
 loader/cli.py::dbt_vars_args                constant-return:[]
 infra/cli.py::planned_deletes               constant-return:[]
 infra/cli.py::refuse_keyfile_env            delete-call
-loader/cli.py::confirmed                    constant-return:True
+infra/cli.py::confirmed                     constant-return:True
 ```
 
 (The federation view and Spanner DDL are SQL rendered by
@@ -313,7 +316,7 @@ per the TEMPLATE's SQL rule.)
 - **The federation swap is a generated source-identifier var, default
   unchanged (item 6)** — satisfies invariant 4 and §3.3's "source-config
   swap, no model changes". Making the view the default `bigquery` source was
-  rejected: it would chain every free-tier parity run to a trial-clock
+  rejected: it would chain every free-tier parity run to a billing
   Spanner stack.
 - **Scoped teardown = toggle-flip apply; no `MODULE`, no `-target`
   (item 4)** — satisfies invariants 5, 6 with zero new argv surface;
@@ -355,11 +358,11 @@ per the TEMPLATE's SQL rule.)
       (google-cloud-spanner declared); BACKLOG count
 - [ ] `docs/ARCHITECTURE.md` — §2.3/§3.3 rows marked delivered as landed;
       §8 Gotchas for every live surprise (type map, connection IAM
-      propagation, trial mechanics)
+      propagation, cost mechanics)
 - [ ] `BACKLOG.md` — close the read-seam row and the `model_version` row;
       re-defer the discriminator row and the `loader/` rename row (new
-      triggers, item 2/3); the trial row closed or re-dated on apply day
-- [ ] `docs/DEPLOYMENT.md` — Spanner apply/teardown runbook; the dated trial
+      triggers, item 2/3); the Spanner row re-dated on apply day (retitled round 3, Amendment M)
+- [ ] `docs/DEPLOYMENT.md` — Spanner apply/teardown runbook; the dated apply/teardown
       lines (apply day); MODULE wording corrected
 - [ ] README — only if a command block it shows changes; else none
 - [ ] docs/RESULTS.md / docs/METRICS.md — none (no metric, no simulation
@@ -436,8 +439,9 @@ user who controls the environment (the threat model's standing carve-out).
   findings → §8): the Spanner→BigQuery type map through `EXTERNAL_QUERY`
   (TIMESTAMP/DATE/STRING casts to the generated landing schema); the
   BigQuery connection's service-agent identity existing before the IAM grant
-  (eventual consistency on first apply); whether the 100-PU instance is
-  inside the trial's bounds; `google-cloud-spanner`'s client surface for
+  (eventual consistency on first apply); the 100-PU instance's cost model
+  (found round 3: `PROVISIONED`, bills from creation — Amendment M);
+  `google-cloud-spanner`'s client surface for
   batch `insert_or_update` (the fake models exactly the calls used).
 
 ## Amendments (review round 1, 2026-08-30)
@@ -620,7 +624,7 @@ user who controls the environment (the threat model's standing carve-out).
 - Also applied, no design change: the metrics pin scans every tracked
   `*.py` (#5); `region` validated in the root AND every module that
   declares it, two-digit regions admitted (#6); `carried_gate` re-checks the
-  origin through `loader.cli.confirmed` — the make target's own predicate,
+  origin through the one `confirmed` predicate (`infra.cli` since round 3 #4) — the make target's own,
   never a forged literal (#7, both integration modules); the fake's
   `transact` rolls back on an exception like `run_in_transaction` (#13);
   invariant 1's ledger assertion (#14); `writeback`'s TARGET/PROJECT

@@ -159,7 +159,7 @@ annotated **Superseded by …** in place and never deleted.
   no model changes", made real: the integration run builds with
   `dim_user_identifier: dim_user_spanner` and must reproduce the three
   goldens. Rejected: making the `EXTERNAL_QUERY` view the default `bigquery`
-  source — it would chain every free-tier parity run to a trial-clock
+  source — it would chain every free-tier parity run to a billing
   Spanner stack.
 - **Scoped Spanner teardown = the toggle flipped back; no `MODULE`, no
   `-target`.** `make tf-apply … CONFIRM=yes VARS='enable_spanner=false'`
@@ -267,6 +267,37 @@ annotated **Superseded by …** in place and never deleted.
   count: `ValueError` with the line. The contract is naive UTC wall times
   (generator/writer.py) and REQUIRED means present; `replace(tzinfo=UTC)`
   on an offset value discarded the offset silently.
+- **`planned_deletes` fails CLOSED (round 3 #1, Amendment K).** Amendment F
+  parsed `show -json` with `json.loads(show_json or "{}")` and
+  `.get("resource_changes", [])`, so an empty or shape-changed body counted
+  as "no deletes" and the gate was skipped. Now an empty, non-JSON,
+  non-object or `resource_changes`-less body is a refusal (exit 2, the
+  reason named, the plan file removed); only a parsed list yields `[]`.
+  Rejected: falling back to requiring `ALLOW_DESTROY` on an unreadable plan
+  (a gate firing for the wrong reason teaches the operator to pass the flag).
+- **The keyfile-env policy is matched by FAMILY (round 3 #2, Amendment L).**
+  `KEYFILE_ENV_RE` now also matches `(GOOGLE|GCLOUD)_*KEYFILE*` (the
+  provider's `GOOGLE_CLOUD_KEYFILE_JSON` / `GCLOUD_KEYFILE_JSON`) and
+  `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`; still one pattern, read by the
+  gate and by `tests/conftest.py`'s scrub. Rejected: `CLOUDSDK_AUTH_*`
+  wholesale (`…_IMPERSONATE_SERVICE_ACCOUNT` is a setting on the runbook's
+  own path, not a credential).
+- **The Spanner instance is `PROVISIONED`; it bills from creation and there
+  is no trial clock (round 3, Amendment M — records).** The "90-day trial"
+  premise carried from the architecture review was wrong: a free-trial
+  instance is a separate, console/gcloud-created kind, never what the
+  module makes (live listing + official docs, 2026-08-31). Cost model:
+  ~$0.09/h while up; the operating rule is apply → prove → tear down in one
+  session. Rejected: switching the module to a free-trial instance (not a
+  provider-creatable shape, and a one-per-project resource the demo should
+  not consume for a test run).
+- **ONE `confirmed` predicate, in `infra.cli` (round 3 #4).** `drop_db`,
+  `infra.cli.require_confirm`, `loader.cli.require_confirm` and both
+  integration fixtures call it; it lives beside the keyfile policy because
+  `loader.cli` already imports from `infra.cli` (the reverse would cycle).
+  The Spanner stored-pair read maps by column name like the candidate read
+  (#3, `EXISTING_COLUMNS` → `existing_sql` / `existing_of`), and the explicit
+  rollback is pinned through a still-open injected connection (#5).
 - **Scaling bounds the Spanner paths carry (round 2 #20).** (1) The dims
   landing is one `insert_or_update` batch of the whole seed (tiny: 22 rows;
   Spanner's per-commit cap is 80,000 mutation cells — a profile past it
@@ -309,7 +340,8 @@ annotated **Superseded by …** in place and never deleted.
   <project>.ontime → spanner, N users, M written`; a PROFILE given anyway is
   still validated (never an unvalidated value on the command line).
 - **The omitted-`VARS` apply IS the Spanner teardown — a runbook rule, not a
-  guard (round 1 #12).** While Spanner is up, any `make tf-apply …
+  guard (round 1 #12). Superseded by Amendment F (round 2 #3, above): `tf-apply`
+  plans first and refuses a destroying plan without `ALLOW_DESTROY=yes`.** While Spanner is up, any `make tf-apply …
   CONFIRM=yes` without `VARS='enable_spanner=true'` plans the module for
   destruction (toggle default false, `deletion_protection = false`,
   `-auto-approve`). `docs/DEPLOYMENT.md`'s runbook now says: every apply in
@@ -562,8 +594,8 @@ allowlist (M); the root `workload_identity_provider` output (J); two datasets,
   false.** `main.tf` wires `modules/{bigquery,gcs,iam,budget}` unconditionally
   (all free/near-free — ARCHITECTURE §6) and `modules/{composer,spanner}` behind
   `count = var.enable_* ? 1 : 0`, so a default plan creates zero of them
-  (Composer is Phase 11, Spanner Phase 10; the Spanner trial clock only starts on
-  an apply, so the BACKLOG row re-defers). Rejected: a flat `main.tf` (a concern
+  (Composer is Phase 11, Spanner Phase 10; Spanner bills only while applied, so
+  the BACKLOG row re-defers). Rejected: a flat `main.tf` (a concern
   can't be toggled or destroyed alone).
 - **`project_id` is the only required var; the budget's billing account is
   derived.** Every other input defaults (`region` `us-central1`, the toggles, the

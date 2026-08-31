@@ -323,8 +323,9 @@ BACKLOG row, not code.
 ## 6. Deployment posture
 
 Region `us-central1`. Free/near-free layer safe to leave up: BigQuery, GCS,
-IAM, budget alerts. Spanner: 90-day trial, `enable_spanner` toggle, teardown
-date in `docs/DEPLOYMENT.md`. Composer: `enable_composer` toggle, applied once on
+IAM, budget alerts. Spanner: a `PROVISIONED` 100-PU instance that bills from
+creation (no free-trial instance — Phase 10 Amendment M), `enable_spanner`
+toggle, applied and torn down in one session, dates in `docs/DEPLOYMENT.md`. Composer: `enable_composer` toggle, applied once on
 demo day, destroyed the same hour. Budget alerts do not stop spend — stated,
 with the optional billing-disable function as the real guardrail. Terraform
 state in GCS (bootstrapped manually); WIF for CI, never JSON keys.

@@ -34,7 +34,7 @@ TABLE = "send_schedule"
 # (serving/writeback.py::COLUMNS); serving/ddl.sql and the module's Spanner DDL
 # carry the same list (pinned by tests/test_writeback.py, tests/test_dbt_sources.py).
 COLUMNS = wb.COLUMNS
-EXISTING_SQL = f"select user_id, model_version, computed_as_of from {TABLE}"
+EXISTING_SQL = wb.existing_sql(TABLE)
 
 T = TypeVar("T")
 
@@ -50,9 +50,9 @@ class QueryClient(Protocol):
 class Txn(Protocol):
     """What the write path may do INSIDE its one read-write transaction: read
     the stored pairs, upsert the winners. No DDL (Terraform owns the schema),
-    no delete."""
+    no delete. Rows come back keyed by column NAME (round 3 #3)."""
 
-    def read(self, sql: str) -> list[tuple]: ...
+    def read(self, sql: str) -> list[dict[str, object]]: ...
 
     def upsert(
         self, table: str, columns: tuple[str, ...], rows: list[tuple]
@@ -65,7 +65,7 @@ class SpannerClient(Protocol):
 
     def transact(self, fn: Callable[[Txn], T]) -> T: ...
 
-    def read(self, sql: str) -> list[tuple]: ...
+    def read(self, sql: str) -> list[dict[str, object]]: ...
 
 
 class GoogleQueryClient:
@@ -86,8 +86,8 @@ class _GoogleTxn:
     def __init__(self, txn: object) -> None:
         self._txn = txn
 
-    def read(self, sql: str) -> list[tuple]:
-        return [tuple(r) for r in self._txn.execute_sql(sql)]  # type: ignore[attr-defined]
+    def read(self, sql: str) -> list[dict[str, object]]:
+        return _rows_by_name(self._txn.execute_sql(sql))  # type: ignore[attr-defined]
 
     def upsert(self, table: str, columns: tuple[str, ...], rows: list[tuple]) -> None:
         self._txn.insert_or_update(table=table, columns=columns, values=rows)  # type: ignore[attr-defined]
@@ -109,9 +109,17 @@ class GoogleSpannerClient:
     def transact(self, fn: Callable[[Txn], T]) -> T:
         return self._db.run_in_transaction(lambda txn: fn(_GoogleTxn(txn)))
 
-    def read(self, sql: str) -> list[tuple]:
+    def read(self, sql: str) -> list[dict[str, object]]:
         with self._db.snapshot() as snap:
-            return [tuple(r) for r in snap.execute_sql(sql)]
+            return _rows_by_name(snap.execute_sql(sql))
+
+
+def _rows_by_name(result: object) -> list[dict[str, object]]:
+    """A StreamedResultSet as dicts: its `fields` (the column metadata) are
+    populated once the stream is consumed, so consume first, then key."""
+    rows = [list(r) for r in result]  # type: ignore[attr-defined]
+    names = [f.name for f in result.fields]  # type: ignore[attr-defined]
+    return [dict(zip(names, r, strict=True)) for r in rows]
 
 
 QueryFactory = Callable[[str], QueryClient]
@@ -177,7 +185,10 @@ def write_back(
     ]
 
     def guard_and_write(txn: Txn) -> int:
-        existing = {r[0]: (r[1], _utc(r[2])) for r in txn.read(EXISTING_SQL)}
+        existing: dict[str, tuple[str, datetime]] = {}
+        for row in txn.read(EXISTING_SQL):
+            user_id, (version, as_of) = wb.existing_of(row)
+            existing[user_id] = (version, _utc(as_of))
         winners = wb.winners_of(candidates, existing)
         apply_writeback(txn, winners)
         return len(winners)

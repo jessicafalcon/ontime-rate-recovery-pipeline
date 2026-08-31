@@ -72,11 +72,20 @@ def validate_project(project: str) -> str:
     return project
 
 
+def confirmed(confirm: str, origin: str) -> bool:
+    """THE rule: CONFIRM=yes with command-line origin (`$(origin CONFIRM)`).
+    ONE predicate for every gate — the tf-* targets, loader.cli's cloud
+    commands and drop-db, and the integration fixtures' carried gate (round 2
+    #7, round 3 #4) — so none can drift from it. It lives beside the keyfile
+    policy because loader.cli imports from here (the reverse would cycle)."""
+    return origin == "command line" and confirm == "yes"
+
+
 def require_confirm(cmd: str, confirm: str, origin: str) -> None:
     """Cloud-cost / destructive: CONFIRM=yes must have command-line origin
     ($(origin CONFIRM)); an env-set CONFIRM=yes is refused (CLAUDE.md: ask
     first, every time)."""
-    if origin != "command line" or confirm != "yes":
+    if not confirmed(confirm, origin):
         die(f"tf-{cmd}: refused — pass CONFIRM=yes on the command line")
 
 
@@ -187,10 +196,14 @@ ENV_REFUSE_PREFIXES = ("TF_VAR_", "TF_CLI_ARGS")
 # token) would silently become the identity of ANY google client — the
 # allowlist already keeps it from terraform; every cloud command refuses it
 # LOUDLY instead (Phase 10 review round 2 #2): auth is the ADC file, never a
-# key. Matched by name shape so a new `GOOGLE_*_CREDENTIALS*` spelling is
-# caught without a list edit.
+# key. Matched by name FAMILY so a new spelling is caught without a list
+# edit: the google provider's `GOOGLE_*CREDENTIALS*`, `GOOGLE_CLOUD_KEYFILE_JSON`
+# and `GCLOUD_KEYFILE_JSON`, the two bearer tokens, and gcloud's credential-
+# file override (round 3, Amendment L). Not `CLOUDSDK_AUTH_*` wholesale:
+# `…_IMPERSONATE_SERVICE_ACCOUNT` is a setting, not a credential.
 KEYFILE_ENV_RE = re.compile(
-    r"^(GOOGLE_.*CREDENTIALS.*|GOOGLE_OAUTH_ACCESS_TOKEN|CLOUDSDK_AUTH_ACCESS_TOKEN)$"
+    r"^(GOOGLE_.*CREDENTIALS.*|(GOOGLE|GCLOUD)_.*KEYFILE.*|GOOGLE_OAUTH_ACCESS_TOKEN"
+    r"|CLOUDSDK_AUTH_(ACCESS_TOKEN|CREDENTIAL_FILE_OVERRIDE))$"
 )
 
 
@@ -247,11 +260,26 @@ Runner = Callable[..., subprocess.CompletedProcess]
 def planned_deletes(show_json: str) -> list[str]:
     """Resource addresses a saved plan would delete (`terraform show -json`'s
     `resource_changes[].change.actions` containing `delete` — a replace
-    counts: it is a delete). Empty for a create/update-only plan."""
-    plan = json.loads(show_json or "{}")
+    counts: it is a delete). Empty ONLY for a parsed plan whose list has no
+    delete; a body that cannot be read — empty, not JSON, not an object, no
+    `resource_changes` list — is a refusal, never "no deletes" (round 3,
+    Amendment K: the gate runs on evidence, not on absence)."""
+    try:
+        plan = json.loads(show_json)
+    except ValueError as e:  # JSONDecodeError; an empty body lands here too
+        die(
+            "tf-apply: refused — the saved plan could not be read back "
+            f"({e}); nothing applied"
+        )
+    changes = plan.get("resource_changes") if isinstance(plan, dict) else None
+    if not isinstance(changes, list):
+        die(
+            "tf-apply: refused — the saved plan could not be read back "
+            "(show -json has no resource_changes list); nothing applied"
+        )
     return sorted(
         rc["address"]
-        for rc in plan.get("resource_changes", [])
+        for rc in changes
         if "delete" in rc.get("change", {}).get("actions", [])
     )
 

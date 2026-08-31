@@ -1249,8 +1249,9 @@ def test_cli_validates_before_running(scratch_infra: Path) -> None:
 
 def test_cli_builds_the_expected_argv(scratch_infra: Path) -> None:
     """Round 2 #11: the argv reaching the runner carries the validated
-    `-var project_id=…` and `-input=false` (no interactive prompt), and the
-    mutating commands `-auto-approve` — dropping any reddens."""
+    `-var project_id=…` and `-input=false` (no interactive prompt); `destroy`
+    carries `-auto-approve` and `apply` does NOT (it applies the saved plan,
+    Amendment F) — dropping any reddens."""
     fake = _FakeRunner()
     assert cli.tf("plan", "my-proj", runner=fake) == 0
     plan = fake.calls[0]
@@ -1375,6 +1376,9 @@ def test_cli_refuses_a_credential_in_the_env_loudly(
         "GOOGLE_BACKUP_CREDENTIALS_JSON",
         "GOOGLE_OAUTH_ACCESS_TOKEN",
         "CLOUDSDK_AUTH_ACCESS_TOKEN",
+        "GOOGLE_CLOUD_KEYFILE_JSON",  # Amendment L (round 3 #2): the keyfile family
+        "GCLOUD_KEYFILE_JSON",
+        "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE",
     ):
         monkeypatch.setenv(name, "x")
         assert cli.keyfile_env() == [name]
@@ -1414,7 +1418,26 @@ def test_apply_plans_first_and_refuses_destroys_without_allow_destroy(
         "module.spanner[0].google_spanner_instance.this",
     ]
     assert cli.planned_deletes(_FakeRunner.NO_DESTROY) == []
-    assert cli.planned_deletes("") == []
+    assert cli.planned_deletes('{"resource_changes": []}') == []
+    # Amendment K (round 3 #1): a plan that cannot be read back is a refusal,
+    # never "no deletes" — the gate runs on evidence, not on absence.
+    for bad in (
+        "",
+        "not json",
+        "[]",
+        '{"format_version": "1.2"}',
+        '{"resource_changes": {}}',
+    ):
+        with pytest.raises(SystemExit) as e:
+            cli.planned_deletes(bad)
+        assert e.value.code == 2
+        assert "could not be read back" in capsys.readouterr().out
+    fake = _FakeRunner(plan_json="")
+    with pytest.raises(SystemExit) as e:
+        cli.tf("apply", "my-proj", "yes", "command line", runner=fake)
+    assert e.value.code == 2
+    assert len(fake.calls) == 2 and "show" in fake.calls[1]  # plan, show
+    assert not any("apply" in c for c in fake.calls)  # never apply
     for allow, origin in (("", "file"), ("yes", "environment"), ("no", "command line")):
         fake = _FakeRunner(plan_json=DESTROYING_PLAN)
         with pytest.raises(SystemExit) as e:

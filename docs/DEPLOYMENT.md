@@ -31,15 +31,17 @@ is applied until you run `make tf-apply` yourself.
 ### Operator permissions for `tf-apply` (your ADC identity, not the SA)
 
 Beyond creating the project resources (project Owner, or Editor + Project IAM
-Admin for the SA grants), three `tf-apply` mechanisms need a specific permission — the
-first is inside Owner/Editor, the two billing ones are not — and one
-post-apply path (the last row) needs a grant Terraform makes:
+Admin for the SA grants), four `tf-apply` mechanisms need a specific permission — the
+first is inside Owner/Editor, the two billing ones are not, the custom role's
+is in Owner but not in Editor + Project IAM Admin — and one post-apply path
+(the last row) needs a grant Terraform makes:
 
 | Mechanism | Permission | Minimal predefined role |
 |---|---|---|
 | `user_project_override` (every API call is quota'd on `project_id`) | `serviceusage.services.use` on the project | `roles/serviceusage.serviceUsageConsumer` (in Owner/Editor) |
 | `data.google_billing_account` (the budget's currency) | `billing.accounts.get` on the billing account | `roles/billing.viewer` on the billing account |
 | `google_billing_budget` create/delete | `billing.budgets.create` / `.delete` on the billing account | `roles/billing.costsManager` on the billing account |
+| `google_project_iam_custom_role` (the spanner module's data-plane role, Amendment E — only on an `enable_spanner=true` apply) | `iam.roles.create` / `.update` / `.delete` on the project, plus `iam.roles.undelete` for the 7-day detour | `roles/iam.roleAdmin` on the project (NOT inside `projectIamAdmin`) |
 | Impersonating the SA for manual BigQuery builds (9b on) | `iam.serviceAccounts.getAccessToken` on `ontime-pipeline` | `roles/iam.serviceAccountTokenCreator` ON the SA — Terraform grants it to `operator_principal` when set (Amendment Q) |
 
 The billing-account read is deferred to apply (the budget module `depends_on`
@@ -135,7 +137,7 @@ The default apply creates only the free/near-free layer:
 | Service account + IAM (+ WIF only when `enable_ci_wif=true`) | free | idempotent |
 | Budget (50 / 150 alerts, in the billing account's currency — $ on a USD account) | free (notifies only — see below) | idempotent |
 | **Composer** (`enable_composer=false`) | **not created** — ~$300+/mo if enabled | — |
-| **Spanner** (`enable_spanner=false`) | **not created** — ~$65+/mo after the 90-day trial | — |
+| **Spanner** (`enable_spanner=false`) | **not created** — a `PROVISIONED` 100-PU instance bills from creation, ~$0.09/h (~$65/mo); it is not a free-trial instance (Amendment M) | — |
 
 Total left up by default: a few cents of storage per month. Composer and Spanner
 stay off until their phase (11 / 10) flips the toggle on a deliberate apply.
@@ -255,7 +257,7 @@ projects/ontime-rate-recovery/serviceAccounts/ontime-pipeline@ontime-rate-recove
 then `make tf-plan` (expect `17 to add`, the SA `0 to change`) → `make tf-apply`.
 Or wait for the window to close.
 
-## Spanner trial (Phase 10) and Composer (Phase 11) — teardown dates
+## Spanner (Phase 10) and Composer (Phase 11) — apply and teardown dates
 
 Both stay off (`enable_spanner`/`enable_composer` default false), so a default
 apply never creates them. **Composer** bills ~$300+/mo — Phase 11 applies it on
@@ -264,9 +266,12 @@ dates here when they land.
 
 ### Spanner: bring-up, run, teardown (Phase 10)
 
-Applying Spanner starts the 90-day trial clock; after it, the 100-processing-
-unit instance bills ~$65/mo. Every step is ask-first, and the teardown belongs
-to the same working session as the apply.
+The module creates a `PROVISIONED` 100-processing-unit instance, which bills
+from its first minute (~$0.09/h, ~$65/mo) — it is NOT a Spanner free-trial
+instance (a separate kind, console/gcloud-created, one per project; Phase 10
+Amendment M corrected the "90-day trial clock" this section carried). Every
+step is ask-first, and the teardown belongs to the same working session as
+the apply: never leave it up.
 
 1. **Apply** (your operator ADC — Terraform never runs as the SA, §8. The
    SA detour applies only when the SA is NOT in state: after a full
@@ -324,14 +329,16 @@ to the same working session as the apply.
    `MODULE` variable and no `-target`; a full `make tf-destroy …
    CONFIRM=yes` also removes Spanner along with everything else.
 
-Dated lines (fill on apply day — the BACKLOG trial row's trigger):
+Dated lines (fill on apply day — the BACKLOG Spanner row's trigger):
 
 - `enable_spanner=true` applied: **2026-08-30** (23:37 UTC, `ontime-rate-recovery`,
   operator ADC after the SA undelete + `terraform import` detour; 26/27 on
   the first apply — Amendment D dropped the failed service-agent grant — then
-  `No changes` on the toggled re-plan). **The trial clock is running.**
-- Trial ends (apply + 90 days): **2026-11-28**
-- Destroy-by (before the trial ends; the runbook tears down the same day): **2026-08-30**
+  `No changes` on the toggled re-plan).
+- *(Corrected 2026-08-31, Amendment M: the "trial ends 2026-11-28" and
+  "destroy-by" lines written here on apply day were wrong — the instance is
+  `PROVISIONED`, there was never a trial clock; it billed for the ~13 minutes
+  it was up.)*
 - Destroyed (`enable_spanner=false` re-applied): **2026-08-30** (23:50 UTC,
   operator ADC): plan `0 to add, 0 to change, 8 to destroy` — exactly the
   module's — then `Apply complete! Resources: 0 added, 0 changed, 8

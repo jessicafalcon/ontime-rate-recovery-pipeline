@@ -28,7 +28,7 @@ import subprocess
 import sys
 from typing import NoReturn
 
-from infra.cli import refuse_keyfile_env, validate_project
+from infra.cli import confirmed, refuse_keyfile_env, validate_project
 from loader import bq, spanner
 from loader import load as loader
 
@@ -90,13 +90,6 @@ def load(profile: str, through: str = "") -> int:
 
 LOCAL_TARGET = "duckdb"
 CLOUD_TARGET = "bigquery"
-
-
-def confirmed(confirm: str, origin: str) -> bool:
-    """THE rule: CONFIRM=yes with command-line origin (`$(origin CONFIRM)`).
-    One predicate for the make targets' gate and for the integration
-    fixtures' carried gate (round 2 #7) — the fixture cannot drift from it."""
-    return origin == "command line" and confirm == "yes"
 
 
 def require_confirm(what: str, confirm: str, origin: str) -> None:
@@ -280,7 +273,7 @@ def dbt_build(
 
 def drop_db(profile: str, confirm: str, origin: str) -> int:
     validate_name("PROFILE", profile)
-    if origin != "command line" or confirm != "yes":
+    if not confirmed(confirm, origin):
         die("drop-db: refused — pass CONFIRM=yes on the command line")
     path = loader.db_path(profile)
     wal = path.with_name(path.name + ".wal")  # a leftover WAL replays into the next db

@@ -492,12 +492,14 @@ class FakeSpanner:
         )
 
     # -- the Txn protocol (only valid inside transact)
-    def read(self, sql: str) -> list[tuple]:
+    def read(self, sql: str) -> list[dict[str, object]]:
         if self._in_txn:
             self.txn_reads += 1
         else:
             self.snapshot_reads += 1
-        return self.con.execute(sql).fetchall()
+        cur = self.con.execute(sql)
+        names = [d[0] for d in cur.description]
+        return [dict(zip(names, r, strict=True)) for r in cur.fetchall()]
 
     def upsert(self, table: str, columns: tuple[str, ...], rows: list[tuple]) -> None:
         assert self._in_txn, "upsert outside the transaction"
@@ -827,3 +829,75 @@ def test_duckdb_target_is_single_writer(fresh: Path) -> None:
         con.close()
     assert probe.returncode != 0 and "opened" not in probe.stdout, probe.stdout
     assert "lock" in probe.stderr.lower() or "IOException" in probe.stderr, probe.stderr
+
+
+def test_duckdb_writeback_rolls_back_before_close(
+    fresh: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 3 #5: the explicit `con.rollback()` on the failure path is what
+    restores the table — observed on the SAME, still-open connection before
+    `close` (which would also roll back, and hid a deleted line)."""
+    real_connect = wb.loader.connect
+    calls: list[str] = []
+    held: dict[str, duckdb.DuckDBPyConnection] = {}
+
+    class Proxy:
+        def __init__(self, con: duckdb.DuckDBPyConnection) -> None:
+            self._con = con
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._con, name)
+
+        def rollback(self) -> None:
+            calls.append("rollback")
+            self._con.rollback()
+
+        def close(self) -> None:
+            calls.append("close")  # kept open: the assertion looks inside
+
+    def connect(path: Path) -> Proxy:
+        held["con"] = real_connect(path)
+        return Proxy(held["con"])
+
+    def delete_then_die(con: duckdb.DuckDBPyConnection, winners: list) -> None:
+        con.execute("delete from serving.send_schedule where user_id = 'u-000001'")
+        raise RuntimeError("simulated failure after the delete")
+
+    monkeypatch.setattr(wb.loader, "connect", connect)
+    monkeypatch.setattr(wb, "apply_writeback", delete_then_die)
+    with pytest.raises(RuntimeError, match="simulated"):
+        wb.write_back("tiny", fresh)
+    con = held["con"]
+    try:
+        assert calls == ["rollback", "close"]
+        (n,) = con.execute(
+            "select count(*) from serving.send_schedule where user_id = 'u-000001'"
+        ).fetchone()
+        assert n == 1  # rolled back on the open connection — not by close
+    finally:
+        con.close()
+
+
+def test_existing_pairs_are_read_by_column_name() -> None:
+    """Round 3 #3 (missed in round 2): the stored pair maps by NAME on both
+    targets — the select list is generated from EXISTING_COLUMNS, a shuffled
+    row maps the same, a row with other keys refuses."""
+    from serving import spanner as sp
+
+    cols = ", ".join(wb.EXISTING_COLUMNS)
+    assert wb.EXISTING_SQL == f"select {cols} from {wb.SEND_SCHEDULE}"
+    assert sp.EXISTING_SQL == f"select {cols} from {sp.TABLE}"
+    ts = datetime(2026, 1, 13, tzinfo=UTC)
+    shuffled = {"computed_as_of": ts, "model_version": "v2", "user_id": "u-1"}
+    assert wb.existing_of(shuffled) == ("u-1", ("v2", ts))
+    with pytest.raises(ValueError, match="want"):
+        wb.existing_of({"user_id": "u-1", "model_version": "v2"})
+    with pytest.raises(ValueError, match="datetime"):
+        wb.existing_of({"user_id": "u-1", "model_version": "v2", "computed_as_of": "x"})
+    store = FakeSpanner("my-proj")
+    store.con.execute(
+        "insert into send_schedule values ('u-1', 'c', 8, 0, 'UTC', 0.5, 'v1', "
+        "timestamp '2026-01-13', timestamp '2026-01-13')"
+    )
+    rows = store.transact(lambda t: t.read(sp.EXISTING_SQL))
+    assert rows and set(rows[0]) == set(wb.EXISTING_COLUMNS)
