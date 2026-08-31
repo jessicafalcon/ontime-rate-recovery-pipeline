@@ -119,6 +119,30 @@ annotated **Superseded by …** in place and never deleted.
   (round 6's re-implementation of the round-4/5 key scan) pins that nothing
   under `.claude/` but agent/command prose and hook scripts is tracked, and no
   `.mcp.json`.
+- **Boundary guards are allowlists; a fix replaces the mechanism's kind, not
+  its list; one correctness fix per commit (2026-08-31, Phase 10 round 4).**
+  Rounds 2→3→4 each reported correctness findings inside the previous
+  round's fixes, and every one of those fixes had been a longer denylist at
+  an input the repo does not own (F→K: one more plan-JSON shape; G→L: one
+  more credential spelling; I→#3: one more by-name mapping of ours). A
+  denylist at an open-world boundary has no last fix — the reviewer who
+  reads it can always name the next case — so the round-4 cap re-implemented
+  the three boundaries once against a closed set or the real type
+  (Amendments N1–N3) and the rule is now a contract: CLAUDE.md Engineering
+  contracts "Boundary contract", "Credential standard" (a vendor-namespace
+  variable that is not a listed setting IS a credential, whenever
+  introduced), "Adapter contract" (fakes under the adapter; adapters tested
+  on the real type built offline); Workflow rules "Fix the class, not the
+  case" and "Fix commits"; DONE checklist item 8; the code-reviewer,
+  security-reviewer and functionality-tester checklists carry the check.
+  The bulk fix commits (24/21/15 findings each) were the process half of the
+  cause: with twenty patches in one commit nobody re-derives the invariant,
+  so a correctness fix is now one commit with its invariant in the message.
+  Rejected: a lint that rejects regexes/denylists (cannot tell a boundary
+  guard from a validator of our own shapes — the judgment belongs in review,
+  where the checklist now asks the question); a generic secret-shape
+  denylist over the whole environment (`*_TOKEN`, `*_KEY` — false refusals
+  on unrelated tools' variables, and still a denylist).
 
 ## Appendix — by phase
 

@@ -42,7 +42,17 @@ When invoked:
       FLAG `roles/editor`, `roles/owner`, project-wide `bigquery.admin`.
 - [ ] Budget alerts present; Composer and Spanner behind `enable_*` toggles
       defaulting to `false`; nothing billable created by a plain `apply`.
-- [ ] Terraform state backend is GCS with versioning; state never in git.
+- [ ] Terraform state backend is GCS with versioning; state never in git
+      (today: local `infra/terraform.tfstate`, gitignored — the BACKLOG row's
+      trigger is "before the next `enable_spanner=true` apply"; FLAG a Spanner
+      apply planned without it).
+- [ ] Credential standard (CLAUDE.md Engineering contracts): every cloud
+      command refuses any `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` name outside
+      `infra.cli.CLOUD_ENV_ALLOW`, names only (Amendment N2). FLAG a new
+      denylist or regex of credential names, an allowlist widened without a
+      DECISIONS entry, a refusal or log that prints a value, a secret in a
+      file. The plan-first apply is an action allowlist (`SAFE_ACTIONS`,
+      Amendment N1): FLAG any per-verb branch added beside it.
 - [ ] Spanner federation / write-back credentials are not in dbt `profiles.yml`
       committed text (env-var interpolation only).
 

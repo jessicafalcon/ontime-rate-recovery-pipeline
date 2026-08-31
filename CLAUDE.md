@@ -554,6 +554,30 @@ DECISIONS.md or fix it.
   never computes a score the pipeline serves.
 - Write-back contract: replace only on strictly greater
   `(model_version, computed_as_of)`; key `user_id`.
+- Boundary contract (Phase 10 round 4, Amendments N1–N3): a guard over an
+  input the repo does not own — a vendor's JSON, a vendor's env-var
+  namespace, a library's result type, a CLI's output — is an ALLOWLIST over
+  a closed set or a strict parse to a declared shape, never a denylist of
+  known-bad cases; a shape or value not recognised is REFUSED. The set is
+  pinned exactly by a test, so widening it is a visible edit. Standing
+  instances: `infra.cli.SAFE_ACTIONS` (plan actions), `CLOUD_ENV_ALLOW`
+  (the Google env namespace), `ENV_ALLOW` (the terraform child), the
+  strict `planned_changes` parse. A fix that adds the case a finding names
+  to an existing check is not a fix (Workflow rules, "Fix the class").
+- Credential standard (the same round): auth is ADC/WIF. A secret — key
+  file, inline key, access token, credential-file override — exists only
+  as an environment variable, never in a file, code, a log or a message
+  (refusals print NAMES, never values), and the pipeline refuses to run
+  with one present: every `GOOGLE_*`/`GCLOUD_*`/`CLOUDSDK_*` name that is
+  not a listed SETTING in `CLOUD_ENV_ALLOW` is a credential by definition,
+  whenever it was introduced. A new vendor is its prefix + its settings +
+  a DECISIONS entry; a benign new variable refusing is the intended
+  direction (one line to admit it).
+- Adapter contract: a fake stands UNDER the thinnest adapter over a vendor
+  type — it replaces the client, never the adapter. An adapter that is
+  more than one library call is tested on the REAL type, built offline
+  (protos, `__new__`), not on a fake of ours (round 4 #1: a mapping the
+  fakes bypassed ran nowhere and survived the whole suite).
 - Dialect contract: exactly five dispatch macros (JSON extract,
   `timestamp_diff`, `safe_divide`, `to_local_time`, partition overwrite; the
   fifth was added in Phase 2 with a DECISIONS entry). Each has a DuckDB body
@@ -651,11 +675,24 @@ simple, standard way over the clever way.
   who-writes-what is a design change. One-paragraph spec amendment naming the
   invariant it restores, committed alone; STOP for approval. Wording-only and
   test-only fixes do not need one.
+- Fix the class, not the case: before proposing any correctness fix,
+  answer in the disposition "what set of inputs does this now accept, and
+  is it closed?" A fix that appends the finding's case to an existing
+  denylist, regex or `.get(…, default)` is refused as a fix (Engineering
+  contracts, "Boundary contract"); the mechanism's KIND changes.
+- Fix commits: one correctness finding per commit, the invariant it
+  restores in the message; wording and record fixes batched in their own
+  commit. Never a bulk "N findings applied" commit — Phase 10 rounds 1–3
+  landed 24/21/15 findings in one commit each, every fix the minimal local
+  patch, and the cap followed.
 - Review cap: if two consecutive review rounds report correctness findings
   only in the previous round's fixes, stop patching. Write the invariant,
-  re-implement against it ONCE, one scoped re-review. A human applies this by
-  comparing round N's table to round N−1's; `/review-round` prints the
-  reminder, never a verdict.
+  re-implement against it ONCE, one scoped re-review. When it fires, the
+  re-implementation replaces the mechanism's kind (denylist → allowlist or
+  strict parse; a hand mapping → the library's own call, tested on the
+  real type) and the amendment names the denylist it retires — never a
+  longer list. A human applies this by comparing round N's table to round
+  N−1's; `/review-round` prints the reminder, never a verdict.
 - `/review-round N`: its deterministic half (`make review-gate`, `make
   mutate`) runs before any agent, every round.
 - Scoped re-review: round N reviews round N−1's diff plus the spec's
@@ -682,6 +719,10 @@ simple, standard way over the clever way.
    should have touched.
 7. For each decision the spec didn't cover: the two alternatives not taken
    and why, one line each.
+8. For every guard added or changed at an input the repo does not own: name
+   the closed set or declared shape it accepts, the test that pins the set
+   EXACTLY, and what an unrecognised input does (it refuses). For every
+   adapter over a vendor type: the test that runs it on the real type.
 
 ## Git workflow (one branch + one PR per phase)
 
