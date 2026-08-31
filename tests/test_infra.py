@@ -1405,6 +1405,7 @@ def test_cli_refuses_a_credential_in_the_env_loudly(
         "GCLOUD_",
         "CLOUDSDK_",
         "GCE_METADATA_",
+        "SPANNER_",  # P1: the spanner client's own settings namespace
     )
     assert cli.CLOUD_ENV_SUFFIXES == ("_EMULATOR_HOST",)
     assert cli.CLOUD_ENV_ALLOW == {  # O3: the three runbook settings, exactly
@@ -1437,15 +1438,19 @@ def test_cli_refuses_a_credential_in_the_env_loudly(
 
 
 def test_cloud_env_policy_covers_every_vendor_declared_name() -> None:
-    """Amendment O1 (round 5 #1): the refused domain is closed by the
-    libraries' OWN declarations, not by a list of ours. Every environment
-    variable name google-auth, google-cloud-core and the spanner / bigquery /
-    storage clients declare is classified exactly once — refused by
-    `unlisted_cloud_env`, admitted in CLOUD_ENV_ALLOW, or recorded in
-    CLOUD_ENV_IGNORED — so a library upgrade that adds an input reddens this
-    test until it is classified. Imports only; no client, no network."""
+    """Amendment O1 (round 5 #1) closed the domain over the libraries' OWN
+    declarations; Amendment P1 (round 6 #1) closes it over what they READ:
+    the declaration modules UNION a scan of the installed google/ tree for
+    literal `os.environ` / `os.getenv` reads (round 5 hand-appended one such
+    name and missed two in the same package). Every name is classified
+    exactly once — refused by `unlisted_cloud_env`, admitted in
+    CLOUD_ENV_ALLOW, or ignored with a recorded reason (CLOUD_ENV_IGNORED /
+    _PREFIXES) — so a library upgrade that adds an input reddens this test
+    until it is classified. Imports and file reads only; no client, no
+    network."""
     import re
 
+    import google
     from google.auth import environment_vars as auth_env
     from google.cloud import environment_vars as cloud_env
     from google.cloud.bigquery import _helpers as bq_helpers
@@ -1467,26 +1472,50 @@ def test_cloud_env_policy_covers_every_vendor_declared_name() -> None:
         spanner_client.OPTIMIZER_VERSION_ENV_VAR,
         spanner_client.OPTIMIZER_STATISITCS_PACKAGE_ENV_VAR,
         spanner_client.SPANNER_DISABLE_BUILTIN_METRICS_ENV_VAR,
-        "SPANNER_DISABLE_AFE_SERVER_TIMING",  # a literal os.environ read in spanner_v1
         bq_helpers.BIGQUERY_EMULATOR_HOST,
         bq_helpers._UNIVERSE_DOMAIN_ENV,
         storage_helpers.STORAGE_EMULATOR_ENV_VAR,
         storage_helpers._API_ENDPOINT_OVERRIDE_ENV_VAR,
         storage_helpers._API_VERSION_OVERRIDE_ENV_VAR,
     }
-    assert len(declared) >= 40, sorted(declared)
+    assert len(declared) >= 39, sorted(declared)
+    # P1: what the installed code READS — every literal env access in the
+    # google namespace tree, whether or not a declaration module names it.
+    read_re = re.compile(
+        r"(?:os\.environ\.get|os\.getenv|os\.environ)\s*[\(\[]\s*[\"']([A-Z][A-Z0-9_]+)[\"']"
+    )
+    scanned: set[str] = set()
+    for base in google.__path__:
+        for p in Path(base).rglob("*.py"):
+            scanned |= set(read_re.findall(p.read_text(errors="ignore")))
+    assert len(scanned) >= 60, sorted(scanned)  # a vacuous scan is a failure
+    domain = declared | scanned
+    assert len(domain) >= 90, sorted(domain)
     unclassified = []
-    for name in sorted(declared):
+    for name in sorted(domain):
         refused = cli.unlisted_cloud_env({name: "x"}) == [name]
         admitted = name in cli.CLOUD_ENV_ALLOW
-        ignored = name in cli.CLOUD_ENV_IGNORED
+        ignored = name.startswith(cli.CLOUD_ENV_IGNORED_PREFIXES) or (
+            name in cli.CLOUD_ENV_IGNORED
+        )
         if refused + admitted + ignored != 1:
             unclassified.append(name)
     assert unclassified == []
-    # the ignored set is exactly google-auth's AWS external-account inputs
-    assert cli.CLOUD_ENV_IGNORED <= declared
-    assert all(n.startswith("AWS_") for n in cli.CLOUD_ENV_IGNORED)
-    assert len(cli.CLOUD_ENV_IGNORED) == 5
+    # the two literal-read spanner tracing switches round 6 found are refused
+    # via the SPANNER_ prefix, and the round-5 hand-appended name still is
+    for name in (
+        "SPANNER_ENABLE_EXTENDED_TRACING",
+        "SPANNER_ENABLE_END_TO_END_TRACING",
+        "SPANNER_DISABLE_AFE_SERVER_TIMING",
+        "GEMINI_API_KEY",
+    ):
+        assert name in domain and cli.unlisted_cloud_env({name: "x"}) == [name]
+    # every ignored entry is a name the vendors actually read (no stale rows),
+    # every ignored prefix matches at least one, and nothing ignored is admitted
+    assert cli.CLOUD_ENV_IGNORED <= domain
+    for prefix in cli.CLOUD_ENV_IGNORED_PREFIXES:
+        assert any(n.startswith(prefix) for n in domain), prefix
+        assert not any(n.startswith(prefix) for n in cli.CLOUD_ENV_ALLOW), prefix
     assert not (cli.CLOUD_ENV_ALLOW & cli.CLOUD_ENV_IGNORED)
 
 

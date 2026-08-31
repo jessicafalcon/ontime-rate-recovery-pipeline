@@ -181,7 +181,8 @@ def parse_vars(vars_: str, origin: str = "command line") -> list[str]:
 
 
 # The Google environment namespace (Amendment N2, round 4; its DOMAIN closed
-# by Amendment O1, round 5): every variable the installed google libraries
+# by Amendment O1, round 5, over what the installed libraries READ by
+# Amendment P1, round 6): every variable the installed google libraries
 # read is a setting, a credential, or an ENDPOINT/identity redirection (an
 # emulator host makes a client use anonymous credentials against a named
 # host; a metadata host issues the token). The policy is an ALLOWLIST: a
@@ -192,15 +193,27 @@ def parse_vars(vars_: str, origin: str = "command line") -> list[str]:
 # test_cloud_env_policy_covers_every_vendor_declared_name imports the
 # libraries' own declarations (google.auth.environment_vars,
 # google.cloud.environment_vars, the spanner / bigquery / storage client
-# constants) and asserts every declared name is classified exactly once —
-# refused, admitted, or ignored — so a library upgrade that adds an input
-# reddens the suite until it is classified. A false refusal is the intended
-# direction; admitting a setting is one line here plus a DECISIONS entry.
-CLOUD_ENV_PREFIXES = ("GOOGLE_", "GCLOUD_", "CLOUDSDK_", "GCE_METADATA_")
+# constants) AND scans the installed google/ tree for literal
+# os.environ / os.getenv reads, then asserts every name is classified
+# exactly once — refused, admitted, or ignored with a recorded reason — so
+# a library upgrade that adds an input reddens the suite until it is
+# classified. A false refusal is the intended direction; admitting a
+# setting is one line here plus a DECISIONS entry.
+CLOUD_ENV_PREFIXES = (
+    "GOOGLE_",
+    "GCLOUD_",
+    "CLOUDSDK_",
+    "GCE_METADATA_",
+    # the spanner client's own settings namespace (P1): emulator host,
+    # optimizer, metrics and tracing switches all live under it, and a new
+    # one lands refused instead of unseen
+    "SPANNER_",
+)
 CLOUD_ENV_SUFFIXES = ("_EMULATOR_HOST",)
 # Prefix-less inputs the installed libraries read (google-auth's GCE/App
-# Engine detection switches, storage's endpoint/version overrides, the
-# spanner client's optimizer/metrics settings, datastore's dataset).
+# Engine detection switches, storage's endpoint/version overrides,
+# datastore's dataset; P1: google-genai — a locked dbt-bigquery transitive —
+# reads an API key and the TLS trust-anchor overrides).
 CLOUD_ENV_NAMES = frozenset(
     {
         "NO_GCE_CHECK",
@@ -208,23 +221,39 @@ CLOUD_ENV_NAMES = frozenset(
         "API_ENDPOINT_OVERRIDE",
         "API_VERSION_OVERRIDE",
         "DATASTORE_DATASET",
-        "SPANNER_OPTIMIZER_VERSION",
-        "SPANNER_OPTIMIZER_STATISTICS_PACKAGE",
-        "SPANNER_DISABLE_BUILTIN_METRICS",
-        "SPANNER_DISABLE_AFE_SERVER_TIMING",
+        "GEMINI_API_KEY",  # an API key: a credential's value, never in the env
+        "SSL_CERT_FILE",  # trust-anchor override — the endpoint-redirection class
+        "SSL_CERT_DIR",
     }
 )
-# Declared by google-auth but read ONLY for an AWS external-account ADC file,
-# which this project has no path to; refusing them would be a false refusal
-# on an unrelated tool's variables. Classified here so the closure test can
-# demand that every declared name is accounted for.
+# Read by installed google-namespace code but NOT an input of any cloud
+# client on a path this project can reach; refusing them would be a false
+# refusal on an unrelated tool's (or the test runner's own) variables.
+# Classified here, each class with its reason, so the closure test can
+# demand that every vendor-read name is accounted for.
+CLOUD_ENV_IGNORED_PREFIXES = (
+    "AWS_",  # google-auth: an AWS external-account ADC file — no path here
+    "AIP_",  # aiplatform: set BY Vertex inside its managed training containers
+    "CLOUD_ML_",  # aiplatform: legacy Vertex job metadata, same containers
+    "VERTEX_",  # aiplatform: prediction-server tuning knobs, same containers
+)
 CLOUD_ENV_IGNORED = frozenset(
     {
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-        "AWS_SESSION_TOKEN",
-        "AWS_REGION",
-        "AWS_DEFAULT_REGION",
+        # aiplatform's prediction model server (runs only in a Vertex container)
+        "HANDLER_CLASS",
+        "HANDLER_MODULE",
+        "PREDICTOR_CLASS",
+        "PREDICTOR_MODULE",
+        "WEB_CONCURRENCY",
+        "LIT_PROXY_URL",
+        # CI/test markers read by vendored test helpers, not client inputs
+        # (PYTEST_CURRENT_TEST is set by pytest itself DURING the suite)
+        "GITHUB_ACTIONS",
+        "PYTEST_CURRENT_TEST",
+        "UNITTEST_ON_FORGE",
+        # protobuf runtime switches — an implementation choice, not identity
+        "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION",
+        "TEMPORARILY_DISABLE_PROTOBUF_VERSION_CHECK",
     }
 )
 # The settings the runbook uses — each a real vendor input, none an identity
