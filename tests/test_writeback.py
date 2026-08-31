@@ -748,6 +748,17 @@ def test_candidates_are_read_by_column_name() -> None:
         wb.candidate_of({k: v for k, v in row.items() if k != "tz"})
     with pytest.raises(ValueError):
         wb.candidate_of({**row, "written_at": row["computed_as_of"]})
+    # round 5 O4: a wrong-typed cell refuses, never coerces (the rule
+    # existing_of follows) — str for an int, int for a float, str for a datetime
+    for bad in (
+        {"send_hour_local": "7"},
+        {"confidence": 1},
+        {"computed_as_of": "2026-01-12"},
+        {"user_id": 7},
+        {"send_minute_local": True},
+    ):
+        with pytest.raises(ValueError, match="want"):
+            wb.candidate_of({**row, **bad})
     sql = wb.candidates_sql()
     select = sql[len("select ") : sql.index(" from ")]
     items = [x.strip() for x in select.split(",")]

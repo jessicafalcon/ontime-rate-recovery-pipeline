@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass, fields
 from datetime import datetime
 from pathlib import Path
+from typing import get_type_hints
 
 import duckdb
 
@@ -52,6 +53,9 @@ class Candidate:
 # writer (DuckDB, Spanner) and the offline row hash read this one tuple;
 # tests/test_writeback.py pins it to SEND_SCHEDULE_GOLDEN.columns.
 CANDIDATE_FIELDS: tuple[str, ...] = tuple(f.name for f in fields(Candidate))
+# The declared cell type per field — the read boundary's shape (round 5 O4):
+# a cell of another type refuses, never coerces, on both targets.
+CANDIDATE_TYPES: dict[str, type] = get_type_hints(Candidate)
 COLUMNS: tuple[str, ...] = CANDIDATE_FIELDS + ("written_at",)
 # The stored pair the guard compares, read by NAME like the candidates (round
 # 3 #3): the select list is generated from this tuple and `existing_of` maps
@@ -74,11 +78,16 @@ def candidate_of(row: dict[str, object]) -> Candidate:
     """A Candidate from a row keyed by column NAME (round 2 #9): the read maps
     by name like the write does, so a reordered select list or a swapped pair
     of same-typed columns cannot land in the wrong field. Missing or extra
-    keys refuse."""
+    keys refuse; a cell of the wrong declared type refuses (round 5 O4 — the
+    rule `existing_of` follows, on the read that reaches the served row)."""
     if set(row) != set(CANDIDATE_FIELDS):
         raise ValueError(
             f"candidate columns {sorted(row)} != {sorted(CANDIDATE_FIELDS)}"
         )
+    for name in CANDIDATE_FIELDS:
+        want, cell = CANDIDATE_TYPES[name], row[name]
+        if not isinstance(cell, want) or (want is int and isinstance(cell, bool)):
+            raise ValueError(f"{name} is {type(cell).__name__}, want {want.__name__}")
     return Candidate(**{name: row[name] for name in CANDIDATE_FIELDS})
 
 
