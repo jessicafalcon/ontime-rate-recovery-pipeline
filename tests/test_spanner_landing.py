@@ -301,6 +301,8 @@ CLOUD_ENTRY_POINTS = [
         "CLOUDSDK_AUTH_ACCESS_TOKEN_FILE",  # round 4 #7: outside L's family
         "GOOGLE_GHA_CREDS_PATH",
         "GCLOUD_A_SPELLING_NOBODY_HAS_SEEN_YET",
+        "SPANNER_EMULATOR_HOST",  # round 5 #1 (O1): endpoint redirection
+        "GCE_METADATA_HOST",  # round 5 #1 (O1): the token issuer
     ],
 )
 def test_every_cloud_command_refuses_a_credential_in_the_env(

@@ -1381,6 +1381,12 @@ UNLISTED_CLOUD_ENV = (
     "GOOGLE_GHA_CREDS_PATH",
     "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES",
     "GCLOUD_A_SPELLING_NOBODY_HAS_SEEN_YET",
+    "SPANNER_EMULATOR_HOST",  # round 5 #1 (O1): endpoint redirection → anonymous creds
+    "BIGQUERY_EMULATOR_HOST",
+    "STORAGE_EMULATOR_HOST",
+    "GCE_METADATA_HOST",  # the metadata server that would issue the token
+    "NO_GCE_CHECK",
+    "API_ENDPOINT_OVERRIDE",
 )
 
 
@@ -1392,7 +1398,13 @@ def test_cli_refuses_a_credential_in_the_env_loudly(
     terraform child) on every project-taking command — the child's allowlist
     alone would have DROPPED a key silently, applying as whoever ADC is while
     the operator believed the key was in use. The listed settings pass."""
-    assert cli.CLOUD_ENV_PREFIXES == ("GOOGLE_", "GCLOUD_", "CLOUDSDK_")
+    assert cli.CLOUD_ENV_PREFIXES == (
+        "GOOGLE_",
+        "GCLOUD_",
+        "CLOUDSDK_",
+        "GCE_METADATA_",
+    )
+    assert cli.CLOUD_ENV_SUFFIXES == ("_EMULATOR_HOST",)
     assert cli.CLOUD_ENV_ALLOW == {
         "CLOUDSDK_CONFIG",
         "CLOUDSDK_CORE_PROJECT",
@@ -1419,6 +1431,63 @@ def test_cli_refuses_a_credential_in_the_env_loudly(
     assert cli.unlisted_cloud_env(
         {"GOOGLE_X": "1", "CLOUDSDK_CONFIG": "2", "PATH": "3"}
     ) == ["GOOGLE_X"]
+    assert (
+        cli.unlisted_cloud_env({}) == []
+    )  # round 5 #7: empty means empty, never a fallback
+
+
+def test_cloud_env_policy_covers_every_vendor_declared_name() -> None:
+    """Amendment O1 (round 5 #1): the refused domain is closed by the
+    libraries' OWN declarations, not by a list of ours. Every environment
+    variable name google-auth, google-cloud-core and the spanner / bigquery /
+    storage clients declare is classified exactly once — refused by
+    `unlisted_cloud_env`, admitted in CLOUD_ENV_ALLOW, or recorded in
+    CLOUD_ENV_IGNORED — so a library upgrade that adds an input reddens this
+    test until it is classified. Imports only; no client, no network."""
+    import re
+
+    from google.auth import environment_vars as auth_env
+    from google.cloud import environment_vars as cloud_env
+    from google.cloud.bigquery import _helpers as bq_helpers
+    from google.cloud.spanner_v1 import client as spanner_client
+    from google.cloud.storage import _helpers as storage_helpers
+
+    declared: set[str] = set()
+    for mod in (auth_env, cloud_env):
+        declared |= {
+            v
+            for k, v in vars(mod).items()
+            if not k.startswith("_")
+            and isinstance(v, str)
+            and re.fullmatch(r"[A-Z][A-Z0-9_]+", v)
+        }
+    declared |= {
+        spanner_client.EMULATOR_ENV_VAR,
+        spanner_client.LOG_CLIENT_OPTIONS_ENV_VAR,
+        spanner_client.OPTIMIZER_VERSION_ENV_VAR,
+        spanner_client.OPTIMIZER_STATISITCS_PACKAGE_ENV_VAR,
+        spanner_client.SPANNER_DISABLE_BUILTIN_METRICS_ENV_VAR,
+        "SPANNER_DISABLE_AFE_SERVER_TIMING",  # a literal os.environ read in spanner_v1
+        bq_helpers.BIGQUERY_EMULATOR_HOST,
+        bq_helpers._UNIVERSE_DOMAIN_ENV,
+        storage_helpers.STORAGE_EMULATOR_ENV_VAR,
+        storage_helpers._API_ENDPOINT_OVERRIDE_ENV_VAR,
+        storage_helpers._API_VERSION_OVERRIDE_ENV_VAR,
+    }
+    assert len(declared) >= 40, sorted(declared)
+    unclassified = []
+    for name in sorted(declared):
+        refused = cli.unlisted_cloud_env({name: "x"}) == [name]
+        admitted = name in cli.CLOUD_ENV_ALLOW
+        ignored = name in cli.CLOUD_ENV_IGNORED
+        if refused + admitted + ignored != 1:
+            unclassified.append(name)
+    assert unclassified == []
+    # the ignored set is exactly google-auth's AWS external-account inputs
+    assert cli.CLOUD_ENV_IGNORED <= declared
+    assert all(n.startswith("AWS_") for n in cli.CLOUD_ENV_IGNORED)
+    assert len(cli.CLOUD_ENV_IGNORED) == 5
+    assert not (cli.CLOUD_ENV_ALLOW & cli.CLOUD_ENV_IGNORED)
 
 
 DESTROYING_PLAN = (

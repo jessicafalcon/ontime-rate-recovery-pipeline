@@ -180,18 +180,53 @@ def parse_vars(vars_: str, origin: str = "command line") -> list[str]:
     return out
 
 
-# The Google environment namespace (Amendment N2, round 4): every variable
-# named `GOOGLE_*`, `GCLOUD_*` or `CLOUDSDK_*` is a google-auth / gcloud /
-# provider input — a setting or a credential. The policy is an ALLOWLIST: a
-# cloud command runs only while every name in the namespace is one of the
-# settings below; any other name is a credential until listed and refuses
-# LOUDLY (names only, never values) before a client or child exists. So a key
-# file path, an inline key, a bearer token or a credential-file override under
-# ANY spelling — present or future — can never become a google client's
-# identity silently (rounds 2–3 grew a denylist of spellings: G, then L; the
-# next spelling was always the next finding). A benign new setting is one
-# line here plus a DECISIONS entry; a false refusal is the intended direction.
-CLOUD_ENV_PREFIXES = ("GOOGLE_", "GCLOUD_", "CLOUDSDK_")
+# The Google environment namespace (Amendment N2, round 4; its DOMAIN closed
+# by Amendment O1, round 5): every variable the installed google libraries
+# read is a setting, a credential, or an ENDPOINT/identity redirection (an
+# emulator host makes a client use anonymous credentials against a named
+# host; a metadata host issues the token). The policy is an ALLOWLIST: a
+# cloud command runs only while every name in the domain is one of the
+# settings in CLOUD_ENV_ALLOW; any other name refuses LOUDLY (names only,
+# never values) before a client or child exists. The domain is not a
+# hand-picked list of spellings: tests/test_infra.py::
+# test_cloud_env_policy_covers_every_vendor_declared_name imports the
+# libraries' own declarations (google.auth.environment_vars,
+# google.cloud.environment_vars, the spanner / bigquery / storage client
+# constants) and asserts every declared name is classified exactly once —
+# refused, admitted, or ignored — so a library upgrade that adds an input
+# reddens the suite until it is classified. A false refusal is the intended
+# direction; admitting a setting is one line here plus a DECISIONS entry.
+CLOUD_ENV_PREFIXES = ("GOOGLE_", "GCLOUD_", "CLOUDSDK_", "GCE_METADATA_")
+CLOUD_ENV_SUFFIXES = ("_EMULATOR_HOST",)
+# Prefix-less inputs the installed libraries read (google-auth's GCE/App
+# Engine detection switches, storage's endpoint/version overrides, the
+# spanner client's optimizer/metrics settings, datastore's dataset).
+CLOUD_ENV_NAMES = frozenset(
+    {
+        "NO_GCE_CHECK",
+        "APPENGINE_RUNTIME",
+        "API_ENDPOINT_OVERRIDE",
+        "API_VERSION_OVERRIDE",
+        "DATASTORE_DATASET",
+        "SPANNER_OPTIMIZER_VERSION",
+        "SPANNER_OPTIMIZER_STATISTICS_PACKAGE",
+        "SPANNER_DISABLE_BUILTIN_METRICS",
+        "SPANNER_DISABLE_AFE_SERVER_TIMING",
+    }
+)
+# Declared by google-auth but read ONLY for an AWS external-account ADC file,
+# which this project has no path to; refusing them would be a false refusal
+# on an unrelated tool's variables. Classified here so the closure test can
+# demand that every declared name is accounted for.
+CLOUD_ENV_IGNORED = frozenset(
+    {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+    }
+)
 CLOUD_ENV_ALLOW = frozenset(
     {
         "CLOUDSDK_CONFIG",  # the gcloud/ADC config dir — where the ADC file lives
@@ -234,13 +269,23 @@ def env_tf_vars() -> list[str]:
     return sorted(k for k in os.environ if k.startswith(ENV_REFUSE_PREFIXES))
 
 
-def unlisted_cloud_env(env: dict[str, str] | None = None) -> list[str]:
-    """Names in the Google namespace that CLOUD_ENV_ALLOW does not admit —
-    what the gate refuses and what tests/conftest.py scrubs (one function)."""
-    src = os.environ if env is None else env
-    return sorted(
-        k for k in src if k.startswith(CLOUD_ENV_PREFIXES) and k not in CLOUD_ENV_ALLOW
+def in_cloud_namespace(name: str) -> bool:
+    """The refused DOMAIN: a vendor prefix, the emulator-host suffix, or a
+    prefix-less name the libraries read (Amendment O1)."""
+    return (
+        name.startswith(CLOUD_ENV_PREFIXES)
+        or name.endswith(CLOUD_ENV_SUFFIXES)
+        or name in CLOUD_ENV_NAMES
     )
+
+
+def unlisted_cloud_env(env: dict[str, str] | None = None) -> list[str]:
+    """Names in the cloud-env domain that CLOUD_ENV_ALLOW does not admit —
+    what the gate refuses and what tests/conftest.py scrubs (one function).
+    `env` is the mapping to inspect; None means this process's environment
+    (an empty mapping is empty, never a fallback)."""
+    src = os.environ if env is None else env
+    return sorted(k for k in src if in_cloud_namespace(k) and k not in CLOUD_ENV_ALLOW)
 
 
 def refuse_cloud_env(what: str) -> None:
