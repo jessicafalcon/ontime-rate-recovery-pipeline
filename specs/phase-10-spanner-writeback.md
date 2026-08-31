@@ -811,6 +811,84 @@ closed set or the real type; no per-case patch is applied.
   comment (#25); `existing_sql`'s docstring (#26); the untracked README
   named as such (#28).
 
+## Amendments (review round 5, 2026-08-31)
+
+Round 5 was the cap's scoped re-review of N1–N3. Its correctness findings
+sit inside the re-implementation, and each has the same shape: the KIND is
+right (allowlist, strict parse, the library's call) but the SET was not yet
+closed — the prefix tuple was still hand-picked, the parser admitted one
+degenerate shape, the adapter contract was applied to one of two clients.
+Amendment O closes each set by construction; nothing here is a longer list.
+
+- **O1 — the cloud-env domain is closed by the vendors' own declarations
+  (round 5 #1 — code-reviewer #1 BLOCKER, security-reviewer #1; #7).**
+  Restores **invariant 6**'s identity half: `SPANNER_EMULATOR_HOST` (the
+  Spanner client then uses `AnonymousCredentials()` against a named host —
+  the write-back and the dims landing leave the project silently),
+  `BIGQUERY_EMULATOR_HOST`, `STORAGE_EMULATOR_HOST`, `GCE_METADATA_HOST` /
+  `_ROOT` / `_IP` and `NO_GCE_CHECK` all passed N2's three prefixes.
+  Mechanism: the refused domain is `in_cloud_namespace(name)` = a prefix in
+  `CLOUD_ENV_PREFIXES` (`GOOGLE_`, `GCLOUD_`, `CLOUDSDK_`, `GCE_METADATA_`)
+  OR a suffix in `CLOUD_ENV_SUFFIXES` (`_EMULATOR_HOST`) OR a name in
+  `CLOUD_ENV_NAMES` (the prefix-less inputs the installed libraries read:
+  `NO_GCE_CHECK`, `APPENGINE_RUNTIME`, `API_ENDPOINT_OVERRIDE`,
+  `API_VERSION_OVERRIDE`, `DATASTORE_DATASET`, the four `SPANNER_*`
+  settings); `CLOUD_ENV_IGNORED` names the five `AWS_*` inputs google-auth
+  reads only for an AWS external-account ADC file this project has no path
+  to (a false refusal on an unrelated tool's variable). The CLOSURE is a
+  test, not a claim: `tests/test_infra.py::test_cloud_env_policy_covers_every_vendor_declared_name`
+  imports `google.auth.environment_vars`, `google.cloud.environment_vars`
+  and the spanner / bigquery / storage client constants and asserts every
+  declared name is classified exactly once — refused, an admitted setting,
+  or ignored — so a library upgrade that adds an input reddens the suite
+  until it is classified. `unlisted_cloud_env({}) == []` is pinned (#7).
+  Rejected: adding `GCE_` and the emulator names to the prefix list by hand
+  (the fourth hand-picked list at this boundary).
+- **O2 — `planned_changes` refuses an empty action set (round 5 #2 —
+  code-reviewer #2, functionality-tester #1).** `frozenset() <= allowed`
+  was vacuously true, so `{"actions": []}` applied as safe. An entry must
+  carry at least one action; pinned in the bad-bodies table.
+- **O3 — `CLOUD_ENV_ALLOW` is the three settings the runbook uses (round 5
+  #3 — code-reviewer #3).** `CLOUDSDK_AUTH_IMPERSONATE_SERVICE_ACCOUNT`
+  (an identity selector; the runbook impersonates with the login FLAG) and
+  `CLOUDSDK_PYTHON` (an interpreter path; nothing here spawns gcloud) are
+  dropped: `CLOUDSDK_CONFIG`, `CLOUDSDK_CORE_PROJECT`, `GOOGLE_CLOUD_PROJECT`
+  remain — each a real vendor input, none an identity.
+- **O4 — the read boundary refuses wrong-typed cells on BOTH reads and the
+  BigQuery adapter is tested on the real type (round 5 #9, #10 — missed in
+  round 4).** `candidate_of` checks each cell against `Candidate`'s
+  declared field type (the same rule `existing_of` gained in N3);
+  `GoogleQueryClient.query`'s `dict(r.items())` runs in a test over real
+  `google.cloud.bigquery.table.Row`s built offline (shuffled field order,
+  an empty result) — the Adapter contract applied to the second client.
+- **O5 — one origin predicate (round 5 #5 — security-reviewer #3).**
+  `full_refresh_args` inlined the literal rule; it calls `confirmed` now,
+  so the docstring's closure claim is true (the one carve-out is `make
+  freeze`, in the generator).
+- **O6 — the conftest scrub is pinned BEHAVIOURALLY (round 5 #6, #8 —
+  functionality-tester #2, #4).** The source-grep test could be satisfied
+  by a dead call; now a child pytest with the conftest copied beside a
+  probe, run with unlisted names, an emulator host and a `TF_VAR_*`
+  exported, must see none of them and still see the listed setting — and
+  the same probe WITHOUT the conftest must fail. The scrub's Terraform half
+  reads `infra.cli.ENV_REFUSE_PREFIXES` instead of its own literal.
+- Also applied: the protobuf `struct_pb2` import in the N3 test replaced by
+  the spanner proto's own `.pb().values.add` (#11 — the dependency
+  allowlist); DEPLOYMENT step 5's token check moved off the argv (stdin
+  POST) with the name-only alternative stated (#4, #12); the retired tfstate
+  trigger corrected where three places still quoted it, and the row's
+  confidentiality half given its own statement and trigger (#12, #13);
+  DEPLOYMENT step 1's custom-role detour retired and the 2026-09-07
+  pointers reworded (#14, #19, #20); DECISIONS' `CLOUDSDK_*` shorthand
+  (#15); the F/G/K/L paragraphs annotated Superseded in place (#16); the
+  mutations block gains `planned_changes` and `unlisted_cloud_env` (#17);
+  Record-updates lists PROJECT_BRIEF and the `.claude/` prose (#18); the
+  Makefile's `tf-apply` comment (#21); the code-reviewer rule narrowed to
+  a CREDENTIAL's value (#22); the Credential standard's "never in a file"
+  clause scoped to files the repo controls — gcloud's ADC file is the one
+  credential at rest, outside the repo (#23); PROJECT_BRIEF's two undated
+  annotations dated (#24).
+
 ## Out of scope (deferred, recorded)
 
 - The `computed_as_of` discriminator redesign — BACKLOG, re-deferred with the
