@@ -20,6 +20,6 @@ variable "raw_dataset" {
 }
 
 variable "sa_email" {
-  description = "The pipeline service account (module.iam) — databaseUser on the one database, connectionUser on the one connection."
+  description = "The pipeline service account (module.iam) — the custom data-plane role (ontimeSpannerDataUser) on the one database, connectionUser on the one connection."
   type        = string
 }

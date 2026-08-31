@@ -406,8 +406,9 @@ user who controls the environment (the threat model's standing carve-out).
   hand-edited, no clock on the write path.
 - **security-reviewer** (mandatory — `infra/`, `serving/`, IAM grants, new
   CONFIRM-gated cloud/destructive targets): scoped grants only
-  (`databaseUser` + `connectionUser` for the SA, nothing for anyone else —
-  no admin), no key material, gating before clients, the toggle-flip destroy
+  (the custom data-plane role + `connectionUser` for the SA, nothing for
+  anyone else — no DDL, no admin; Amendment E), no key material, gating
+  before clients, the toggle-flip destroy
   path.
 - **functionality-tester** (after code-reviewer): DONE command, the fakes'
   negative tests (v10/v2, malformed version, refusal-before-client), mutation

@@ -545,7 +545,8 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   docs, the principal running `EXTERNAL_QUERY` needs
   `roles/spanner.databaseReader` on the database and
   `roles/bigquery.connectionUser` on the connection — the pipeline SA's
-  `databaseUser` + `connectionUser` grants are the whole set (Amendment D).
+  database grant + `connectionUser` were the whole set (Amendment D; the
+  database grant became the custom data-plane role in round 2, Amendment E).
 - **Every predefined Spanner role that writes also carries `updateDdl`; a
   custom role may only carry permissions of an ENABLED API** (Phase 10,
   review round 2). `roles/spanner.databaseUser` is read+write+DDL, so the
