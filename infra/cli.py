@@ -181,24 +181,29 @@ def parse_vars(vars_: str, origin: str = "command line") -> list[str]:
 
 
 # The Google environment namespace (Amendment N2, round 4; its DOMAIN closed
-# by Amendment O1, round 5, over what the installed libraries READ by
-# Amendment P1, round 6): every variable the installed google libraries
-# read is a setting, a credential, or an ENDPOINT/identity redirection (an
-# emulator host makes a client use anonymous credentials against a named
-# host; a metadata host issues the token). The policy is an ALLOWLIST: a
-# cloud command runs only while every name in the domain is one of the
-# settings in CLOUD_ENV_ALLOW; any other name refuses LOUDLY (names only,
-# never values) before a client or child exists. The domain is not a
-# hand-picked list of spellings: tests/test_infra.py::
-# test_cloud_env_policy_covers_every_vendor_declared_name imports the
-# libraries' own declarations (google.auth.environment_vars,
-# google.cloud.environment_vars, the spanner / bigquery / storage client
-# constants) AND scans the installed google/ tree for literal
-# os.environ / os.getenv reads, then asserts every name is classified
-# exactly once — refused, admitted, or ignored with a recorded reason — so
-# a library upgrade that adds an input reddens the suite until it is
-# classified. A false refusal is the intended direction; admitting a
-# setting is one line here plus a DECISIONS entry.
+# by O1, round 5; widened over what the installed libraries READ by P1, round
+# 6; narrowed to a DECLARED CLOSED SET by Amendment Q, the security re-review
+# of P): every variable a google client acts on is a setting, a credential, an
+# identity redirection (an emulator host makes a client use anonymous
+# credentials against a named host; a metadata host issues the token), or a
+# transport redirection (a proxy endpoint, a TLS trust-anchor override, a
+# session-key log). The policy is an ALLOWLIST: a cloud command runs only while
+# every name in the domain is one of the settings in CLOUD_ENV_ALLOW; any other
+# name refuses LOUDLY (names only, never values) before a client or child
+# exists. The refuse domain is ENUMERATED and pinned — the vendor prefixes, the
+# _EMULATOR_HOST suffix, the prefix-less names the libraries read
+# (CLOUD_ENV_NAMES) and the transport-redirection class (REDIRECTION_NAMES) —
+# so it refuses on the IN-PROCESS cloud paths (bq-load, writeback), not only
+# the terraform child (P2 closed the redirection class for the child alone).
+# tests/test_infra.py's closure test pins that set exactly and checks every
+# name the vendor DECLARATION modules name is classified once; a scan of the
+# installed google/ tree for literal env reads is a COVERAGE AID that flags a
+# newly-read name against the recorded ignored classes — not a proof the domain
+# is closed over everything the libraries read (a constant-keyed read escapes
+# any scan; Q A3 records the two known — APPDATA, refused, and
+# ENABLE_GCS_PYTHON_CLIENT_OTEL_TRACES, a benign tracing switch). A false
+# refusal is the intended direction; admitting a setting is one line here plus
+# a DECISIONS entry.
 CLOUD_ENV_PREFIXES = (
     "GOOGLE_",
     "GCLOUD_",
@@ -213,7 +218,9 @@ CLOUD_ENV_SUFFIXES = ("_EMULATOR_HOST",)
 # Prefix-less inputs the installed libraries read (google-auth's GCE/App
 # Engine detection switches, storage's endpoint/version overrides,
 # datastore's dataset; P1: google-genai — a locked dbt-bigquery transitive —
-# reads an API key and the TLS trust-anchor overrides).
+# reads an API key; Q: APPDATA is the Windows ADC config root, the identity
+# class, CLOUDSDK_CONFIG's sibling). The TLS trust-anchor overrides moved to
+# REDIRECTION_NAMES.
 CLOUD_ENV_NAMES = frozenset(
     {
         "NO_GCE_CHECK",
@@ -222,7 +229,30 @@ CLOUD_ENV_NAMES = frozenset(
         "API_VERSION_OVERRIDE",
         "DATASTORE_DATASET",
         "GEMINI_API_KEY",  # an API key: a credential's value, never in the env
-        "SSL_CERT_FILE",  # trust-anchor override — the endpoint-redirection class
+        "APPDATA",  # Windows ADC config root — identity, refused (Q, A3)
+    }
+)
+# The transport-redirection class the Credential standard names a secret: a
+# proxy endpoint (upper- and lower-case — requests honors both), a TLS
+# trust-anchor override, a gRPC roots override, a session-key log, an OAuth
+# downgrade. Any HTTP/TLS stack the google clients import reads these, so an
+# operator export reaches the IN-PROCESS cloud paths, not only the terraform
+# child ENV_ALLOW governs (Amendment Q, A1). A declared closed set; widening it
+# is a visible edit (never the open-world transport scan the finding proposed).
+REDIRECTION_NAMES = frozenset(
+    {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH",
+        "SSLKEYLOGFILE",
+        "OAUTHLIB_INSECURE_TRANSPORT",
+        "SSL_CERT_FILE",
         "SSL_CERT_DIR",
     }
 )
@@ -308,12 +338,14 @@ def env_tf_vars() -> list[str]:
 
 
 def in_cloud_namespace(name: str) -> bool:
-    """The refused DOMAIN: a vendor prefix, the emulator-host suffix, or a
-    prefix-less name the libraries read (Amendment O1)."""
+    """The refused DOMAIN: a vendor prefix, the emulator-host suffix, a
+    prefix-less name the libraries read (O1), or a name in the
+    transport-redirection class (Amendment Q — refused on every path)."""
     return (
         name.startswith(CLOUD_ENV_PREFIXES)
         or name.endswith(CLOUD_ENV_SUFFIXES)
         or name in CLOUD_ENV_NAMES
+        or name in REDIRECTION_NAMES
     )
 
 

@@ -1352,12 +1352,13 @@ def test_cli_child_env_is_an_allowlist(
         "TF_LOG": "TRACE",
         "TF_LOG_PATH": "/tmp/l",
         "HOME": "/tmp/h",
-        # P2 (round 6 #3): the proxy/trust-anchor trio is out of ENV_ALLOW —
-        # NO_PROXY and HTTPS_PROXY are outside the refused domain (nothing
-        # google-namespace reads them), so they pass the gate yet must not
-        # reach the child; SSL_CERT_FILE is refused by the gate itself (P1)
+        # NO_PROXY is out of ENV_ALLOW and passes the gate (a de-restriction,
+        # not a redirect — not in REDIRECTION_NAMES) yet must not reach the
+        # child. The redirect proxy names ARE refused by the gate now
+        # (Amendment Q, A1: HTTPS_PROXY etc. are the redirection class), so
+        # they never reach this far — that path is
+        # test_cli_refuses_a_credential_in_the_env_loudly.
         "NO_PROXY": "*",
-        "HTTPS_PROXY": "http://mitm.example:3128",
     }.items():
         monkeypatch.setenv(k, v)
     fake = _FakeRunner()
@@ -1366,7 +1367,7 @@ def test_cli_child_env_is_an_allowlist(
     assert set(env) <= set(cli.ENV_ALLOW)
     assert env["HOME"] == "/tmp/h" and "PATH" in env
     assert not any(k.startswith(("GOOGLE_", "TF_")) for k in env)
-    assert "NO_PROXY" not in env and "HTTPS_PROXY" not in env
+    assert "NO_PROXY" not in env
     assert "SSL_CERT_FILE" not in cli.ENV_ALLOW
     # Amendment N2 → P3 (round 6 #5): a name the child may see is never one
     # the gate refuses — checked with the domain function itself, not a
@@ -1401,6 +1402,8 @@ UNLISTED_CLOUD_ENV = (
     "GCE_METADATA_HOST",  # the metadata server that would issue the token
     "NO_GCE_CHECK",
     "API_ENDPOINT_OVERRIDE",
+    "HTTPS_PROXY",  # Amendment Q: the transport-redirection class, refused too
+    "SSLKEYLOGFILE",
 )
 
 
@@ -1450,16 +1453,16 @@ def test_cli_refuses_a_credential_in_the_env_loudly(
 
 
 def test_cloud_env_policy_covers_every_vendor_declared_name() -> None:
-    """Amendment O1 (round 5 #1) closed the domain over the libraries' OWN
-    declarations; Amendment P1 (round 6 #1) closes it over what they READ:
-    the declaration modules UNION a scan of the installed google/ tree for
-    literal `os.environ` / `os.getenv` reads (round 5 hand-appended one such
-    name and missed two in the same package). Every name is classified
-    exactly once — refused by `unlisted_cloud_env`, admitted in
-    CLOUD_ENV_ALLOW, or ignored with a recorded reason (CLOUD_ENV_IGNORED /
-    _PREFIXES) — so a library upgrade that adds an input reddens this test
-    until it is classified. Imports and file reads only; no client, no
-    network."""
+    """Amendment Q narrows the closure (O1/P1) to a DECLARED CLOSED SET. The
+    security proof is the ENUMERATED refuse domain — the vendor prefixes, the
+    _EMULATOR_HOST suffix, CLOUD_ENV_NAMES and the REDIRECTION_NAMES transport
+    class — pinned exactly here; every name the vendor DECLARATION modules name
+    classifies exactly once. The scan of the installed google/ tree for literal
+    env reads is a COVERAGE AID: it flags a newly-read name against the recorded
+    ignored classes, but does not claim to close the domain over everything the
+    libraries read — a constant-keyed read escapes any scan (Q A3, recorded:
+    APPDATA is refused, ENABLE_GCS_PYTHON_CLIENT_OTEL_TRACES is a benign
+    tracing switch). Imports and file reads only; no client, no network."""
     import re
 
     import google
@@ -1522,6 +1525,15 @@ def test_cloud_env_policy_covers_every_vendor_declared_name() -> None:
         "GEMINI_API_KEY",
     ):
         assert name in domain and cli.unlisted_cloud_env({name: "x"}) == [name]
+    # the transport-redirection class refuses on EVERY path (Amendment Q, A1),
+    # pinned exactly — a proxy endpoint, a TLS trust-anchor override, a gRPC
+    # roots override, a session-key log, an OAuth downgrade; APPDATA (the
+    # Windows ADC root, the identity class) is refused too.
+    assert cli.REDIRECTION_NAMES  # non-empty
+    for name in cli.REDIRECTION_NAMES | {"APPDATA"}:
+        assert cli.unlisted_cloud_env({name: "x"}) == [name], name
+    assert not (cli.REDIRECTION_NAMES & cli.CLOUD_ENV_ALLOW)
+    assert not (cli.REDIRECTION_NAMES & cli.CLOUD_ENV_IGNORED)
     # every ignored entry is a name the vendors actually read (no stale rows),
     # every ignored prefix matches at least one, and nothing ignored is admitted
     assert cli.CLOUD_ENV_IGNORED <= domain
