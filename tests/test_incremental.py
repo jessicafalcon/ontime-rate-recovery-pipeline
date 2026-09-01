@@ -17,7 +17,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from loader import load as loader
+from landing import load as landing
 from tests import pins
 
 ROOT = Path(__file__).parent.parent
@@ -36,7 +36,7 @@ def run_landing(db: Path, through: str | None = None) -> None:
     os.environ.setdefault("DO_NOT_TRACK", "1")
     from dbt.cli.main import dbtRunner
 
-    loader.load("tiny", db, through=through)
+    landing.load("tiny", db, through=through)
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("OTR_DUCKDB_PATH", str(db))
         res = dbtRunner().invoke(
@@ -290,9 +290,9 @@ def test_build_under_tokyo_is_identical(tmp_path: Path, landings: TwoLanding) ->
     """Invariant 6: no clock — a build under a non-UTC host zone is identical
     (the session zone is pinned UTC; local time uses the tz macro, not the host)."""
     script = (
-        "import os,sys; from pathlib import Path; from loader import load as loader;"
+        "import os,sys; from pathlib import Path; from landing import load as landing;"
         "os.environ['DO_NOT_TRACK']='1';"
-        "db=Path(sys.argv[1]); loader.load('tiny', db);"
+        "db=Path(sys.argv[1]); landing.load('tiny', db);"
         "os.environ['OTR_DUCKDB_PATH']=str(db);"
         "from dbt.cli.main import dbtRunner;"
         "r=dbtRunner().invoke(['run','--project-dir',sys.argv[2],'--profiles-dir',sys.argv[2],"
@@ -378,7 +378,7 @@ def run_staging(db: Path, profile: str, through: str | None = None) -> None:
     os.environ.setdefault("DO_NOT_TRACK", "1")
     from dbt.cli.main import dbtRunner
 
-    loader.load(profile, db, through=through)
+    landing.load(profile, db, through=through)
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("OTR_DUCKDB_PATH", str(db))
         res = dbtRunner().invoke(
@@ -409,8 +409,8 @@ def test_staging_lookback_boundary_reprocesses_a_late_row(
     not `<`. Falsifies stg_events/stg_prompts narrowed to `<`."""
     root = tmp_path / "repo"
     _boundary_fixture(root)
-    monkeypatch.setattr(loader, "ROOT", root)
-    monkeypatch.setattr(loader, "DATA", root / "data")
+    monkeypatch.setattr(landing, "ROOT", root)
+    monkeypatch.setattr(landing, "DATA", root / "data")
 
     one = tmp_path / "one.duckdb"
     run_staging(one, "boundary")  # whole set: horizon 2026-01-10, distance 5

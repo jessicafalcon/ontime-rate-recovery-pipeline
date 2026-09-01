@@ -1,4 +1,4 @@
-"""Phase 10: the Spanner dims landing (loader/spanner.py) against fakes — the
+"""Phase 10: the Spanner dims landing (landing/spanner.py) against fakes — the
 seed lands with the generated contract's columns and types, idempotently; the
 CLI gates before any client. No service, no network."""
 
@@ -12,8 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from loader import cli, spanner
-from loader import load as loader
+from landing import cli, spanner
+from landing import load as landing
+from pipeline import cli as pipeline_cli
 from tests import pins
 
 ROOT = Path(__file__).parent.parent
@@ -69,7 +70,7 @@ def test_header_drift_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     dims = tmp_path / "dims"
     dims.mkdir()
     (dims / "dim_user.csv").write_text("user_id,tz\nu-1,UTC\n")
-    monkeypatch.setattr(spanner.loader, "fixture_dir", lambda p: tmp_path)
+    monkeypatch.setattr(spanner.landing, "fixture_dir", lambda p: tmp_path)
     store = FakeDim()
     with pytest.raises(ValueError, match="header"):
         spanner.load_dims("tiny", "my-proj", clients=lambda p: store)
@@ -131,11 +132,11 @@ def test_cloud_landings_refuse_manifest_drift(
 ) -> None:
     """Round 1 #6: one edited byte in a frozen fixture → `<target> DRIFT`, exit
     1, and the client is never called — the same pin `load` has
-    (tests/test_loader.py), for both cloud landings (bq-load shared the gap)."""
+    (tests/test_landing.py), for both cloud landings (bq-load shared the gap)."""
     root = tmp_path / "repo"
     shutil.copytree(TINY, root / "fixtures" / "tiny")
-    monkeypatch.setattr(loader, "ROOT", root)
-    monkeypatch.setattr(loader, "DATA", root / "data")
+    monkeypatch.setattr(landing, "ROOT", root)
+    monkeypatch.setattr(landing, "DATA", root / "data")
     f = root / "fixtures" / "tiny" / "dims" / "dim_user.csv"
     f.write_text(f.read_text().replace("u-000008", "u-000009", 1))
     calls: list[str] = []
@@ -164,14 +165,14 @@ def test_dbt_build_admits_exactly_one_var_override(
     build can override, it is validated like a name, and it reaches dbt as
     `--vars {dim_user_identifier: <relation>}` — deleting the append or
     widening the seam reddens here."""
-    assert cli.dbt_vars_args("") == []
-    assert cli.dbt_vars_args("dim_user_spanner") == [
+    assert pipeline_cli.dbt_vars_args("") == []
+    assert pipeline_cli.dbt_vars_args("dim_user_spanner") == [
         "--vars",
         "{dim_user_identifier: dim_user_spanner}",
     ]
     for bad in ("../x", 'a"; rm', "dim_user_spanner, model_version: x1", "A"):
         with pytest.raises(SystemExit) as e:
-            cli.dbt_vars_args(bad)
+            pipeline_cli.dbt_vars_args(bad)
         assert e.value.code == 2, bad
     seen: dict[str, list[str]] = {}
 
@@ -184,12 +185,15 @@ def test_dbt_build_admits_exactly_one_var_override(
 
     monkeypatch.setattr(dbt_main, "dbtRunner", Runner)
     monkeypatch.setattr(cli, "load", lambda p, t="": 0)
-    assert cli.dbt_build("tiny", "duckdb", dim_user_identifier="dim_user_spanner") == 0
+    assert (
+        pipeline_cli.dbt_build("tiny", "duckdb", dim_user_identifier="dim_user_spanner")
+        == 0
+    )
     assert seen["args"][-2:] == ["--vars", "{dim_user_identifier: dim_user_spanner}"]
-    assert cli.dbt_build("tiny", "duckdb") == 0
+    assert pipeline_cli.dbt_build("tiny", "duckdb") == 0
     assert "--vars" not in seen["args"]  # the default build is unchanged
     with pytest.raises(SystemExit):
-        cli.dbt_build("tiny", "duckdb", dim_user_identifier="../x")
+        pipeline_cli.dbt_build("tiny", "duckdb", dim_user_identifier="../x")
 
 
 def test_int_spanner_cli_refuses_a_non_tiny_profile(
@@ -205,9 +209,11 @@ def test_int_spanner_cli_refuses_a_non_tiny_profile(
     monkeypatch.setattr(subprocess, "run", never)
     for profile in ("medium", "../x", ""):
         with pytest.raises(SystemExit) as e:
-            cli.int_spanner(profile, "ontime-rate-recovery", "yes", "command line")
+            pipeline_cli.int_spanner(
+                profile, "ontime-rate-recovery", "yes", "command line"
+            )
         assert e.value.code == 2, profile
-    assert cli.INT_PROFILE == "tiny"
+    assert pipeline_cli.INT_PROFILE == "tiny"
 
 
 def test_spanner_clients_disable_the_builtin_metrics_exporter() -> None:
@@ -228,7 +234,7 @@ def test_spanner_clients_disable_the_builtin_metrics_exporter() -> None:
     for rel in tracked:  # the whole tracked tree (round 2 #5), not a fixed list
         text = (ROOT / rel).read_text()
         calls += [(rel, c) for c in re.findall(r"spanner\.Client\(([^)]*)\)", text)]
-    assert {rel for rel, _ in calls} == {"loader/spanner.py", "serving/spanner.py"}, (
+    assert {rel for rel, _ in calls} == {"landing/spanner.py", "serving/spanner.py"}, (
         calls
     )
     assert all("disable_builtin_metrics=True" in c for _, c in calls), calls
@@ -270,7 +276,7 @@ def test_row_width_drift_refuses(
     dims.mkdir()
     header = ",".join(f["name"] for f in spanner.dim_fields())
     (dims / "dim_user.csv").write_text(f"{header}\n{row}\n")
-    monkeypatch.setattr(spanner.loader, "fixture_dir", lambda p: tmp_path)
+    monkeypatch.setattr(spanner.landing, "fixture_dir", lambda p: tmp_path)
     store = FakeDim()
     with pytest.raises(ValueError, match="line 2"):
         spanner.load_dims("tiny", "my-proj", clients=lambda p: store)
@@ -314,7 +320,7 @@ def test_every_cloud_command_refuses_a_credential_in_the_env(
     google client. Every cloud entry point refuses ANY Google-namespace
     variable the allowlist does not admit (exit 2) BEFORE any client factory
     is resolved — one policy (infra.cli.refuse_cloud_env, CLOUD_ENV_ALLOW)
-    behind the one gate (loader.cli.require_confirm); the list here is
+    behind the one gate (landing.cli.require_confirm); the list here is
     illustrative, the policy is the allowlist."""
     import subprocess
 
@@ -335,11 +341,11 @@ def test_every_cloud_command_refuses_a_credential_in_the_env(
     calls = {
         "bq-load": lambda: cli.bq_load("tiny", proj, *gate),
         "spanner-load": lambda: cli.spanner_load("tiny", proj, *gate),
-        "dbt-build:bigquery": lambda: cli.dbt_build(
+        "dbt-build:bigquery": lambda: pipeline_cli.dbt_build(
             "tiny", "bigquery", *gate, project=proj
         ),
-        "test-int-bigquery": lambda: cli.int_bigquery("tiny", proj, *gate),
-        "test-int-spanner": lambda: cli.int_spanner("tiny", proj, *gate),
+        "test-int-bigquery": lambda: pipeline_cli.int_bigquery("tiny", proj, *gate),
+        "test-int-spanner": lambda: pipeline_cli.int_spanner("tiny", proj, *gate),
         "writeback:spanner": lambda: scli.writeback("tiny", "spanner", proj, *gate),
     }
     with pytest.raises(SystemExit) as e:

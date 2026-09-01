@@ -1,9 +1,9 @@
 -- A conflicting duplicate: one insert_id whose copies tie on all three clocks
 -- but carry different event_properties. The dedupe keeps the earliest copy by
 -- content, so tying copies must be identical (Phase 2 invariant 1). The DuckDB
--- loader refuses such a landing in Python (loader/load.py); this is the same
+-- landing refuses such a landing in Python (landing/load.py); this is the same
 -- predicate on the source, so the BigQuery landing (which has no Python
--- loader in the way) fails the build instead of resolving it silently
+-- landing step in the way) fails the build instead of resolving it silently
 -- (Phase 9b; closes the BACKLOG row). The payload is compared key by key
 -- through the json macro — the six keys generator/models.py::PROPERTY_KEYS
 -- allows — because neither dialect can group or cast a whole JSON value

@@ -5,7 +5,7 @@ serving store the DuckDB table stood in for.
 The guard is the SAME Python (`should_replace` / `version_key` / `winners_of`);
 only the reader and the applier dispatch — one TARGET knob, two named
 configurations (spec reconciliation item 1), never a read×write matrix. Every
-cloud call goes through an injectable factory (loader/bq.py's pattern): the
+cloud call goes through an injectable factory (landing/bq.py's pattern): the
 offline suite injects fakes and the google clients are never constructed there.
 Auth is ADC (the impersonated SA), never a keyfile. `written_at =
 computed_as_of` — data-derived, no clock, so two runs over the same scores
@@ -25,7 +25,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Protocol, TypeVar
 
-from loader.spanner import DATABASE, INSTANCE
+from landing.spanner import DATABASE, INSTANCE
 from serving import writeback as wb
 
 MODELS_DATASET = "ontime"  # infra/variables.tf models_dataset default (9a's pin)

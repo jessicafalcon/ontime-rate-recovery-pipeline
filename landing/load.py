@@ -1,6 +1,6 @@
 """Raw landing: fixtures/<profile>/{raw,dims} → DuckDB schema `raw`.
 
-Column types come from `loader/ddl.sql` (generated from the contract), never
+Column types come from `landing/ddl.sql` (generated from the contract), never
 from file inference: `event_properties` stays `json` so a JSON `null` value
 survives, and an empty `valid_to` becomes SQL NULL (the open SCD2 row).
 Idempotent: every load recreates both tables from the files."""
@@ -15,7 +15,7 @@ import duckdb
 from generator import manifest  # hashes only; names no side-file
 
 ROOT = Path(__file__).parent.parent
-DDL = ROOT / "loader" / "ddl.sql"
+DDL = ROOT / "landing" / "ddl.sql"
 DATA = ROOT / "data"
 TS_FORMAT = "%Y-%m-%d %H:%M:%S.%f"  # the Amplitude export string
 
@@ -32,7 +32,7 @@ def fixture_dir(profile: str) -> Path:
     raise FileNotFoundError(f"no raw/ under fixtures/{profile} or data/out/{profile}")
 
 
-STAGED_SUBTREES = ("raw", "dims")  # the only bytes the loader ever reads
+STAGED_SUBTREES = ("raw", "dims")  # the only bytes the landing ever reads
 
 
 def manifest_drift(fixture: Path) -> list[str]:

@@ -3,7 +3,7 @@
 Invariant 2 — a per-interval `make dbt-build … THROUGH=<ds>` lands and builds
 only files uploaded on or before `<ds>`; unset loads all. Invariant 3 — an
 ill-formed THROUGH is refused before any landing. A real in-process build into a
-tmp DuckDB (loader.DATA redirected), no service, no network. This is the build
+tmp DuckDB (landing.DATA redirected), no service, no network. This is the build
 path the DAG runs per interval, so the backfill's partial landings are exercised
 here at the make level."""
 
@@ -14,8 +14,8 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from loader import cli
-from loader import load as loader
+from landing import load as landing
+from pipeline import cli
 from tests import pins
 
 
@@ -33,9 +33,9 @@ def _raw_events(db: Path) -> tuple[int, str]:
 
 def _build(tmp: Path, monkeypatch: pytest.MonkeyPatch, through: str = "") -> Path:
     """Redirect the output DB to tmp (fixtures stay real) and run dbt-build."""
-    monkeypatch.setattr(loader, "DATA", tmp / "data")
+    monkeypatch.setattr(landing, "DATA", tmp / "data")
     assert cli.dbt_build("tiny", "", through=through) == 0
-    return loader.db_path("tiny")
+    return landing.db_path("tiny")
 
 
 def test_dbt_build_through_lands_only_files_le_cut(
@@ -66,6 +66,6 @@ def test_build_refuses_bad_through(
 ) -> None:
     """A malformed THROUGH is refused before any landing (it never becomes a
     path). Kills `validate_through invert-guard` (which would accept it)."""
-    monkeypatch.setattr(loader, "DATA", tmp_path / "data")
+    monkeypatch.setattr(landing, "DATA", tmp_path / "data")
     with pytest.raises(SystemExit):
         cli.dbt_build("tiny", "", through="not-a-date")

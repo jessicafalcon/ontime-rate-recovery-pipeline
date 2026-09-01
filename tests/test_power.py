@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 
 from eval import blocks, power
-from loader import load as loader
+from landing import load as landing
 from tests import pins
 
-AB_DESIGN = loader.ROOT / "docs" / "AB_DESIGN.md"
+AB_DESIGN = landing.ROOT / "docs" / "AB_DESIGN.md"
 
 
 def test_z_quantile_inverts_the_normal_cdf() -> None:

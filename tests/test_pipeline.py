@@ -14,7 +14,7 @@ import duckdb
 import pytest
 
 from eval import golden
-from loader import load as loader
+from landing import load as landing
 from serving import cli as scli
 from serving import writeback as wb
 from tests import pins
@@ -28,7 +28,7 @@ FIXTURES = ROOT / "fixtures"
 def piped() -> Path:
     """The real chain into data/tiny.duckdb (dbt build → eval → write-back)."""
     assert scli.pipeline("tiny") == 0
-    return loader.db_path("tiny")
+    return landing.db_path("tiny")
 
 
 def test_pipeline_send_schedule_matches_pin(piped: Path) -> None:

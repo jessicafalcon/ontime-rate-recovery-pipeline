@@ -29,20 +29,20 @@ import sys
 from pathlib import Path
 
 from eval import blocks, golden, power, report, score, simulate
-from loader import load as loader
-from loader.cli import die, validate_name
+from landing import load as landing
+from landing.cli import die, validate_name
 
-DATA_OUT = loader.ROOT / "data" / "out"
-FIXTURES = loader.ROOT / "fixtures"
+DATA_OUT = landing.ROOT / "data" / "out"
+FIXTURES = landing.ROOT / "fixtures"
 EXPECTED = golden.ATTRIBUTION.file
-RESULTS = loader.ROOT / "docs" / "RESULTS.md"
-AB_DESIGN = loader.ROOT / "docs" / "AB_DESIGN.md"
+RESULTS = landing.ROOT / "docs" / "RESULTS.md"
+AB_DESIGN = landing.ROOT / "docs" / "AB_DESIGN.md"
 
 
 def _rel(path) -> str:
     return (
-        str(path.relative_to(loader.ROOT))
-        if path.is_relative_to(loader.ROOT)
+        str(path.relative_to(landing.ROOT))
+        if path.is_relative_to(landing.ROOT)
         else str(path)
     )
 
@@ -57,9 +57,9 @@ def truth_dir(profile: str) -> Path:
 
 
 def _db(profile: str):
-    db = loader.db_path(profile)
+    db = landing.db_path(profile)
     if not db.is_file():
-        rel = db.relative_to(loader.ROOT)
+        rel = db.relative_to(landing.ROOT)
         die(f"refused — no {rel}; run `make dbt-build PROFILE={profile}` first")
     return db
 
@@ -80,7 +80,7 @@ def _golden(
         return 0, len(rows), -1
     frozen_path = FIXTURES / profile / spec.file
     if not frozen_path.is_file():
-        rel = frozen_path.relative_to(loader.ROOT)
+        rel = frozen_path.relative_to(landing.ROOT)
         die(f"{name}: refused — no {rel} (WRITE=yes, then `make freeze`)")
     diff = golden.diff_rows(
         rows, golden.parse(frozen_path.read_text(), spec), spec.key_width

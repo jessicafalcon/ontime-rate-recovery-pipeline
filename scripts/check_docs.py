@@ -54,7 +54,7 @@ TRACES: list[tuple[str, str]] = [
     ("scripts/review_gate.py", "freeze_declarations"),
     ("generator/manifest.py", "MANIFEST.sha256"),
     ("generator/writer.py", "FixtureWriteRefused"),
-    ("loader/cli.py", "validate_name"),
+    ("landing/cli.py", "validate_name"),
     ("scripts/gen_dbt_sources.py", "column_tests"),
     ("dbt/macros/to_local_time.sql", "duckdb__to_local_time"),
     ("tests/test_dbt_conventions.py", "test_exactly_five_dispatch_macros"),

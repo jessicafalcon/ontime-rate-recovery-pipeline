@@ -23,7 +23,7 @@ import duckdb
 import pytest
 
 from eval import golden
-from loader import load as loader
+from landing import load as landing
 from serving import writeback as wb
 from tests import pins
 
@@ -49,12 +49,12 @@ SEND_SCHEDULE_GOLDEN = golden.Golden(
 
 
 def build_tiny(db: Path) -> None:
-    """loader.load + a full `dbt run` of fixtures/tiny into `db` (models only —
+    """landing.load + a full `dbt run` of fixtures/tiny into `db` (models only —
     every model, so scores_send_time and dim_user_current exist)."""
     os.environ.setdefault("DO_NOT_TRACK", "1")
     from dbt.cli.main import dbtRunner
 
-    loader.load("tiny", db)
+    landing.load("tiny", db)
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("OTR_DUCKDB_PATH", str(db))
         res = dbtRunner().invoke(
@@ -248,7 +248,7 @@ def test_new_user_inserts(fresh: Path) -> None:
 
 def test_writeback_under_tokyo_is_identical(tmp_path: Path) -> None:
     """A build + write-back under TZ=Asia/Tokyo yields the same send_schedule —
-    loader.connect forces UTC and written_at is data-derived (no host clock)."""
+    landing.connect forces UTC and written_at is data-derived (no host clock)."""
     db = tmp_path / "tk.duckdb"
     script = (
         "import sys; from pathlib import Path;"
@@ -299,7 +299,7 @@ def test_writeback_refuses_without_a_db() -> None:
     downstream failure (round 1, finding 1)."""
     from serving import cli
 
-    assert not loader.db_path("nodbabsent").is_file()  # precondition
+    assert not landing.db_path("nodbabsent").is_file()  # precondition
     with pytest.raises(SystemExit) as e:
         cli.writeback("nodbabsent")
     assert e.value.code == 2
@@ -844,7 +844,7 @@ def test_duckdb_writeback_rolls_back_before_close(
     """Round 3 #5: the explicit `con.rollback()` on the failure path is what
     restores the table — observed on the SAME, still-open connection before
     `close` (which would also roll back, and hid a deleted line)."""
-    real_connect = wb.loader.connect
+    real_connect = wb.landing.connect
     calls: list[str] = []
     held: dict[str, duckdb.DuckDBPyConnection] = {}
 
@@ -870,7 +870,7 @@ def test_duckdb_writeback_rolls_back_before_close(
         con.execute("delete from serving.send_schedule where user_id = 'u-000001'")
         raise RuntimeError("simulated failure after the delete")
 
-    monkeypatch.setattr(wb.loader, "connect", connect)
+    monkeypatch.setattr(wb.landing, "connect", connect)
     monkeypatch.setattr(wb, "apply_writeback", delete_then_die)
     with pytest.raises(RuntimeError, match="simulated"):
         wb.write_back("tiny", fresh)

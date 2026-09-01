@@ -18,7 +18,7 @@ from test_staging import DBT, build, q
 
 from eval import golden, score
 from generator import cli as gen_cli
-from loader import load as loader
+from landing import load as landing
 from tests import pins
 
 ROOT = Path(__file__).parent.parent
@@ -28,11 +28,11 @@ SPEC = golden.SCORES_SEND_TIME
 
 
 def build_profile(profile: str, db: Path) -> bool:
-    """tests/test_staging.py::build for any profile the loader can resolve."""
+    """tests/test_staging.py::build for any profile the landing can resolve."""
     os.environ.setdefault("DO_NOT_TRACK", "1")
     from dbt.cli.main import dbtRunner
 
-    loader.load(profile, db)
+    landing.load(profile, db)
     args = ["build", "--project-dir", str(DBT), "--profiles-dir", str(DBT)]
     args += ["--target", "duckdb", "--quiet", "--target-path", str(db.parent / "t")]
     with pytest.MonkeyPatch.context() as mp:
@@ -215,7 +215,7 @@ def test_medium_mae_and_coverage_match_pins(tmp_path: Path, capsys) -> None:
     db = tmp_path / "medium.duckdb"
     assert build_profile("medium", db)
     windows = score.truth_windows(
-        loader.ROOT / "data" / "out" / "medium" / "truth" / "users.jsonl"
+        landing.ROOT / "data" / "out" / "medium" / "truth" / "users.jsonl"
     )
     scores = score.built_scores(db)
     assert len(windows) == len(scores) == pins.MEDIUM_USERS

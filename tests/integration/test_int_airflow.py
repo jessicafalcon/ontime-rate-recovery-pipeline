@@ -186,7 +186,7 @@ def test_backfill_equals_union(airflow_container: None, tmp_path: Path) -> None:
     _reset_db()
     first, *rest = pins.BACKFILL_THROUGHS_TINY  # 2026-01-07
     _run_dag(first)
-    # THROUGH reached the loader: the first landing is a strict subset.
+    # THROUGH reached the landing: the first landing is a strict subset.
     assert (
         _query("select max(cast(server_upload_time as date))::varchar from raw.events")
         <= first

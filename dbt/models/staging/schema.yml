@@ -5,7 +5,7 @@ models:
     description: >
       One row per insert_id — the raw export deduplicated by content
       (earliest server_upload_time, then server_received_time, then
-      client_event_time; copies tying on all three are identical, the loader
+      client_event_time; copies tying on all three are identical, the landing
       refuses otherwise), typed, with the dim_user tz valid at
       client_event_time and the local wall time.
     columns:

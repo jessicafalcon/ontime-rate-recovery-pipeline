@@ -1,5 +1,5 @@
 """The BigQuery landing (specs/phase-9b-bigquery-dialect.md invariants 3, 7):
-the same files the DuckDB loader selects, the generated schema, ONE
+the same files the DuckDB landing selects, the generated schema, ONE
 WRITE_TRUNCATE load job per table (a zero-byte object for an empty selection —
 Amendment X) — against FAKE clients. No google client is ever built here: the
 default factory is replaced by a sentinel that raises, so a code path
@@ -13,10 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from loader import bq, cli
-from loader import load as loader
+from landing import bq, cli
+from landing import load as landing
+from pipeline import cli as pipeline_cli
 
-TINY = loader.fixture_dir("tiny")
+TINY = landing.fixture_dir("tiny")
 ROOT = Path(__file__).parent.parent
 
 
@@ -51,10 +52,10 @@ def _factory() -> tuple[list[Recorder], bq.ClientFactory]:
     return made, make
 
 
-def test_selects_the_same_files_as_the_duckdb_loader() -> None:
+def test_selects_the_same_files_as_the_duckdb_landing() -> None:
     for through in (None, "2026-01-07", "2026-01-13", "2025-01-01"):
         files = bq.selected_files(TINY, through)
-        assert files["events"] == loader.event_files(TINY, through)
+        assert files["events"] == landing.event_files(TINY, through)
         assert files["dim_user"] == [TINY / "dims" / "dim_user.csv"]
     assert len(bq.selected_files(TINY, "2026-01-07")["events"]) == 4
     assert bq.selected_files(TINY, "2025-01-01")["events"] == []
@@ -63,7 +64,7 @@ def test_selects_the_same_files_as_the_duckdb_loader() -> None:
 def test_uploads_then_loads_with_the_generated_schema() -> None:
     """Invariant 3: every selected file is uploaded under landing/<profile>/,
     then ONE load job per table over exactly those URIs, with the contract
-    schema (loader/bq_schema.json — generated) and WRITE_TRUNCATE."""
+    schema (landing/bq_schema.json — generated) and WRITE_TRUNCATE."""
     made, make = _factory()
     files, events, dims = bq.bq_load("tiny", "my-project", "2026-01-07", make)
     assert (files, events, dims) == (4, 970, 22)
@@ -72,7 +73,10 @@ def test_uploads_then_loads_with_the_generated_schema() -> None:
     assert all(b == "my-project-ontime" for b, _, _ in r.uploads)
     names = [n for _, n, _ in r.uploads]
     assert names == [
-        *[f"landing/tiny/raw/{p.name}" for p in loader.event_files(TINY, "2026-01-07")],
+        *[
+            f"landing/tiny/raw/{p.name}"
+            for p in landing.event_files(TINY, "2026-01-07")
+        ],
         "landing/tiny/dims/dim_user.csv",
     ]
     assert [t for t, _, _ in r.loads] == [
@@ -114,7 +118,7 @@ def test_landing_reads_nothing_and_uses_one_mechanism(
         "my-project.zz.dim_user",
     ]
     for module in ("bq.py", "cli.py"):  # round 4 #1: the whole cloud path
-        src = (ROOT / "loader" / module).read_text()
+        src = (ROOT / "landing" / module).read_text()
         for forbidden in (".query(", "truncate", "delete_table", "create_table"):
             assert forbidden not in src, (module, forbidden)
 
@@ -215,7 +219,7 @@ def test_int_bigquery_entry_validates_and_gates_before_pytest(
         ("../x", "my-project", "yes", "command line"),
     ):
         with pytest.raises(SystemExit) as e:
-            cli.int_bigquery(profile, project, confirm, origin)
+            pipeline_cli.int_bigquery(profile, project, confirm, origin)
         assert e.value.code == 2
     seen: dict[str, object] = {}
 
@@ -224,7 +228,7 @@ def test_int_bigquery_entry_validates_and_gates_before_pytest(
         return type("R", (), {"returncode": 0})()
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    assert cli.int_bigquery("tiny", "my-project", "yes", "command line") == 0
+    assert pipeline_cli.int_bigquery("tiny", "my-project", "yes", "command line") == 0
     assert seen["argv"][-1].endswith("tests/integration/test_int_bigquery.py")
     env = seen["env"]
     assert env["OTR_INT"] == "1" and env["OTR_GCP_PROJECT"] == "my-project"

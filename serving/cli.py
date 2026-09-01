@@ -25,8 +25,8 @@ import argparse
 import sys
 
 from infra.cli import validate_project
-from loader import load as loader
-from loader.cli import NAME_RE, die, require_confirm
+from landing import load as landing
+from landing.cli import NAME_RE, die, require_confirm
 from serving import spanner as spanner_wb
 from serving import writeback as wb
 
@@ -41,9 +41,9 @@ def validate_name(kind: str, value: str) -> str:
 
 
 def _require_db(profile: str) -> None:
-    db = loader.db_path(profile)
+    db = landing.db_path(profile)
     if not db.is_file():
-        rel = db.relative_to(loader.ROOT)
+        rel = db.relative_to(landing.ROOT)
         die(f"refused — no {rel}; run `make dbt-build PROFILE={profile}` first")
 
 
@@ -80,7 +80,7 @@ def pipeline(profile: str) -> int:
     outputs the 8b DAG must reproduce byte-identically."""
     validate_name("PROFILE", profile)
     from eval.cli import score_cmd
-    from loader.cli import dbt_build
+    from pipeline.cli import dbt_build
 
     if dbt_build(profile, ""):
         return 1
