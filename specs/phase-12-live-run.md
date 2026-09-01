@@ -228,7 +228,16 @@ Python mutation — no write path changes.)
   commands stay `make` targets — `orchestration/tasks.py`'s own comment already
   anticipated "Composer sets bigquery here and adds PROJECT"). Rejected:
   hard-coding a second cloud task list (duplicates the ordering; drifts).
-  Satisfies invariant 2.
+  Satisfies invariant 2. **Amendment (review round 1, #1/#2/#3 — Boundary
+  contract):** `build_tasks` is an ALLOWLIST, not a denylist — `duckdb`/`bigquery`
+  render, any other target RAISES, and the cloud branch validates the project
+  against `PROJECT_RE` before interpolating it. Restores the invariant "for all
+  `(target, project)`, `build_tasks` renders only recognised `make` targets — an
+  unrecognised target or a malformed project refuses, never a cloud command from
+  an unvalidated input" (the earlier `if duckdb else cloud` fallthrough rendered a
+  cloud-cost command for any typo, and the threat-model text described the
+  opposite of the code). Pinned by
+  `test_build_tasks_refuses_unknown_target_and_bad_project`.
 - **Option A: Composer proves the module applies and the DAG parses live; the
   green data run is the local Docker-Airflow → real-BigQuery+Spanner rehearsal.**
   The make-based DAG cannot execute on Composer workers (no repo / `make` / venv
@@ -315,8 +324,8 @@ variables, and not on any destructive path:
 
 | Input | empty / unset | `../x` | `"; ` | env-exported (the only source) | Pinned by |
 |---|---|---|---|---|---|
-| `OTR_DAG_TARGET` | unset → `duckdb` (the committed default) | not a path — used only to pick `duckdb`/`bigquery`; any other value renders no cloud command (the render is a closed `if target == "bigquery"`, else local) | passes through into a single-quoted `make TARGET=…` token; the value never reaches a shell unquoted, and `make` rejects an unknown TARGET | env is the intended source (Airflow/Composer config); it selects a target, it is never a path or a SQL predicate | `tests/test_dag_structure.py::test_tasks_render_cloud_target_from_env` |
-| `OTR_DAG_PROJECT` | unset → no PROJECT (local build) | validated by the same GCP project-id shape check the `make` targets already apply (`pipeline/cli.py` / `infra/cli.py`) BEFORE any client — an invalid id is refused there, not in the DAG | single-quoted `PROJECT='…'`; refused by the project-id validator downstream | env is the intended source; it reaches `make` as a single token and is validated by the existing gate | same test + the existing `test_project_id_validation` |
+| `OTR_DAG_TARGET` | unset → `duckdb` (the committed default) | not a path — `build_tasks` is an ALLOWLIST: `duckdb` → local, `bigquery` (`CLOUD_TARGET`) → cloud, any OTHER value RAISES (round 1 #1/#2); a typo can never render a cloud-cost command | never reaches a shell unquoted; a non-allowlisted value refuses at render (`ValueError`) before any BashOperator is built | env is the intended source (Airflow/Composer config); it selects a target from the allowlist, never a path or predicate | `tests/test_dag_structure.py::test_tasks_render_cloud_target_from_env`, `::test_build_tasks_refuses_unknown_target_and_bad_project` |
+| `OTR_DAG_PROJECT` | unset → no PROJECT (local build); on the cloud branch, refuses (`PROJECT_RE`) | validated AT RENDER by `orchestration/tasks.py::PROJECT_RE` (the same shape as `infra.cli.PROJECT_RE`) BEFORE it is interpolated — a value with a quote / shell metacharacter refuses here, not only at the downstream `make` validator (round 1 #3) | single-quoted `PROJECT='…'` AND shape-validated before the string is built, so a `'`-breakout value never reaches the rendered command | env is the intended source; it is validated at render and again by the downstream `make`/`pipeline.cli` gate | same test + `::test_build_tasks_refuses_unknown_target_and_bad_project` |
 
 The DAG never runs `make` on the Composer worker (Option A), so on Composer these
 vars only affect what the DAG *renders*, never what executes there; on the Docker

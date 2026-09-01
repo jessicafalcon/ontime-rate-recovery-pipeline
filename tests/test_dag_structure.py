@@ -263,6 +263,24 @@ def test_tasks_render_cloud_target_from_env() -> None:
         assert cmd.startswith("make ")
 
 
+def test_build_tasks_refuses_unknown_target_and_bad_project() -> None:
+    """Invariant (Boundary contract, round 1 #1/#2/#3): build_tasks is an
+    allowlist — an unrecognised target REFUSES, and the cloud branch REFUSES a
+    project that is not a valid GCP project id, so no unvalidated value (a quote,
+    a shell metacharacter) is ever interpolated into the rendered command."""
+    import pytest
+
+    with pytest.raises(ValueError):  # unknown target — not duckdb/bigquery
+        tasks.build_tasks("sqlite", "ontime-rate-recovery")
+    with pytest.raises(ValueError):  # a quote/injection payload is not a project id
+        tasks.build_tasks("bigquery", "bad'; rm -rf /")
+    with pytest.raises(ValueError):  # empty project on the cloud branch
+        tasks.build_tasks("bigquery", "")
+    # the two recognised targets still render (the allowlist admits them)
+    assert tasks.build_tasks("duckdb", "")[0][0] == "dbt_build"
+    assert tasks.build_tasks("bigquery", "ontime-rate-recovery")[1][0] == "writeback"
+
+
 def test_module_target_and_project_come_from_env(monkeypatch: Any) -> None:
     """Invariant 2 (the env wiring): the module-level TARGET/PROJECT are read from
     OTR_DAG_TARGET/OTR_DAG_PROJECT, and TASKS is build_tasks of them — so setting
