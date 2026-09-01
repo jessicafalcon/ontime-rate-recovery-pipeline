@@ -905,7 +905,10 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **22** — the post-13 roadmap (`docs/ROADMAP.md`,
+Open BACKLOG rows: **21** — `fix/public-release` (2026-09-01, the pre-publication
+security review) struck the live-project-id row: every record reads `<project_id>` /
+`<operator>`, the history copies are accepted in DECISIONS, `.gitignore` gained the
+direnv and key-file globs `.dockerignore` already had. The post-13 roadmap (`docs/ROADMAP.md`,
 2026-09-01, branch `fix/roadmap`) opened four (the front-door reframe, the
 scores→`dim_user_current` layering fix, the temporal holdout eval, the
 append-only landing) beside the four rows it cites, and re-anchored the BACKLOG

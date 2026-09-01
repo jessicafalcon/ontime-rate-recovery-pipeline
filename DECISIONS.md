@@ -144,7 +144,48 @@ annotated **Superseded by …** in place and never deleted.
   denylist over the whole environment (`*_TOKEN`, `*_KEY` — false refusals
   on unrelated tools' variables, and still a denylist).
 
+- **A record names a placeholder, never a live account identifier.** The
+  pre-publication security review (`fix/public-release`, 2026-09-01) found no
+  credential in the tree or in history, but the live GCP project id, the derived
+  SA email and the operator's Google account address sat in the records. Records
+  now read `<project_id>` / `<operator>`; a live value belongs in the operator's
+  shell, not the repo. Rejected: leaving them as "informational" (a project id
+  is the enumeration key for its bucket, SA and budget names, and the operator
+  address ties a public repo to a named account). ([fix/public-release](#fixpublic-release-after-phase-13-2026-09-01))
+
 ## Appendix — by phase
+
+### fix/public-release (after Phase 13, 2026-09-01)
+
+*The pre-publication security review before the repo goes public.*
+
+- **Records redacted to `<project_id>` / `<operator>`; the tests keep the
+  project-id-SHAPED literal.** The demo project was named after the repo, so
+  the string the tests pass as a sample `PROJECT` is the repo's own name — public
+  by definition — and changing it would turn a docs range into a code range for
+  no information gain. `pyproject.toml`'s `name`, the agent descriptions and
+  PROJECT_BRIEF's "working name" are the repo name, untouched. BACKLOG row
+  "The live project id and the derived SA email sit in tracked records" is
+  struck.
+- **Three history-only identifiers are ACCEPTED, not rewritten.** (i) The
+  project id and SA email in every earlier revision of the records — not a
+  credential, unusable without IAM, and nothing billable is up (`docs/DEPLOYMENT.md`);
+  (ii) one of 261 commits authored under a personal address instead of the
+  GitHub noreply one; (iii) the phase-0 commit's mention of a private
+  predecessor repository's name, scrubbed in a later commit. A history rewrite
+  would cost the phase-by-phase trail `docs/PHASES.md` cites and every
+  commit hash the specs and BACKLOG pin; none of the three is a secret.
+  Rejected: squashing to one initial commit (the trail is the portfolio).
+- **`.gitignore` gains `.envrc`, `*.pem`, `*.p12`, `*-key.json`,
+  `*-credentials.json`, `service-account*.json`.** Belt and braces: the real
+  guard is `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars`, a
+  content scan; these mirror what `.dockerignore` already excluded so the two
+  never-commit lists agree.
+- **Out of the repo, on the GitHub side:** Actions → "Require approval for all
+  external contributors" once public (CI runs `on: pull_request` with a
+  read-only token, no secrets, SHA-pinned actions — a fork PR runs its own
+  Makefile on the runner, so gate it); `enable_ci_wif` stays false until the
+  CI-WIF branch re-points `github_repository` at the public `owner/repo`.
 
 ### fix/roadmap (after Phase 13, 2026-09-01)
 

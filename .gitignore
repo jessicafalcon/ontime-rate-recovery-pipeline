@@ -2,6 +2,12 @@
 data/
 .env
 .env.*
+.envrc
+*.pem
+*.p12
+*-key.json
+*-credentials.json
+service-account*.json
 .claude/settings.local.json
 *.duckdb
 *.duckdb.wal

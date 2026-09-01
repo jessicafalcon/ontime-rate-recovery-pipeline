@@ -254,16 +254,16 @@ fails re-creating them ("already exists, in a deleted state"). Recover with
 `gcloud iam service-accounts undelete <id>` /
 `gcloud iam workload-identity-pools undelete`, or wait out the window, before the
 second apply. Harmless for a single demo-day apply/destroy. **Live:** the
-Evidence-row-5 destroy on `ontime-rate-recovery` ran **2026-08-29**, so
-`ontime-pipeline@ontime-rate-recovery` is reserved until **~2026-09-28**; a 9b
+Evidence-row-5 destroy on `<project_id>` ran **2026-08-29**, so
+`ontime-pipeline@<project_id>` is reserved until **~2026-09-28**; a 9b
 apply on that project before then runs the **undelete + import detour**
 first (the pool was never created — no reservation): `gcloud iam
-service-accounts undelete <unique_id> --project=ontime-rate-recovery` (the
+service-accounts undelete <unique_id> --project=<project_id>` (the
 numeric `unique_id` is in the local, gitignored `infra/terraform.tfstate.backup`
 from the destroy), then — because the state is empty after a destroy and a
 bare apply would try to CREATE it again — `terraform -chdir=infra import
 module.iam.google_service_account.pipeline
-projects/ontime-rate-recovery/serviceAccounts/ontime-pipeline@ontime-rate-recovery.iam.gserviceaccount.com`,
+projects/<project_id>/serviceAccounts/ontime-pipeline@<project_id>.iam.gserviceaccount.com`,
 then `make tf-plan` (expect `17 to add`, the SA `0 to change`) → `make tf-apply`.
 Or wait for the window to close.
 
@@ -328,12 +328,12 @@ the apply: never leave it up.
    written` on the second run — the read is the warehouse's, not a
    PROFILE's build). `PROFILE` is `tiny` only (a CLI refusal otherwise).
    **Live 2026-08-30:** `spanner-load OK: tiny — 22 dim rows`; `4 passed
-   in 221.01s`; `writeback OK: ontime-rate-recovery.ontime → spanner, 20
+   in 221.01s`; `writeback OK: <project_id>.ontime → spanner, 20
    users, 0 written`. **Live 2026-08-31, under the custom role
    `ontimeSpannerDataUser` (Amendment E; the live role's permission set is
    the module's 11, no `updateDdl`; the database's one binding):**
    `spanner-load OK: tiny — 22 dim rows`; `4 passed in 239.42s`;
-   `writeback OK: ontime-rate-recovery.ontime → spanner, 20 users, 0
+   `writeback OK: <project_id>.ontime → spanner, 20 users, 0
    written`.
 4. **Tear down the same day** — the SCOPED destroy is the toggle flipped
    back: `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=false'
@@ -345,7 +345,7 @@ the apply: never leave it up.
 
 Dated lines (fill on apply day — the BACKLOG Spanner row's trigger):
 
-- `enable_spanner=true` applied: **2026-08-30** (23:37 UTC, `ontime-rate-recovery`,
+- `enable_spanner=true` applied: **2026-08-30** (23:37 UTC, `<project_id>`,
   operator ADC after the SA undelete + `terraform import` detour; 26/27 on
   the first apply — Amendment D dropped the failed service-agent grant — then
   `No changes` on the toggled re-plan).
@@ -379,7 +379,7 @@ Dated lines (fill on apply day — the BACKLOG Spanner row's trigger):
   changed, 0 destroyed`; toggled re-plan `No changes`; `INSTANCE_TYPE
   PROVISIONED`, `STATE READY`. As the SA: `spanner-load OK: tiny — 22 dim
   rows`; `test-int-spanner` `4 passed in 248.70s`; `writeback OK:
-  ontime-rate-recovery.ontime → spanner, 20 users, 0 written`.
+  <project_id>.ontime → spanner, 20 users, 0 written`.
 - Third teardown: a first attempt at 06:38 UTC failed at refresh with 403
   `serviceusage.services.use` — the ADC browser login had picked the
   git-only Google account, not the GCP one (nothing changed; ARCHITECTURE
@@ -487,7 +487,7 @@ Dated lines (Phase 12 demo-day run, 2026-09-01):
 - `enable_composer=true` **plan** observed (Phase 12): **5 to add, 0 to change,
   0 to destroy** — 2026-09-01 (operator ADC; the plan creates nothing).
 - `enable_composer=true` applied (Phase 12): **2026-09-01** (~03:00–03:30 UTC,
-  `ontime-rate-recovery`, operator ADC, carrying `enable_spanner=true` +
+  `<project_id>`, operator ADC, carrying `enable_spanner=true` +
   `operator_principal`). The FIRST apply failed at
   `google_project_service.composer` with a transient `Error code 13 … failed
   services [compute.googleapis.com]` (nothing created — the API is the module's
