@@ -113,6 +113,7 @@ write-back, Composer-scheduled DAG — is ask-first and metered:
 - [docs/INSIGHT.md](docs/INSIGHT.md) — the one-page honest read: what the numbers
   mean and what they do not.
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — GCP bring-up, cost, teardown (ask-first).
+- [docs/ROADMAP.md](docs/ROADMAP.md) — what comes next, in order, and the one-week cut.
 - [DECISIONS.md](DECISIONS.md) — the why-not-X log. [BACKLOG.md](BACKLOG.md) —
   deferred findings with triggers. [CLAUDE.md](CLAUDE.md) — the operating manual.
 

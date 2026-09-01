@@ -204,7 +204,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   table, operator permissions, teardown, the optional kill-switch), INSIGHT.md
   (Phase 13: the one-page honest read — tiny's negative simulated lift, the
   simulation's circularity, the A/B as the real test), img/lift.svg (Phase 13:
-  the generated findings chart, `make readme`); all under `docs/`.
+  the generated findings chart, `make readme`), ROADMAP.md (post-13: the ordered
+  fix-branch plan and the one-week cut, decided 2026-09-01); all under `docs/`.
 - `README.md` *(Phase 13)* — the front door: a `make readme`-generated
   first-screen block (never typed), a Mermaid architecture diagram, the
   cloud-free quickstart (Phases 1–8 on tiny), the docs index and the
@@ -893,7 +894,7 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **18** — Phase 13 opened four: two obligations named as their
+Open BACKLOG rows: **22** — the post-13 roadmap (`docs/ROADMAP.md`, 2026-09-01) opened four (the front-door reframe, the scores→`dim_user_current` layering fix, the temporal holdout eval, the append-only landing) beside the four it cites. Phase 13 opened four: two obligations named as their
 own future branches (the Composer-runnable DAG via Cosmos / `KubernetesPodOperator`,
 superseding Option A; a real-scale cost run) and two review-exit latent-staleness
 notes (the readme's non-pin-derived structural labels; INSIGHT's hand-typed
