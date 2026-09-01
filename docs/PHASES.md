@@ -507,3 +507,26 @@ over every named guard and target.
 **Done when.** `make check-docs` green; every number on the README first
 screen is sourced from a generated block; a cold reader can run Phases 1–8
 from README alone.
+
+**Delivered** (`phase-13-docs-narrative`, spec
+`specs/phase-13-docs-narrative.md`): the docs-and-narrative capstone and the
+**planned close** — Phase 13 is the last phase; there is no Phase 14. A tracked
+`README.md` front door: a first-screen `<!-- readme:begin -->` block written by
+`make readme` (label accuracy, tiny/medium MAE + coverage, on-time rates, the
+simulated lift — every figure read from `tests/pins.py` (which the committed
+`docs/RESULTS.md` blocks are pinned to), never typed), a Mermaid architecture diagram naming the
+same components as CLAUDE.md's ASCII one, the cloud-free quickstart (`setup →
+seed → dbt-build → eval → report → simulate → writeback → pipeline` on tiny,
+reaching `pipeline OK: tiny` with no GCP), the docs index and the stack-roles
+table. `docs/img/lift.svg` is the generated findings chart (a deterministic SVG
+string, no matplotlib); `docs/INSIGHT.md` is the honest one-pager (tiny's
+NEGATIVE simulated lift, the simulation's circularity, the A/B as the real test).
+ARCHITECTURE gained the Amplitude-export mapping (§2.10) and a privacy/PII
+paragraph (§6); `scripts/check_docs.py` widened over the now-tracked README and
+`TRACES` (each new guard/target). `make readme` reuses Phase 6's marker-confined
+writer (`eval/blocks.py`); `tests/test_readme.py` regenerates the block AND the
+SVG byte-identically under `make test`, and pins the quickstart cloud-free. No
+pin, fixture, model, or `.tf` moved. The four OUT items (remote tfstate →
+`fix/tf-remote-state`; a real-scale cost run; a Composer-runnable DAG via
+Cosmos / `KubernetesPodOperator`; the WIF CI leg) are BACKLOG rows named as their
+own future branches, not built here.

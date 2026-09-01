@@ -235,6 +235,34 @@ one `begin`/`commit` and the file is single-writer across processes
 (Amendment I). The SA's Spanner access is a custom data-plane role — no
 `updateDdl`; Terraform owns the schema (Amendment E).
 
+### 2.10 Amplitude export mapping *(the local ↔ production interchange)*
+
+The generator emits the Amplitude raw-export shape so the local stub and a real
+Amplitude export are the SAME dbt `source` — no model changes between them. The
+mapping the export path relies on:
+
+| Amplitude export field | pipeline column (`raw.events`) | note |
+|---|---|---|
+| `$insert_id` | `insert_id` | Amplitude's own dedupe key; the export can carry duplicates (44 in `tiny`) — staging dedupes on it |
+| `event_type` | `event_type` | the nine types in §2.2; a foreign type fails the `accepted_values` source test |
+| `user_id` | `user_id` | here a counter (`u-000123`); in production the app's stable user key, never a UUID on the wire |
+| `device_id` | `device_id` | counter locally; the app install id in production |
+| `event_time` (client) | `client_event_time` | device clock — clock 1 of the three |
+| `server_received_time` | `server_received_time` | clock 2; `received − client` is the upload delay |
+| `server_upload_time` | `server_upload_time` | clock 3; the export batch landing time — the incremental horizon |
+| `event_properties` | `event_properties` (json) | the per-type payload in §2.2 (`prompt_id`, `cohort_id`, `error_code`, …) |
+| `user_properties` | — | **not consumed**; `tz`/`cohort_id` come from the `dim_user` SCD2 dimension (§2.3), not the event |
+
+Production landing (§3.3) is the Amplitude → GCS → BigQuery export writing
+`raw.events` with the schema **generated** from `generator/models.py`
+(`landing/bq_schema.json`); locally the same schema lands the fixture files. Two
+export realities the contract already handles: `insert_id` is **not** unique in
+raw (staging makes it so), and `error_code` is JSON `null` on
+`upload_started`/`upload_completed` and SQL `NULL` once staged. A field the
+export adds that no model reads is simply not in `sources.yml` — the generator is
+the schema authority, so a new consumed field is a generator change first
+(`make gen-sources`), never a hand edit.
+
 ## 3. Components
 
 ```
@@ -267,7 +295,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
 | landing | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load); on BigQuery also the staging objects `gs://<project>-ontime/landing/<p>/{raw,dims}/` incl. a zero-byte `_empty.jsonl` (Phase 9b); on Spanner the `dim_user` table (`make spanner-load`, idempotent upsert — Phase 10) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
-| eval | dbt outputs, truth, the profile JSON (the generator's input) | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), the marker-confined blocks of `docs/RESULTS.md` and `docs/AB_DESIGN.md` *(Phase 6; `WRITE=yes` only)* | write any table the pipeline reads; write under `fixtures/`; create or append to a doc |
+| eval | dbt outputs, truth, the profile JSON (the generator's input), `tests/pins.py` (which the committed RESULTS blocks are pinned to; Phase 13 `make readme`) | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), the marker-confined blocks of `docs/RESULTS.md` and `docs/AB_DESIGN.md` *(Phase 6; `WRITE=yes` only)*, the `README.md` first-screen block + the wholly-generated `docs/img/lift.svg` *(Phase 13 `make readme`; `WRITE=yes` only)* | write any table the pipeline reads; write under `fixtures/`; create or append to a doc |
 | write-back | `scores_send_time`, `dim_user_current` (the open `dim_user` row's tz — Phase 8a) | `send_schedule` | read truth; read raw; re-derive a score |
 | Airflow | — | — | contain logic (it orders `make` targets / dbt commands) |
 
@@ -342,6 +370,20 @@ rather than run as an operator's Owner ADC).
 `docs/DEPLOYMENT.md` is the runbook — auth (ADC/WIF), the one-time state-backend
 bootstrap, the cost table, the optional billing kill-switch, and the teardown
 that leaves nothing billable.
+
+**Privacy and PII.** This is a synthetic project: every `user_id`/`device_id` is
+a counter, no name, email, IP, or device fingerprint is generated, and the
+`event_properties` payloads are counters and enum error codes — nothing personal
+to leak. In production the same shape carries real identifiers, so the standing
+rules are the safeguards, not an afterthought: `dim_user` holds a coarse IANA `tz`
+and a `cohort_id`, never a precise location; the served `send_schedule` is a
+`(user_id, hour, minute, tz)` tuple, no behavioural history; the truth side-file
+never leaves `eval/` (it is not even a pipeline input); and `data/`, `*.tfvars`,
+and any credential are gitignored and never committed (block-secrets hook). A
+production deployment adds what synthetic data does not need — field-level access
+control on `raw` and the dims, a retention policy on raw events, and a
+DELETE-by-`user_id` path for erasure requests — recorded here as the deployment
+obligation, not built against fake data.
 
 ## 7. Validation stance
 

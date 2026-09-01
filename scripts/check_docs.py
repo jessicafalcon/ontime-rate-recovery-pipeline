@@ -62,6 +62,11 @@ TRACES: list[tuple[str, str]] = [
     ("dbt/tests/assert_cohort_day_partition.sql", "prompts_delivered"),
     ("eval/golden.py", "ONTIME_RATE_DAILY"),
     ("generator/cli.py", "missing_from_output"),
+    # Phase 13 — the docs name these guards/targets/symbols by identity.
+    ("eval/readme.py", "readme:begin"),
+    ("eval/readme.py", "first_screen_rows"),
+    ("eval/readme.py", "render_svg"),
+    ("generator/response.py", "open_probability"),
 ]
 
 
