@@ -133,5 +133,5 @@ Phases 0–13 are complete: the pipeline is complete on correctness, not yet on
 scale or a scheduled cloud run. What comes next, in order, is
 [docs/ROADMAP.md](docs/ROADMAP.md) — a reframed front door, remote Terraform
 state, one layering fix, then a real-scale cost run, a non-circular holdout
-eval, an append-only landing, a Composer-runnable DAG and the CI parity leg —
+eval, a Composer-runnable DAG, an append-only landing and the CI parity leg —
 each item a [BACKLOG.md](BACKLOG.md) row with a trigger.

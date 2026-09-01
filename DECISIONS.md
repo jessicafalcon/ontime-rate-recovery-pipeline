@@ -161,20 +161,25 @@ annotated **Superseded by …** in place and never deleted.
   title, a pointer and the trigger, because the first round's full copies
   drifted twice against the plan in one review. For `check-docs` ROADMAP stays
   a LIVING doc — the seven real targets it names keep rename detection — and
-  the one target it names before its branch builds it is admitted by name from
-  `FUTURE_TARGETS` (`scripts/check_docs.py`), an exact closed set whose test is
-  also red once a listed name exists in the Makefile, so it self-prunes
-  (round 2 replaced the first mechanism, demoting the whole file to a plan,
-  which traded seven live checks for one exemption). The plans set is pinned
-  exactly by the same test file — a stronger pin than a `TRACES` row, which is
-  why the citation has none. The BACKLOG review and the mandatory whole-repo
-  coherence audit are re-anchored to every `fix/` branch exit as well as every
-  phase exit (CLAUDE.md Repo map, Workflow rules, the agent table, the
-  agent's own description), since there is no phase exit left to carry the
-  standing Spanner-clean check — this branch ran it first. A `fix/` branch
-  that re-freezes a fixture or changes a write path carries a spec
-  (`specs/fix-<slug>.md`, same template — the gate's `Freeze:` check needs a
-  SPEC file), listed here, not in PHASES. Rejected: reopening PHASES with a Phase 14
+  the one target it names before its branch builds it is admitted as a
+  (doc, target) pair from `FUTURE_TARGETS` (`scripts/check_docs.py`, a `TRACES`
+  row), an exact closed set whose test is red in BOTH stale directions — the
+  target exists in the Makefile, or the doc no longer names it — so an entry
+  lives exactly as long as its citation, and exempts that doc alone; a file
+  that vanishes from the link-checked set errors instead of skipping. Round 2
+  had demoted the whole file to a plan (seven live checks traded for one
+  exemption); round 3's one-sided pin let a dead entry linger; the review cap
+  fired and this is the one re-implementation. The BACKLOG review and the
+  mandatory whole-repo coherence audit are re-anchored to every `fix/` branch
+  exit as well as every phase exit, stated ONCE (CLAUDE.md Workflow rules,
+  "Exit cadence"; the Repo map, the agent table, the tooling index and the
+  agent file point there — round 3 found the fifth copy unchanged, hence one
+  statement), since there is no phase exit left to carry the standing
+  Spanner-clean check — this branch ran it first. A `fix/` branch that
+  RE-FREEZES a fixture carries a spec (`specs/fix-<slug>.md`, same template —
+  the gate's `Freeze:` check reads a SPEC file), listed in ROADMAP, not
+  PHASES; a write-path change stays the standing amendment rule (round 3: the
+  first wording made the two rules fire on one trigger). Rejected: reopening PHASES with a Phase 14
   (contradicts the recorded close, and each item is a bounded fix to a finished
   system, not a stage of the pipeline — the same gate runs either way); rows in
   BACKLOG only (no order, no cut, nothing to hand a reader who asks "what

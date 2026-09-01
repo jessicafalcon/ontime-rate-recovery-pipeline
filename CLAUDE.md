@@ -40,9 +40,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
 
 - `specs/` — one spec per phase, from `specs/TEMPLATE.md`. ONE DONE command
   each. `docs/PHASES.md` is the list; specs are the executable contracts. Since
-  the Phase 13 close a `fix/` branch that re-freezes a fixture or changes a
-  write path also carries one (`specs/fix-<slug>.md`, same template; the gate's
-  `Freeze:` check needs a SPEC) — listed in `docs/ROADMAP.md`, not PHASES.
+  the Phase 13 close a `fix/` branch that re-freezes a fixture also carries one
+  (Workflow rules, "Fix amendments") — listed in `docs/ROADMAP.md`, not PHASES.
 - `generator/` — `models.py` (pydantic, schema source of truth), `profiles.py`
   + `profiles/*.json` (every knob a required field), `generate.py` (cause-first,
   one `Random`, `SIM_START` fixed), `response.py` (the one response function,
@@ -209,7 +208,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   (Phase 13: the one-page honest read — tiny's negative simulated lift, the
   simulation's circularity, the A/B as the real test), img/lift.svg (Phase 13:
   the generated findings chart, `make readme`), ROADMAP.md (post-13: the ordered
-  fix-branch plan and the one-week cut, decided 2026-09-01); all under `docs/`.
+  fix-branch list and the one-week cut, decided 2026-09-01 — a living doc, not
+  a `check-docs` plan); all under `docs/`.
 - `README.md` *(Phase 13)* — the front door: a `make readme`-generated
   first-screen block (never typed), a Mermaid architecture diagram, the
   cloud-free quickstart (Phases 1–8 on tiny), the docs index and the
@@ -217,8 +217,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   it.
 - `DECISIONS.md` — why-not-X log. One entry per non-obvious choice.
 - `BACKLOG.md` — deferred findings with revisit triggers. Reviewed at every
-  phase exit and, since the Phase 13 close, at every `fix/` branch exit: do due
-  items or re-defer with a new trigger, never drop.
+  exit (Workflow rules, "Exit cadence"): do due items or re-defer with a new
+  trigger, never drop.
 - `data/` — gitignored working output (`data/out/<profile>/`, `data/truth/`,
   `*.duckdb`).
 
@@ -235,7 +235,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   PROJECT_BRIEF, DECISIONS, BACKLOG resolves; every
   `make <target>` the LIVING docs name exists in the Makefile (ARCHITECTURE,
   PHASES and PROJECT_BRIEF are plans — link-checked only; a living doc may name
-  a not-yet-built target only from the exact `FUTURE_TARGETS` set, red once built); every trace token in `TRACES` exists in source as an exact token;
+  a not-yet-built target only as a (doc, target) pair in the exact
+  `FUTURE_TARGETS` set, red once the target is built or the doc stops citing it); every trace token in `TRACES` exists in source as an exact token;
   this file's "Open BACKLOG rows: **N**" equals BACKLOG.md's un-struck rows
 - `make review-gate [SPEC=specs/<f>.md] [BASE=main] [DELETED=a,b]` — the
   offline review gate: `make test` + `ruff check` + `ruff format --check`
@@ -722,8 +723,10 @@ simple, standard way over the clever way.
   the profile.
 - `fixtures/tiny/` is read-only after Phase 1. Re-freezing is a deliberate,
   signed-off change with a DECISIONS entry and a new MANIFEST.
-- At each phase exit, and at each `fix/` branch exit now that phases are over:
-  run the coherence audit and review BACKLOG.md for due items.
+- Exit cadence — the ONE statement; the Repo map, the agent table, the
+  Project-tooling index and the agent file point here: at each phase exit,
+  and at each `fix/` branch exit since the Phase 13 close, run the coherence
+  audit and review BACKLOG.md for due items.
 - Stack surprises: check official docs before working around; log under
   ARCHITECTURE.md §8 Gotchas.
 - Do not add features outside ARCHITECTURE.md without asking.
@@ -736,7 +739,9 @@ simple, standard way over the clever way.
 - Fix amendments: a fix that changes a data structure, a write path, or
   who-writes-what is a design change. One-paragraph spec amendment naming the
   invariant it restores, committed alone; STOP for approval. Wording-only and
-  test-only fixes do not need one.
+  test-only fixes do not need one. A fix that RE-FREEZES a fixture needs a
+  spec (`specs/fix-<slug>.md`, same template — the gate's `Freeze:` check
+  reads a SPEC file), not only an amendment.
 - Fix the class, not the case: before proposing any correctness fix,
   answer in the disposition "what set of inputs does this now accept, and
   is it closed?" A fix that appends the finding's case to an existing
@@ -827,7 +832,7 @@ range. Agents run only when the range touches their surface — derived from
 | Code: `*.py`, `dbt/**` (models, macros, tests, yml), `Makefile`, `scripts/`, `tests/`, `generator/`, `eval/`, `serving/`, `orchestration/`, `infra/**/*.tf` | code-reviewer, then functionality-tester |
 | Sensitive: `.github/`, `infra/`, `serving/`, `orchestration/` (Docker image / `docker-compose` / the container-spinning `test-int-airflow`), `.env*`, `.dockerignore`, `dbt/profiles.yml`, `.claude/hooks/`, `.claude/settings*.json`, any target that deletes / applies / takes `CONFIRM` | + security-reviewer |
 | Docs and records only: `*.md` (incl. `specs/`, `docs/`, `DECISIONS.md`, `BACKLOG.md`, `CLAUDE.md`, `.claude/agents|commands/*.md`) | coherence-auditor only, scoped to the changed docs (drift and stale-record checks; no code to review or run) |
-| Any of the above at a phase exit, or a `fix/` branch exit since the Phase 13 close | + coherence-auditor over the whole repo (mandatory) |
+| Any of the above at an exit (Workflow rules, "Exit cadence") | + coherence-auditor over the whole repo (mandatory) |
 
 A range that mixes surfaces runs the union. A docs-only range still runs the
 gate (`check-docs`, the BACKLOG count, Evidence/Record checks). Running an
@@ -863,9 +868,9 @@ are fixed in the main session or explicitly accepted — never auto-fixed.
 - `functionality-tester` agent — runs the suite + the spec's DONE command,
   mutation step, Evidence rows. After code-reviewer, same trigger.
 - `coherence-auditor` agent — whole-repo drift audit vs CLAUDE.md /
-  ARCHITECTURE.md / PHASES.md / DECISIONS.md. MANDATORY once at each phase
-  exit, before merge; the ONLY agent for a docs-only range (scoped to the
-  changed docs).
+  ARCHITECTURE.md / PHASES.md / DECISIONS.md. MANDATORY once at each exit
+  (Workflow rules, "Exit cadence"), before merge; the ONLY agent for a
+  docs-only range (scoped to the changed docs).
 - `/selfcheck` — `.claude/commands/selfcheck.md`; verifies the last commit,
   then stops.
 - `/review-round N` — `.claude/commands/review-round.md`; gate → mutate →
@@ -904,7 +909,8 @@ Open BACKLOG rows: **22** — the post-13 roadmap (`docs/ROADMAP.md`,
 2026-09-01, branch `fix/roadmap`) opened four (the front-door reframe, the
 scores→`dim_user_current` layering fix, the temporal holdout eval, the
 append-only landing) beside the four rows it cites, and re-anchored the BACKLOG
-review cadence to every `fix/` branch exit. Phase 13 opened four: two obligations named as their
+review and the mandatory coherence audit to every `fix/` branch exit too
+(stated once, Workflow rules "Exit cadence"). Phase 13 opened four: two obligations named as their
 own future branches (the Composer-runnable DAG via Cosmos / `KubernetesPodOperator`,
 superseding Option A; a real-scale cost run) and two review-exit latent-staleness
 notes (the readme's non-pin-derived structural labels; INSIGHT's hand-typed
