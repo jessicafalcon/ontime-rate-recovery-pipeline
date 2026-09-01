@@ -102,6 +102,10 @@ def render_svg(rows: dict[str, object]) -> str:
         ("cohort", cohort, "#9aa4b2"),
         ("recommended", reco, "#2f6f4f"),
     )
+    # explicit ceiling: a rate above axis_max would draw a bar/label off-canvas
+    assert all(0.0 <= rate <= axis_max for _, rate, _ in bars), (
+        f"a simulated rate exceeds axis_max={axis_max}; widen the axis"
+    )
     parts = [
         '<svg xmlns="http://www.w3.org/2000/svg" width="680" height="320" '
         'viewBox="0 0 680 320" role="img" '
