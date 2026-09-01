@@ -140,7 +140,3 @@ def render_svg(rows: dict[str, object]) -> str:
     )
     parts.append("</svg>")
     return "\n".join(parts) + "\n"
-
-
-def render() -> str:
-    return render_block(first_screen_rows())

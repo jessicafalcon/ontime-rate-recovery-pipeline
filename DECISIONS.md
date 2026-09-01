@@ -156,8 +156,8 @@ PHASES rows.
 
 - **The README first screen and the findings chart are GENERATED, not typed.**
   `make readme` renders the `readme:begin` block (`README.md`) and
-  `docs/img/lift.svg` from `tests/pins.py` + the committed `docs/RESULTS.md`
-  numbers, through Phase 6's marker-confined writer (`eval/blocks.py`);
+  `docs/img/lift.svg` from `tests/pins.py` (which the committed `docs/RESULTS.md`
+  blocks are pinned to), through Phase 6's marker-confined writer (`eval/blocks.py`);
   `tests/test_readme.py` regenerates both byte-identically under `make test`
   (the CI proof, exactly as `test_power.py` pins the AB_DESIGN block). Rejected:
   typing the numbers into README prose — the hiring-review's exact complaint is

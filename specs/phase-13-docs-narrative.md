@@ -6,7 +6,7 @@ Phase 13. Depends on Phase 12 (`phase-12-live-run`) merged to main.
 **Status: PROPOSED — do not start until approved.** No new dependencies: the
 README first-screen block and the findings chart are rendered by the SAME
 marker-confined writer Phase 6 uses (`eval/blocks.py`), from numbers that already
-live in `tests/pins.py` and the committed `docs/RESULTS.md` blocks; the chart is
+live in `tests/pins.py` (to which the committed `docs/RESULTS.md` blocks are pinned); the chart is
 a hand-written deterministic SVG string, NOT matplotlib (a plotting package for a
 static picture is a STOP-and-ask, CLAUDE.md allowlist). If a Markdown renderer on
 GitHub turns out to drop the inline `<svg>` or a Mermaid fence this spec assumes,
@@ -43,7 +43,7 @@ Reconciliation items (the developer's calls at phase entry):
    `make readme [WRITE=yes]` (same check-mode/`WRITE=yes` shape as `simulate` /
    `power`): every number in it — tiny label accuracy, tiny/medium MAE + coverage,
    the medium recommended-vs-baseline lift, the on-time rates — is read from
-   `tests/pins.py` and the committed RESULTS blocks, never hand-typed.
+   `tests/pins.py` (to which the committed RESULTS blocks are pinned), never hand-typed.
    `tests/test_readme.py` regenerates it byte-identically under `make test` (the
    CI proof, exactly as `tests/test_power.py::test_ab_design_block_matches_the_committed_block`
    is). Prose OUTSIDE the markers (the tagline, the quickstart list, the docs
@@ -105,8 +105,8 @@ reused.
 ## The central constraint
 
 **Not one number a reader sees is typed by a human.** Every figure on the README
-first screen and in the findings chart is rendered from `tests/pins.py` /
-the committed `docs/RESULTS.md` blocks by `make readme`, and `make test`
+first screen and in the findings chart is rendered from `tests/pins.py` (to
+which the committed `docs/RESULTS.md` blocks are pinned) by `make readme`, and `make test`
 regenerates both byte-identically; a drift is a red test, never a hand-edited
 constant. The pins, fixtures, macros, and models do not move — Phase 13 adds only
 docs and one generated artifact.
@@ -267,8 +267,8 @@ mutation coverage via `test_simulate.py` / `test_power.py`.)
       Composer-runnable DAG; the large-profile cost run; row 30 re-stated); row 15
       re-confirmed at exit
 - [ ] Spec amendments — none (Phase 13 is the docs capstone; no later spec exists)
-- [ ] RESULTS / METRICS / DEPLOYMENT — none (Phase 13 reads RESULTS, writes none
-      of these)
+- [ ] RESULTS / METRICS / DEPLOYMENT — none (Phase 13 writes none of these; its
+      figures are pinned in `tests/pins.py`, to which RESULTS is pinned)
 - [ ] `README.md` — the phase's own new file (first screen, quickstart, index)
 - [ ] `docs/INSIGHT.md` — NEW: the one-page honest read (tiny's negative
       simulated lift, the simulation's circularity, the A/B as the real test)
@@ -286,13 +286,13 @@ wholly-generated `docs/img/lift.svg`, nothing else), no cloud, no `CONFIRM`.
 
 `make readme` writes only `README.md` (between its markers — a missing pair is a
 refusal, `eval/blocks.py`) and `docs/img/lift.svg` (wholly generated). It reads
-`tests/pins.py` and `docs/RESULTS.md`; it writes no table, no fixture, nothing
-under `fixtures/`.
+`tests/pins.py` (to which `docs/RESULTS.md` is pinned) and the README it rewrites;
+it writes no table, no fixture, nothing under `fixtures/`.
 
 ## Review & stack risk
 
 - **code-reviewer** (triggered — `eval/`, `Makefile`, `scripts/`, `tests/` in
-  Scope): the `readme` renderer reads pins/RESULTS and never re-derives a number;
+  Scope): the `readme` renderer reads the pins and never re-derives a number;
   the writer is `eval/blocks.py` reused (marker-confined, refuses a missing pair);
   the SVG is a deterministic string (no clock, no order dependence); no pin,
   fixture, or model moves; the quickstart is cloud-free.

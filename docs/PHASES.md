@@ -513,8 +513,8 @@ from README alone.
 **planned close** — Phase 13 is the last phase; there is no Phase 14. A tracked
 `README.md` front door: a first-screen `<!-- readme:begin -->` block written by
 `make readme` (label accuracy, tiny/medium MAE + coverage, on-time rates, the
-simulated lift — every figure read from `tests/pins.py` + the committed
-`docs/RESULTS.md` blocks, never typed), a Mermaid architecture diagram naming the
+simulated lift — every figure read from `tests/pins.py` (which the committed
+`docs/RESULTS.md` blocks are pinned to), never typed), a Mermaid architecture diagram naming the
 same components as CLAUDE.md's ASCII one, the cloud-free quickstart (`setup →
 seed → dbt-build → eval → report → simulate → writeback → pipeline` on tiny,
 reaching `pipeline OK: tiny` with no GCP), the docs index and the stack-roles
