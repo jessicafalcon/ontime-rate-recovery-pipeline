@@ -388,6 +388,14 @@ Dated lines (fill on apply day — the BACKLOG Spanner row's trigger):
   complete! Resources: 0 added, 0 changed, 9 destroyed`; `Listed 0 items.`;
   state 21; re-plan `No changes`. ~35 minutes up ≈ 5¢. **Nothing billable
   is up.**
+- Phase 12 demo-day rehearsal: applied **2026-09-01** (02:42 UTC, operator
+  ADC, `VARS='enable_spanner=true,operator_principal=…'`, `9 added`); as the
+  SA `spanner-load OK: tiny — 22 dim rows`, then the Docker-Airflow → real
+  BigQuery+Spanner DAG run wrote the Spanner `send_schedule` (`20 users, 20
+  written`, idempotent `0` on re-run, hash == `SEND_SCHEDULE_SHA256_TINY`);
+  destroyed the same session **2026-09-01** (03:32–03:41 UTC) in the combined
+  Composer+Spanner toggle-flip (`14 destroyed`), `Listed 0 items.`. ~50 min up
+  ≈ 8¢.
 
 ### Composer: bring-up, run, teardown (Phase 11 module; applied in Phase 12)
 
@@ -450,6 +458,15 @@ test-int-airflow`). Ask-first, cloud-cost, same session. It needs Spanner up
 
 **Phase 12 (apply / run / teardown — the runbook, mirrors Spanner):**
 
+0. **Bootstrap the Composer API deps by hand once** (§8, found live Phase 12):
+   `gcloud services enable compute.googleapis.com composer.googleapis.com
+   --project=<id>`. Composer runs on Compute/GKE, so enabling
+   `composer.googleapis.com` transitively enables `compute` — and that batch
+   enable can fail with a transient `Error code 13 … failed services
+   [compute.googleapis.com]` on the first `tf-apply` (nothing is created — the
+   API is the module's first resource). Enabling both by hand first, then
+   re-running the apply, clears it (the enablement is idempotent, so
+   Terraform's `google_project_service.composer` finds it on and proceeds).
 1. **Apply** (operator ADC, never the SA — §8): `make tf-apply PROJECT=<id>
    CONFIRM=yes VARS='enable_composer=true'` (carry EVERY applied toggle — while
    Composer OR Spanner is up, an apply that omits its toggle plans the teardown,
@@ -466,9 +483,28 @@ test-int-airflow`). Ask-first, cloud-cost, same session. It needs Spanner up
 
 Dated lines (fill when the plan/apply run):
 
-- `enable_composer=true` **plan** observed (Phase 11 evidence): **N to add,
-  0 to change, 0 to destroy** — *(fill on the day the ask-first plan is run;
-  the plan creates nothing)*.
-- `enable_composer=true` applied (Phase 12): *(demo day — fill on apply)*.
-- Destroyed (`enable_composer=false … ALLOW_DESTROY=yes`): *(same session —
-  fill on teardown; confirm `gcloud composer environments list` → empty)*.
+- `enable_composer=true` **plan** observed (Phase 12): **5 to add, 0 to change,
+  0 to destroy** — 2026-09-01 (operator ADC; the plan creates nothing).
+- `enable_composer=true` applied (Phase 12): **2026-09-01** (~03:00–03:30 UTC,
+  `ontime-rate-recovery`, operator ADC, carrying `enable_spanner=true` +
+  `operator_principal`). The FIRST apply failed at
+  `google_project_service.composer` with a transient `Error code 13 … failed
+  services [compute.googleapis.com]` (nothing created — the API is the module's
+  first resource; §8 gotcha); `gcloud services enable compute.googleapis.com
+  composer.googleapis.com` by hand, then re-apply → `Apply complete! Resources:
+  5 added, 0 changed, 0 destroyed` (environment `ontime` after 23m16s + the two
+  DAG-bucket objects). Environment `RUNNING`; `dags list-import-errors` → `No
+  data found` (the committed DAG imports with no error on managed Airflow — the
+  dual-path import); `dags list` shows `pipeline`; one `dags test pipeline
+  2026-01-13` run was triggered (`state:running`) and its `dbt_build` task
+  failed on the worker — `make: No rule to make target 'dbt-build'` at
+  `cwd=/home/airflow` (no repo/toolchain — Option A, §8). The green DATA run is
+  the Docker-Airflow rehearsal (`docs/RESULTS.md § Phase 12`).
+- Destroyed (`enable_spanner=false,enable_composer=false … ALLOW_DESTROY=yes`):
+  **2026-09-01** (~03:32–03:41 UTC, operator ADC): plan `0 to add, 0 to change,
+  14 to destroy` (Composer 5 + Spanner 9) → `Apply complete! … 14 destroyed`
+  (Composer env destroyed after 7m35s); `gcloud composer environments list` →
+  `Listed 0 items.`, `gcloud spanner instances list` → `Listed 0 items.`, `bq
+  ls` → `raw`, `ontime`. **Nothing billable is up.** Session spend ≈ cents (well
+  under the $25 cap). The `composer.googleapis.com` / `compute` API enablements
+  stay on (free); the state keeps the free-tier layer + `operator_principal`.

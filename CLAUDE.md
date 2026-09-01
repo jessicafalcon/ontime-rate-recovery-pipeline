@@ -1079,12 +1079,28 @@ Docker-Airflow → real-BigQuery+Spanner rehearsal (rehearsed FIRST). Suite 585
 green (was 578; +4 DAG, +3 compose), mutate 2/2 (`build_tasks` neutered → red),
 ruff clean. Records: DECISIONS Phase 12, PHASES in-flight, ARCHITECTURE §8
 (make-on-Composer gotcha), CLAUDE status/Repo map/count, BACKLOG (47 struck;
-16/37/44/30 re-deferred, 17 not-built, 15 re-confirmed), RESULTS Phase 12 block
-(pending the live run), DEPLOYMENT rehearsal runbook. Meters confirmed OFF at
-entry — Spanner `Listed 0 items.`, Composer API `SERVICE_DISABLED`. **Nothing
-applied.** NEXT (ask-first, developer authorizes each): review agents, then the
-live rehearsal → Composer apply → one DAG run → capture into RESULTS → teardown
-(prove meter stopped, spend < $25) → push + PR (developer merges).
+16/37/44/30 re-deferred, 17 not-built, 15 re-confirmed), RESULTS Phase 12 block,
+DEPLOYMENT rehearsal runbook.
+**LIVE RUN DONE (2026-09-01, `ontime-rate-recovery`; `tf-*` on operator ADC, the
+build/write-back as the impersonated SA).** Rehearsal (the green data run): Spanner
+applied 02:42 UTC (`9 added`), `spanner-load OK: tiny — 22 dim rows`, the committed
+DAG via Docker Airflow + the cloud override built on BigQuery and wrote the Spanner
+`send_schedule` — `writeback OK: … → spanner, 20 users, 20 written`, `DagRun …
+state=success`, idempotent `0` on re-run, **20 rows, hash == `SEND_SCHEDULE_SHA256_TINY`**.
+Composer (Option A): the first `enable_composer=true` apply hit a transient API-enable
+`Error code 13` (transitive `compute`; nothing created — §8 gotcha), fixed by `gcloud
+services enable compute composer` then re-apply → `5 added`, env `RUNNING` after
+23m16s; `dags list-import-errors` → `No data found` (the DAG imports clean on managed
+Airflow — the dual-path import, row 47 proven live), `dags list` shows `pipeline`; one
+`dags test` run triggered → `dbt_build` failed on the worker (`make: No rule to make
+target 'dbt-build'` — no repo/toolchain, Option A). Torn down the same session
+03:32–03:41 UTC (combined toggle-flip `14 destroyed`, `ALLOW_DESTROY=yes`): Spanner +
+Composer both `Listed 0 items.`, `bq ls` → `raw`, `ontime` (free-tier intact).
+**Nothing billable is up; session spend ≈ cents (< $25).** Records filled (RESULTS
+Phase 12 rehearsal+Composer tables, DEPLOYMENT dated lines + the API-bootstrap step,
+ARCHITECTURE §8 make-on-Composer + transient-API-enable gotchas, BACKLOG row 15 exit
+re-confirm). **Phase 12's Done-when is met.** NEXT (ask-first): review agents, then
+push + PR (developer merges).
 Open BACKLOG rows: **14** (Phase 12 struck the flat-Composer-DAG-import row
 (47) — the DAG import is now dual-path — and re-deferred the tfstate
 confidentiality half (16), the DAG↔task attachment row (37), the cloud-env

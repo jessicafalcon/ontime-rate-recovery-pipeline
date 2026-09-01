@@ -488,9 +488,13 @@ make-based DAG parses on Composer but does not execute there (no repo/`make`/ven
 on a worker — ARCHITECTURE §8); Composer proves the module applies + the DAG
 imports clean, and the green DATA run + `send_schedule` (20 rows,
 `SEND_SCHEDULE_SHA256_TINY`) come from the local Docker-Airflow →
-real-BigQuery+Spanner rehearsal. LIVE half pending (ask-first, same session):
-rehearse first, apply Composer (+ Spanner), one DAG run, capture into
-`docs/RESULTS.md`, destroy, prove the meter stopped and spend < $25.
+real-BigQuery+Spanner rehearsal. LIVE run DONE 2026-09-01 (same session): the
+rehearsal DAG green on real BigQuery+Spanner (`20 users, 20 written`, hash ==
+`SEND_SCHEDULE_SHA256_TINY`); Composer applied (`5 added`, env `RUNNING`), the DAG
+imported with no error on managed Airflow, one run triggered (its make-task failed
+on the worker — Option A); torn down the same session (`14 destroyed`, Spanner +
+Composer `Listed 0 items.`), spend ≈ cents (< $25). Captured in `docs/RESULTS.md`
+§ Phase 12; dated lines in `docs/DEPLOYMENT.md`.
 
 ---
 

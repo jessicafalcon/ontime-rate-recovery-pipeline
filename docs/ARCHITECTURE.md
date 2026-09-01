@@ -590,3 +590,15 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   out of scope. The DAG is pointed at the cloud by config, not code:
   `orchestration/tasks.py::build_tasks` reads `OTR_DAG_TARGET`/`OTR_DAG_PROJECT`
   at parse time (unset → the local DuckDB default, byte-identical to Phase 8b).
+- **Enabling `composer.googleapis.com` transitively enables `compute` and can
+  fail with a transient INTERNAL error** (Phase 12, live). The first
+  `enable_composer=true` apply failed at `google_project_service.composer`:
+  `Error code 13 … [composer.googleapis.com]: … with failed services
+  [compute.googleapis.com]` — Composer runs on Compute/GKE, so enabling its API
+  pulls in `compute.googleapis.com`, and the batch enable hit a transient
+  internal error. No resource was created (the API is the module's first
+  resource; nothing billable started). Remedy (a one-time bootstrap, not a code
+  change): `gcloud services enable compute.googleapis.com composer.googleapis.com`
+  by hand, then re-run `tf-apply` (the API enablement is idempotent — the second
+  apply found it on and proceeded to the environment). `docs/DEPLOYMENT.md`
+  carries it as a Composer bootstrap step.
