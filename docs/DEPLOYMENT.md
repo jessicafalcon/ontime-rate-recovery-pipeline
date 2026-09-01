@@ -270,9 +270,10 @@ Or wait for the window to close.
 ## Spanner (Phase 10) and Composer (Phase 11) — apply and teardown dates
 
 Both stay off (`enable_spanner`/`enable_composer` default false), so a default
-apply never creates them. **Composer** bills ~$300+/mo — Phase 11 applies it on
-demo day and destroys it the same hour (Phase 12). Record the actual apply
-dates here when they land.
+apply never creates them. **Composer** bills ~$300+/mo — Phase 11 WRITES the
+module (proven plan-clean, nothing applied); **Phase 12** applies it on demo
+day, runs one DAG, and destroys it the same hour. Record the actual apply dates
+in the Composer section below when they land.
 
 ### Spanner: bring-up, run, teardown (Phase 10)
 
@@ -387,3 +388,48 @@ Dated lines (fill on apply day — the BACKLOG Spanner row's trigger):
   complete! Resources: 0 added, 0 changed, 9 destroyed`; `Listed 0 items.`;
   state 21; re-plan `No changes`. ~35 minutes up ≈ 5¢. **Nothing billable
   is up.**
+
+### Composer: bring-up, run, teardown (Phase 11 module; applied in Phase 12)
+
+Phase 11 WROTE the module — nothing was applied. The module creates a Cloud
+Composer environment (managed Airflow), running as the existing pipeline SA with
+one `roles/composer.worker` grant, plus the DAG-bucket upload of the committed
+Phase 8b DAG. Composer has a hard cost floor (~$300+/mo, billed continuously)
+that no config removes, so — like Spanner — the apply and the teardown belong to
+the SAME working session; never leave it up. The environment also takes 25–40+
+minutes to create (rehearse the Docker-Airflow → BigQuery fallback first;
+PROJECT_BRIEF demo-day risks).
+
+**Phase 11 (plan-only, done):** offline suite green + `tf-validate OK`; the live
+proof is an ask-first `tf-plan` (creates nothing):
+
+- `make tf-plan PROJECT=<id>` → **zero** `google_composer_*` in the plan (the
+  default toggle is false).
+- `make tf-plan PROJECT=<id> VARS='enable_composer=true'` → **exactly** the
+  module's resources (`Plan: N to add`, `0 to change`, `0 to destroy` on the
+  free-tier layer). Record the observed N and date below when the plan is run.
+
+**Phase 12 (apply / run / teardown — the runbook, mirrors Spanner):**
+
+1. **Apply** (operator ADC, never the SA — §8): `make tf-apply PROJECT=<id>
+   CONFIRM=yes VARS='enable_composer=true'` (carry EVERY applied toggle — while
+   Composer OR Spanner is up, an apply that omits its toggle plans the teardown,
+   which `tf-apply` refuses without `ALLOW_DESTROY=yes`, Amendment F/N1). Expect
+   the environment + the composer.worker grant + the two DAG objects; the
+   environment create takes 25–40+ min.
+2. **Run one DAG** against BigQuery (+ Spanner if also up); capture the run log
+   and the `send_schedule` row count (`docs/RESULTS.md`, Phase 12).
+3. **Tear down the same session** — the scoped destroy is the toggle flipped
+   back: `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_composer=false'
+   ALLOW_DESTROY=yes` (count → 0 destroys exactly the module's resources; the
+   `composer.googleapis.com` enablement stays on — free, like the root set). A
+   full `make tf-destroy … CONFIRM=yes` also removes it.
+
+Dated lines (fill when the plan/apply run):
+
+- `enable_composer=true` **plan** observed (Phase 11 evidence): **N to add,
+  0 to change, 0 to destroy** — *(fill on the day the ask-first plan is run;
+  the plan creates nothing)*.
+- `enable_composer=true` applied (Phase 12): *(demo day — fill on apply)*.
+- Destroyed (`enable_composer=false … ALLOW_DESTROY=yes`): *(same session —
+  fill on teardown; confirm `gcloud composer environments list` → empty)*.

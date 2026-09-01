@@ -124,11 +124,23 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `docker-compose.yml` (lean `SequentialExecutor`/SQLite; `apache-airflow` never
   in `uv.lock`). A pipeline dir — `test_truth_isolation.py` covers it. `eval` is
   NOT a DAG task (union-only gate — reads truth, asserts full-data pins).
-- `infra/` *(Phase 9a; 10)* — Terraform. `main.tf`/`variables.tf`/`outputs.tf` +
+- `infra/` *(Phase 9a; 10; 11)* — Terraform. `main.tf`/`variables.tf`/`outputs.tf` +
   `modules/{bigquery,gcs,iam,budget}` (unconditional, free/near-free) and
   `modules/{composer,spanner}` `count`-gated behind `enable_*` toggles that
   default false (so is the CI WIF layer inside `iam`: `enable_ci_wif`).
-  Phase 10 filled the spanner module: instance (100 PU), database with the
+  Phase 11 filled the composer module (written, not applied): the
+  `composer.googleapis.com` enablement (kept on at destroy), the smallest
+  environment (`ENVIRONMENT_SIZE_SMALL`) running as the pipeline SA
+  (`node_config.service_account = var.sa_email`, not a default Compute SA), one
+  project-level `roles/composer.worker` grant to that SA (its documented
+  minimum — `test_project_level_grant_is_only_bigquery_jobuser` admits it beside
+  `bigquery.jobUser`), and the DAG-bucket upload of the committed Phase 8b DAG
+  (`google_storage_bucket_object` sourcing `orchestration/dags/pipeline_dag.py`
+  + `tasks.py`, never inline); the composer resource-type allowlist filled from
+  `set()` to the exact four types (`tests/test_infra.py`); nothing applied
+  (plan-only — a default `tf-plan` is Composer-free, `enable_composer=true`
+  shows exactly the module's). Phase 10 filled the spanner module: instance
+  (100 PU), database with the
   `dim_user` + `send_schedule` DDL inlined (PINNED by
   `tests/test_dbt_sources.py` against the contract renders — `gen-sources`
   never writes a `.tf`; a drift is a paste + `tf-freeze`), `EXTERNAL_QUERY`
@@ -1024,13 +1036,33 @@ NAME is unchanged, only the `-m` module path differs (landing.cli vs
 pipeline.cli). `tests/test_loader.py`→`tests/test_landing.py`; the tree-derived
 truth-isolation guard covers both new packages with no edit. Suite 575 green,
 mutate/review-gate/check-docs clean; struck the `loader/` package-shape BACKLOG
-row. NEXT: run the review agents (code + functionality + coherence; sensitive
-surface → security too, for the Makefile/serving diff), report verdicts, then
-push + PR (developer merges).
-Open BACKLOG rows: **15** (the security re-review of P opened three: the
+row. **Merged to main (`891c898`, 2026-08-31).**
+**Phase 11 in flight** (`phase-11-composer-module`, spec approved 2026-08-31):
+the composer module — a count-gated stub since 9a — filled behind the
+still-default-false `enable_composer` toggle. Offline complete: the module body
+(`composer.googleapis.com` enablement kept-on; the smallest environment running
+as the pipeline SA, not a default Compute SA; one project-level
+`roles/composer.worker` grant to that SA; the DAG-bucket upload of the committed
+Phase 8b DAG, sourcing the file, not inline), the exact composer resource-type
+allowlist (`set()` → four types), three new `test_infra.py` pins
+(`test_composer_module_resource_types`, `_runtime_grant_scope`,
+`_uploads_the_committed_dag`) + the three widened grant pins (composer.worker
+admitted beside bigquery.jobUser, `seen == 9`, LEAST_PRIVILEGE_ROLES), the `.tf`
+re-freeze (22 files). **Nothing applied — plan-only Done-when.** Suite 578
+green, `tf-validate OK`, mutate 1/1 (`manifest_diff` neutered → red). Records:
+DECISIONS Phase 11, PHASES Delivered + the Phase 10 O/P/Q narrative (BACKLOG row
+46 struck), DEPLOYMENT Composer bring-up/run/teardown runbook (Phase 12 applies;
+the intro "Phase 11 applies" corrected), CLAUDE status/Repo map/count, BACKLOG
+37/44 re-deferred. NEXT: run the review agents (code + functionality + security
++ coherence — `infra/`/IAM/cloud-toggle surface), report verdicts, then the
+ask-first live `tf-plan` evidence, then push + PR (developer merges).
+Open BACKLOG rows: **14** (Phase 11 struck the `docs/PHASES.md`
+Delivered-narrative trail — row 46, the Phase 10 O/P/Q append — and re-deferred
+the offline DAG↔task attachment row to Phase 12 and the cloud-env redirection
+gate row with a sharper trigger. The security re-review of P opened three: the
 cloud-env redirection gate's residual — proxy-spelling/exact-pin/entry-point
 test, `grpc_proxy` closed now — the `APPDATA`/Windows classification, and the
-`docs/PHASES.md` Delivered-narrative trail. Phase 10 struck: the write-back
+`docs/PHASES.md` Delivered-narrative trail (**now struck by Phase 11**). Phase 10 struck: the write-back
 read-seam row and
 the `model_version`-lexical row; re-deferred: the `computed_as_of`
 discriminator (new trigger: a served-row change without an advancing as-of /

@@ -396,7 +396,9 @@ variable exists, and `fix/tf-vars-argv` pinned toggles to command-line `VARS`
 → argv `-var` — spec item 4, DECISIONS Phase 10.)*
 
 **Delivered** (`phase-10-spanner-writeback`, spec
-`specs/phase-10-spanner-writeback.md`): as planned, plus ten amendments.
+`specs/phase-10-spanner-writeback.md`): as planned, plus the review-round
+amendments A–Q (rounds 1–4's A–N3, round 5's O, round 6's P, and the security
+re-review's Q).
 `serving/spanner.py` — `TARGET=spanner` reads BigQuery `ontime` through the
 one `candidates_sql` relation seam and writes the Spanner `send_schedule`
 inside ONE read-write transaction (Amendment A; the DuckDB stand-in is one
@@ -428,7 +430,13 @@ permission set and `test-int-spanner` passed `4 passed` under it (E); the
 `ALLOW_DESTROY=yes` toggle-flip destroyed exactly the module's 9. Round 4
 (the cap: Amendments N1–N3, denylist → allowlist / the library's call)
 re-proven live 2026-08-31 06:07–06:42 UTC: `9 added`, `4 passed in
-248.70s`, `0 written`, `9 destroyed`, `Listed 0 items.`.
+248.70s`, `0 written`, `9 destroyed`, `Listed 0 items.`. Then round 5
+(Amendment O: the cloud-env domain closed by the vendors' own declarations),
+round 6 (Amendment P: closed over what the installed libraries READ), and the
+security re-review (Amendment Q: the domain narrowed to an enumerated set with
+`REDIRECTION_NAMES`, the vendor scan a coverage aid) — the cap firing three
+times on the same open-world boundary, each fix a KIND change; the residuals are
+BACKLOG rows. Merged as PR #15.
 
 ---
 
@@ -439,6 +447,25 @@ apply; `docs/DEPLOYMENT.md` bring-up / run / teardown / cost table.
 
 **Done when.** `terraform plan` with `enable_composer=false` shows zero Composer
 resources; with `true` shows exactly the module's; nothing applied.
+
+**Delivered** (`phase-11-composer-module`, spec
+`specs/phase-11-composer-module.md`): the composer module — a stubbed shell
+since 9a — filled behind the still-default-false `enable_composer` toggle.
+`infra/modules/composer/main.tf`: the `composer.googleapis.com` enablement
+(kept on at destroy), the smallest environment (`ENVIRONMENT_SIZE_SMALL`)
+running as the existing least-privilege pipeline SA (`node_config.service_account
+= var.sa_email`, not a default Compute SA), one scoped `roles/composer.worker`
+grant to that SA (the documented minimum; inherently project-level), and the
+DAG-bucket upload of the committed Phase 8b DAG (`google_storage_bucket_object`
+sourcing `orchestration/dags/pipeline_dag.py` + `tasks.py`, never an inline
+copy). The composer resource-type allowlist filled from `set()` to the exact
+four types (`tests/test_infra.py`); the `.tf` tree re-frozen
+(`infra/MANIFEST.sha256`, 22 files). **Nothing applied** — plan-only: the
+offline suite (578 green) + `tf-validate` are the static half; the live half is
+an ask-first `tf-plan` (zero Composer resources by default, exactly the module's
+at `enable_composer=true`), captured when run. No pipeline `.py`, no golden, no
+pin moved. Row 46 (the Phase 10 Delivered narrative) reconciled in the same doc
+pass; rows 37/44 re-deferred.
 
 ---
 
