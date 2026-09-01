@@ -482,7 +482,7 @@ test-int-airflow`). Ask-first, cloud-cost, same session. It needs Spanner up
    `composer.googleapis.com` enablement stays on — free, like the root set). A
    full `make tf-destroy … CONFIRM=yes` also removes it.
 
-Dated lines (fill when the plan/apply run):
+Dated lines (Phase 12 demo-day run, 2026-09-01):
 
 - `enable_composer=true` **plan** observed (Phase 12): **5 to add, 0 to change,
   0 to destroy** — 2026-09-01 (operator ADC; the plan creates nothing).

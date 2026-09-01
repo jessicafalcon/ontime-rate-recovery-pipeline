@@ -179,7 +179,9 @@ annotated **Superseded by …** in place and never deleted.
 - **The rehearsal is a committed cloud OVERRIDE compose file, ADC mounted
   read-only.** `orchestration/docker-compose.cloud.yml` (a second `-f`, never
   used by `make test-int-airflow`) sets the two env vars and mounts the host's
-  gcloud ADC dir READ-ONLY at the container's default ADC path — no keyfile, no
+  ADC json file ALONE READ-ONLY at the container's default ADC path — not the
+  whole gcloud dir, which holds refresh tokens for every account (review round 1
+  security #6) — no keyfile, no
   `GOOGLE_APPLICATION_CREDENTIALS`, no credential in the repo or image (Credential
   standard); `OTR_DAG_PROJECT` uses compose's `:?` guard so a rehearsal with no
   project errors before anything starts. Rejected: a keyfile mount / a
