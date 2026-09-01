@@ -213,9 +213,15 @@ ALLOWED_RESOURCE_TYPES = {
 # The count-gated modules are NOT exempt (Phase 10 round 1 #11): each has its
 # own exact allowlist, so a `null_resource` + local-exec (runs on the
 # operator's machine during the ask-first apply) or a second billable type
-# dropped into a module is caught the same way. composer is still a stub.
+# dropped into a module is caught the same way. Both modules now declare their
+# exact sets (Phase 11 filled composer).
 GATED_ALLOWED_RESOURCE_TYPES = {
-    INFRA / "modules" / "composer": set(),
+    INFRA / "modules" / "composer": {
+        "google_project_service",
+        "google_project_iam_member",
+        "google_composer_environment",
+        "google_storage_bucket_object",
+    },
     INFRA / "modules" / "spanner": {
         "google_project_service",
         "google_project_iam_custom_role",
@@ -386,6 +392,64 @@ def test_spanner_custom_role_is_the_exact_data_plane_set() -> None:
         assert "roles/spanner." not in body, f  # no predefined Spanner role anywhere
         if f.parent != INFRA / "modules" / "spanner":
             assert 'resource "google_project_iam_custom_role"' not in body, f
+
+
+# ---------------------------------------------------------------- Phase 11 composer
+
+
+def test_composer_module_resource_types() -> None:
+    """Phase 11 invariant 2 / Done-when 2: every `google_composer_*` resource sits
+    inside the count-gated module (a plan is Composer-free by default); the
+    environment is the smallest size; the API is kept on at destroy like the
+    root/Spanner sets. The exact declared-type set is pinned by
+    test_every_declared_resource_type_is_on_the_allowlist (GATED_ALLOWED_...)."""
+    module_dir = INFRA / "modules" / "composer"
+    for f in _tf_files():
+        if f.parent == module_dir:
+            continue
+        assert not re.search(
+            r'resource\s+"google_composer_', _strip_hcl_comments(f.read_text())
+        ), f
+    text = _stripped("modules", "composer", "main.tf")
+    env = _block(text, r'resource "google_composer_environment" "this"')
+    assert re.search(r'environment_size\s*=\s*"ENVIRONMENT_SIZE_SMALL"', env)
+    api = _block(text, r'resource "google_project_service" "composer"')
+    assert re.search(r"^\s*disable_on_destroy\s*=\s*false", api, re.M)
+
+
+def test_composer_runtime_grant_scope() -> None:
+    """Phase 11 invariant 3 / Done-when 3: the environment runs as the pipeline
+    SA (var.sa_email — module.iam), never a default Compute SA; its ONE grant is
+    `roles/composer.worker` to that SA. A second/broader role, or a default-SA
+    fallback (no node_config.service_account), reddens."""
+    text = _stripped("modules", "composer", "main.tf")
+    env = _block(text, r'resource "google_composer_environment" "this"')
+    node = _block(env, r"node_config")
+    assert re.search(r"^\s*service_account\s*=\s*var\.sa_email", node, re.M)
+    grants = _blocks(text, r'resource "google_project_iam_member"\s+"[^"]+"')
+    assert len(grants) == 1, grants
+    grant = _block(text, r'resource "google_project_iam_member" "worker"')
+    assert re.search(r'^\s*role\s*=\s*"roles/composer\.worker"', grant, re.M)
+    assert re.search(
+        r'^\s*member\s*=\s*"serviceAccount:\$\{var\.sa_email\}"', grant, re.M
+    )
+
+
+def test_composer_uploads_the_committed_dag() -> None:
+    """Phase 11 invariant 4 / Done-when 4: the DAG-bucket upload SOURCES the
+    committed 8b DAG file (never an inline `content` heredoc that could drift),
+    and that file exists in the repo."""
+    text = _stripped("modules", "composer", "main.tf")
+    for obj, repo_path in (
+        ("dag", "orchestration/dags/pipeline_dag.py"),
+        ("tasks", "orchestration/tasks.py"),  # Done-when 4: "and tasks.py"
+    ):
+        block = _block(text, rf'resource "google_storage_bucket_object" "{obj}"')
+        src = re.search(r'source\s*=\s*"([^"]+)"', block).group(1)
+        assert src.endswith(repo_path), src
+        # a file source, not an inline copy that could drift
+        assert not _has_arg(block, "content"), block
+        assert (ROOT / repo_path).is_file()
 
 
 def test_region_is_validated_wherever_it_is_declared() -> None:
@@ -831,6 +895,13 @@ LEAST_PRIVILEGE_ROLES = {
     # (SPANNER_DATA_PERMISSIONS below — round 2 #1, Amendment E), never a
     # predefined Spanner role: every writing one carries updateDdl.
     "roles/bigquery.connectionUser",
+    # Phase 11 (composer module, count-gated): the environment's runtime SA
+    # needs composer.worker — the documented minimum an environment service
+    # account carries. It is inherently PROJECT-level (composer.worker cannot
+    # be scoped to one resource), so test_project_level_grant_is_only_* admits
+    # it beside bigquery.jobUser; a custom role is deferred (BACKLOG) — no
+    # documented custom role replaces composer.worker cleanly.
+    "roles/composer.worker",
 }
 # … and ON the SA (who may act as it): CI's WIF binding, the operator's
 # impersonation (Amendment Q). Both are `google_service_account_iam_member`.
@@ -909,10 +980,15 @@ def test_every_grant_member_is_pinned() -> None:
             key = next(k for k in SPANNER_MEMBERS if k in b.splitlines()[0])
             assert member == SPANNER_MEMBERS[key], member
             assert b.startswith(f'resource "{SPANNER_GRANT_SCOPES[key][0]}"'), key
+        elif '"worker"' in b.splitlines()[0]:  # Phase 11 composer worker grant
+            assert b.startswith('resource "google_project_iam_member" "worker"'), (
+                b.splitlines()[0]
+            )
+            assert member == "serviceAccount:${var.sa_email}", member
         else:
             assert member == SA_MEMBER, member
         seen += 1
-    assert seen == 8, seen
+    assert seen == 9, seen
 
 
 def test_no_role_can_create_a_dataset() -> None:
@@ -931,17 +1007,21 @@ def test_no_role_can_create_a_dataset() -> None:
 
 
 def test_project_level_grant_is_only_bigquery_jobuser() -> None:
-    """Round 2 #9: scope, not just role name. The only PROJECT-level grant is
-    `bigquery.jobUser` (which must be project-level); `dataEditor` is
-    dataset-scoped and `objectAdmin` bucket-scoped — moving `objectAdmin` to a
-    project-wide `google_project_iam_member` reddens."""
+    """Round 2 #9: scope, not just role name. The only PROJECT-level grants are
+    the two roles that MUST be project-level — `bigquery.jobUser` and (Phase 11,
+    count-gated) `composer.worker`; `dataEditor` is dataset-scoped and
+    `objectAdmin` bucket-scoped — moving `objectAdmin` to a project-wide
+    `google_project_iam_member` reddens, and a new project-wide role is a
+    conscious edit here."""
     project_roles: set[str] = set()
     for body in _stripped_files().values():  # whole tree (round 3 #1)
         project_roles |= {
             re.search(r'role\s*=\s*"(roles/[^"]+)"', b).group(1)
             for b in _blocks(body, r'resource "google_project_iam_member"\s+"[^"]+"')
         }
-    assert project_roles == {"roles/bigquery.jobUser"}, project_roles
+    assert project_roles == {"roles/bigquery.jobUser", "roles/composer.worker"}, (
+        project_roles
+    )
     iam = _stripped("modules", "iam", "main.tf")
     # objectAdmin is granted on the bucket, dataEditor on the datasets
     assert _blocks(iam, r'resource "google_storage_bucket_iam_member"\s+"[^"]+"')

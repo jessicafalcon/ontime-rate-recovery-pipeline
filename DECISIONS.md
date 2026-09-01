@@ -146,6 +146,53 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### Phase 11 — Composer module (written, not applied) (2026-08-31)
+
+- **The environment runs as the existing least-privilege pipeline SA, granted
+  exactly `roles/composer.worker` inside the count-gated module.** The root
+  passes `sa_email = module.iam.service_account_email` (the Spanner wiring
+  pattern); the module sets `node_config.service_account` to it and adds one
+  `google_project_iam_member` for `roles/composer.worker` — the documented
+  minimum an environment's service account needs. Rejected: letting Composer
+  fall back to the default Compute Engine SA (broad, unmanaged project-wide
+  access an orchestrator must not carry). `composer.worker` is inherently
+  PROJECT-level (it cannot be scoped to one resource), so
+  `test_project_level_grant_is_only_bigquery_jobuser` widens to admit it beside
+  `bigquery.jobUser` — a conscious, exact edit, not a denylist loosening. A
+  tighter custom role (the Spanner `data_user` pattern) is deferred (BACKLOG if
+  the security review pushes): no documented custom role replaces
+  `composer.worker` cleanly.
+- **The DAG-bucket upload sources the committed Phase 8b DAG file, never an
+  inline copy.** The environment creates its own DAG bucket; the module reads
+  its `dag_gcs_prefix`, splits out the bucket, and uploads
+  `orchestration/dags/pipeline_dag.py` (+ `tasks.py`) as
+  `google_storage_bucket_object`s whose `source` is the repo file. Rejected: an
+  inline `content =` heredoc (drifts from the reviewed DAG). Whether the
+  Composer workers can EXECUTE the `make` targets (repo, uv, dbt present on the
+  workers) is Phase 12's live concern, with the Docker-Airflow → BigQuery
+  fallback; Phase 11 proves the upload PLANS, not that a run succeeds.
+- **Plan-only, meter off: nothing is applied; the module is count-gated and
+  `enable_composer` defaults false.** The Done-when's static half is the offline
+  suite (count-gate, default-off, the exact resource-type allowlist filled from
+  `set()`, the runtime-grant scope, the DAG-source pin) + `tf-validate`; the live
+  half is an ask-first `tf-plan` (reads GCP APIs on operator ADC, creates
+  nothing) showing zero Composer resources by default and exactly the module's
+  at `enable_composer=true`. The `.tf` re-freeze (`infra/MANIFEST.sha256`) lands
+  in the same commit as the `.tf` change. Rejected: applying to observe the real
+  resource set (Phase 12's job — the ~$300+/mo meter). The smallest environment
+  size (`ENVIRONMENT_SIZE_SMALL`) is pinned so demo-day cost is the minimum, not
+  because Composer is ever cheap — a hard cost floor no config removes is why it
+  is applied once and torn down the same session.
+- **The composer resource-type allowlist is filled to the exact declared set;
+  the module reads no `data` source.** `GATED_ALLOWED_RESOURCE_TYPES[composer]`
+  goes `set()` → `{google_project_service, google_composer_environment,
+  google_storage_bucket_object, google_project_iam_member}`, so a new billable
+  type dropped in later is caught the way Spanner's is (Phase 10 round 1 #11 —
+  the gated modules are not exempt). No service-agent grant here (the Spanner §8
+  lesson): the API enablement provisions the Composer Service Agent, and any
+  missing service-agent edge surfaces at Phase 12's live apply, cost-free at plan
+  time.
+
 ### fix/landing-package (after Phase 10, 2026-08-31)
 
 - **`loader/` → `landing/`, and the build/integration plumbing → a new
