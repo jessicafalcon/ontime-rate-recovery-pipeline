@@ -67,3 +67,46 @@ def test_readme_write_takes_only_yes() -> None:
 
     with pytest.raises(SystemExit):
         cli.readme_cmd("Yes")
+
+
+def test_readme_write_persists_both_artifacts(tmp_path, monkeypatch) -> None:
+    """WRITE=yes actually lands the block AND creates the SVG (the persistence
+    path a `delete-call` on either write survived — round-1 finding #2)."""
+    from eval import cli
+
+    rows = readme.first_screen_rows()
+    expected_block = readme.render_block(rows)
+    expected_svg = readme.render_svg(rows)
+
+    scratch_readme = tmp_path / "README.md"
+    scratch_readme.write_text(f"top\n{readme.BEGIN}\nstale\n{readme.END}\nbottom\n")
+    scratch_svg = tmp_path / "img" / "lift.svg"  # parent does not exist yet
+    monkeypatch.setattr(cli, "README", scratch_readme)
+    monkeypatch.setattr(cli, "LIFT_SVG", scratch_svg)
+
+    assert cli.readme_cmd("yes") == 0
+    written = blocks.find_block(scratch_readme.read_text(), readme.BEGIN, readme.END)
+    assert written == expected_block  # write_block ran, not a no-op
+    assert scratch_svg.read_text() == expected_svg  # write_text + mkdir ran
+
+
+def test_readme_refuses_missing_file(tmp_path, monkeypatch) -> None:
+    import pytest
+
+    from eval import cli
+
+    monkeypatch.setattr(cli, "README", tmp_path / "nope.md")
+    with pytest.raises(SystemExit):
+        cli.readme_cmd("")
+
+
+def test_readme_refuses_missing_markers(tmp_path, monkeypatch) -> None:
+    import pytest
+
+    from eval import cli
+
+    no_markers = tmp_path / "README.md"
+    no_markers.write_text("no markers here\n")
+    monkeypatch.setattr(cli, "README", no_markers)
+    with pytest.raises(SystemExit):
+        cli.readme_cmd("")
