@@ -19,12 +19,9 @@ pipeline`'s."""
 
 from __future__ import annotations
 
+import os
+
 PROFILE = "tiny"
-# The warehouse the build lands in and builds against (Phase 9b): the build's
-# landing is the target's own (duckdb → the DuckDB file; bigquery → GCS →
-# BigQuery), so the DAG names it. The Docker-local DAG is duckdb; Composer
-# (Phase 11) sets bigquery here and adds PROJECT.
-TARGET = "duckdb"
 
 # Rendered to YYYY-MM-DD by Airflow, never by us. A per-interval build lands only
 # the files uploaded on or before this date (Phase 8b); the DAG's @daily schedule
@@ -32,14 +29,49 @@ TARGET = "duckdb"
 # explicit backfill converges to the union (catchup=False).
 THROUGH_TEMPLATE = "{{ data_interval_end | ds }}"
 
-# (task_id, make command) in dependency order — make pipeline's WRITING steps.
-# THROUGH is single-quoted so the rendered date is one shell token regardless of
-# what Airflow substitutes (belt-and-suspenders; the date has no metacharacters).
-TASKS: list[tuple[str, str]] = [
-    (
-        "dbt_build",
-        f"make dbt-build PROFILE={PROFILE} TARGET={TARGET} "
-        f"THROUGH='{THROUGH_TEMPLATE}'",
-    ),
-    ("writeback", f"make writeback PROFILE={PROFILE}"),
-]
+
+def build_tasks(target: str, project: str) -> list[tuple[str, str]]:
+    """The ordered (task_id, make command) list — make pipeline's WRITING steps.
+
+    `target == "duckdb"` (the default) renders the local build + local write-back,
+    byte-identical to the Docker-local DAG (Phase 8b). Any other target is a cloud
+    target (Phase 12): the build lands on that warehouse and the write-back writes
+    the Spanner serving table, each carrying `PROJECT` (single-quoted) and
+    `CONFIRM=yes` — which is command-line origin inside the BashOperator, so the
+    `$(origin CONFIRM)` gate accepts it. Selecting a target is config, not logic:
+    every rendered command is a `make` target (CLAUDE.md "Airflow contains no
+    logic"). `THROUGH` is single-quoted so the rendered date is one shell token.
+    """
+    if target == "duckdb":
+        return [
+            (
+                "dbt_build",
+                f"make dbt-build PROFILE={PROFILE} TARGET={target} "
+                f"THROUGH='{THROUGH_TEMPLATE}'",
+            ),
+            ("writeback", f"make writeback PROFILE={PROFILE}"),
+        ]
+    return [
+        (
+            "dbt_build",
+            f"make dbt-build PROFILE={PROFILE} TARGET={target} "
+            f"PROJECT='{project}' CONFIRM=yes THROUGH='{THROUGH_TEMPLATE}'",
+        ),
+        (
+            "writeback",
+            f"make writeback PROFILE={PROFILE} TARGET=spanner "
+            f"PROJECT='{project}' CONFIRM=yes",
+        ),
+    ]
+
+
+# The warehouse the build lands in and builds against (Phase 9b): the build's
+# landing is the target's own (duckdb → the DuckDB file; bigquery → GCS →
+# BigQuery), so the DAG names it. Env-driven config (Phase 12): unset → duckdb,
+# the Docker-local DAG unchanged; the live rehearsal and the Composer run set
+# OTR_DAG_TARGET=bigquery + OTR_DAG_PROJECT=<id> so one DAG run builds on BigQuery
+# and writes Spanner. Read at parse time; it selects a target, never a path.
+TARGET = os.environ.get("OTR_DAG_TARGET", "duckdb")
+PROJECT = os.environ.get("OTR_DAG_PROJECT", "")
+
+TASKS: list[tuple[str, str]] = build_tasks(TARGET, PROJECT)

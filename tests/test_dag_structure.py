@@ -62,10 +62,10 @@ class _StubDAG:
         return False
 
 
-def _load_dag() -> tuple[_StubDAG, list[_StubOp]]:
-    """Exec pipeline_dag.py with a stubbed airflow; return the DAG stub and its
-    operator stubs (in construction order). Only `DAG`/`BashOperator` exist, so a
-    PythonOperator / `@task` import would raise here — a pin on "no logic"."""
+def _stub_airflow_modules() -> tuple[types.ModuleType, ...]:
+    """The three stub modules a DAG load needs: only `DAG`/`BashOperator` exist, so
+    any other operator / TaskFlow import fails the load (a positive pin on "no
+    logic")."""
     airflow = types.ModuleType("airflow")
     airflow.DAG = _StubDAG  # type: ignore[attr-defined]
     operators = types.ModuleType("airflow.operators")
@@ -73,6 +73,14 @@ def _load_dag() -> tuple[_StubDAG, list[_StubOp]]:
     bash.BashOperator = _StubOp  # type: ignore[attr-defined]
     operators.bash = bash  # type: ignore[attr-defined]
     airflow.operators = operators  # type: ignore[attr-defined]
+    return airflow, operators, bash
+
+
+def _load_dag() -> tuple[_StubDAG, list[_StubOp]]:
+    """Exec pipeline_dag.py with a stubbed airflow; return the DAG stub and its
+    operator stubs (in construction order). Only `DAG`/`BashOperator` exist, so a
+    PythonOperator / `@task` import would raise here — a pin on "no logic"."""
+    airflow, operators, bash = _stub_airflow_modules()
     _StubOp.instances = []  # reset the registry for this load (#1)
     names = ("airflow", "airflow.operators", "airflow.operators.bash")
     saved = {n: sys.modules.get(n) for n in names}
@@ -156,3 +164,122 @@ def test_dag_object_tasks_edges_and_operator_kwargs() -> None:
     assert [u.task_id for u in by_id["writeback"].upstream] == ["dbt_build"]
     assert by_id["dbt_build"].upstream == []  # dbt_build is the source
     assert by_id["writeback"].downstream == []  # writeback is the sink
+
+
+# --- Phase 12 (specs/phase-12-live-run.md): the DAG parses in both layouts, and
+# --- its cloud target is env-driven config (invariants 1–2). ---
+
+
+def test_dag_imports_in_flat_bucket_layout(tmp_path: Path) -> None:
+    """Invariant 1: the DAG imports TASKS under the flat Composer `dags/` bucket,
+    where only `dags/` is on sys.path and the `orchestration` package does not
+    resolve — the dual-path import falls back to the flat `import tasks` (BACKLOG
+    row 47). Simulated by copying both files flat, putting that dir on sys.path,
+    and blocking `orchestration` in sys.modules (a `None` entry → ImportError,
+    the same class ModuleNotFoundError subclasses on a real worker)."""
+    flat = tmp_path / "dags"
+    flat.mkdir()
+    (flat / "tasks.py").write_text((ROOT / "orchestration" / "tasks.py").read_text())
+    dag_copy = flat / "pipeline_dag.py"
+    dag_copy.write_text(DAG_FILE.read_text())
+
+    airflow, operators, bash = _stub_airflow_modules()
+    names = (
+        "airflow",
+        "airflow.operators",
+        "airflow.operators.bash",
+        "orchestration",
+        "orchestration.tasks",
+        "tasks",
+    )
+    saved = {n: sys.modules.get(n) for n in names}
+    sys.path.insert(0, str(flat))
+    try:
+        sys.modules.update(
+            {
+                "airflow": airflow,
+                "airflow.operators": operators,
+                "airflow.operators.bash": bash,
+                # the worker has no `orchestration` package: block it so the
+                # dual-path import must fall back to the flat `import tasks`
+                "orchestration": None,  # type: ignore[assignment]
+                "orchestration.tasks": None,  # type: ignore[assignment]
+            }
+        )
+        sys.modules.pop("tasks", None)  # let the flat copy win
+        _StubOp.instances = []
+        spec = importlib.util.spec_from_file_location("_flat_pipeline_dag", dag_copy)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # must NOT raise (the fallback resolved TASKS)
+        assert [op.task_id for op in mod.steps] == PIPELINE_WRITING_STEPS
+    finally:
+        sys.path.remove(str(flat))
+        sys.modules.pop("_flat_pipeline_dag", None)
+        for n, prev in saved.items():
+            if prev is None:
+                sys.modules.pop(n, None)
+            else:
+                sys.modules[n] = prev
+
+
+def test_tasks_default_is_local_duckdb() -> None:
+    """Invariant 2 (unset default): `build_tasks("duckdb", "")` renders the
+    committed local list byte-for-byte — no PROJECT, no CONFIRM — so
+    `test-int-airflow` and the offline structure test are unchanged. The module's
+    own TASKS (env unset in the test process) IS that list."""
+    assert tasks.build_tasks("duckdb", "") == [
+        (
+            "dbt_build",
+            f"make dbt-build PROFILE=tiny TARGET=duckdb "
+            f"THROUGH='{tasks.THROUGH_TEMPLATE}'",
+        ),
+        ("writeback", "make writeback PROFILE=tiny"),
+    ]
+    assert tasks.TARGET == "duckdb"
+    assert tasks.TASKS == tasks.build_tasks("duckdb", "")
+
+
+def test_tasks_render_cloud_target_from_env() -> None:
+    """Invariant 2 (set-cloud): a cloud target renders the two cloud `make`
+    commands — build on the warehouse, write-back to spanner — each `make`-only,
+    PROJECT single-quoted, CONFIRM on the command line (command-line origin inside
+    the BashOperator). No non-`make` token leaks in."""
+    rendered = tasks.build_tasks("bigquery", "ontime-rate-recovery")
+    assert rendered == [
+        (
+            "dbt_build",
+            "make dbt-build PROFILE=tiny TARGET=bigquery "
+            "PROJECT='ontime-rate-recovery' CONFIRM=yes "
+            f"THROUGH='{tasks.THROUGH_TEMPLATE}'",
+        ),
+        (
+            "writeback",
+            "make writeback PROFILE=tiny TARGET=spanner "
+            "PROJECT='ontime-rate-recovery' CONFIRM=yes",
+        ),
+    ]
+    for _task_id, cmd in rendered:
+        assert cmd.startswith("make ")
+
+
+def test_module_target_and_project_come_from_env(monkeypatch: Any) -> None:
+    """Invariant 2 (the env wiring): the module-level TARGET/PROJECT are read from
+    OTR_DAG_TARGET/OTR_DAG_PROJECT, and TASKS is build_tasks of them — so setting
+    the env on the Docker rehearsal / Composer run points the one DAG at the
+    cloud. Reloaded back to the unset default in the finally so other tests see
+    the committed local list."""
+    import importlib as _importlib
+
+    monkeypatch.setenv("OTR_DAG_TARGET", "bigquery")
+    monkeypatch.setenv("OTR_DAG_PROJECT", "ontime-rate-recovery")
+    try:
+        reloaded = _importlib.reload(tasks)
+        assert reloaded.TARGET == "bigquery"
+        assert reloaded.PROJECT == "ontime-rate-recovery"
+        proj = "ontime-rate-recovery"
+        assert reloaded.TASKS == reloaded.build_tasks("bigquery", proj)
+    finally:
+        monkeypatch.delenv("OTR_DAG_TARGET", raising=False)
+        monkeypatch.delenv("OTR_DAG_PROJECT", raising=False)
+        _importlib.reload(tasks)  # restore the unset default for the rest of the suite

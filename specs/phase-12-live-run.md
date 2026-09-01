@@ -197,7 +197,7 @@ authoritative if the landing diverges.)
 
 ```mutations
 orchestration/tasks.py::build_tasks        constant-return:[]
-orchestration/tasks.py::build_tasks        swap-sort-key
+orchestration/tasks.py::build_tasks        invert-guard
 ```
 
 (The two offline invariants above are upheld by the one new function
@@ -209,7 +209,9 @@ Python mutation — no write path changes.)
 ## Pinned decisions (do not re-litigate)
 
 - **The DAG import is dual-path.** `try: from orchestration.tasks import TASKS
-  except ModuleNotFoundError: from tasks import TASKS` — resolves under the
+  except ImportError: from tasks import TASKS` (`ModuleNotFoundError` ⊂
+  `ImportError`; the flat-bucket test blocks the package via a `None` sys.modules
+  entry, which raises a plain `ImportError`) — resolves under the
   package layout (offline / Docker, where `tests/test_dag_structure.py` imports
   it as `orchestration.dags.pipeline_dag`) and under the flat Composer `dags/`
   bucket (only `dags/` on path). Rejected: shipping an `orchestration/` package
