@@ -96,8 +96,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   table, `math.erf` + bisection), `blocks.py` (the marker-confined writer
   of generated doc blocks), `readme.py` (Phase 13: `first_screen_rows` +
   `render_block` / `render_svg` — the README first-screen block and the
-  deterministic `docs/img/lift.svg`, from `tests/pins.py` + the committed
-  RESULTS blocks; `cli.py readme`). Writes console, `data/out/<p>/expected/`,
+  deterministic `docs/img/lift.svg`, from `tests/pins.py` (which the committed
+  RESULTS blocks are pinned to); `cli.py readme`). Writes console, `data/out/<p>/expected/`,
   the marked blocks of `docs/RESULTS.md` / `docs/AB_DESIGN.md`, and (Phase 13)
   the `README.md` first-screen block + `docs/img/lift.svg` only — never a
   table, never `fixtures/`.
@@ -225,7 +225,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `OTR_INT=1`, which only the `test-int-*` targets export)
 - `make lint` — ruff via pre-commit (rewrites files; never run inside a gate)
 - `make check-docs` — `scripts/check_docs.py`: every relative link/anchor in
-  CLAUDE.md, README (read only if one is tracked — none today), docs/,
+  CLAUDE.md, README (tracked since Phase 13, so read), docs/,
   PROJECT_BRIEF, DECISIONS, BACKLOG resolves; every
   `make <target>` the LIVING docs name exists in the Makefile (ARCHITECTURE,
   PHASES and PROJECT_BRIEF are plans — link-checked only); every trace token in `TRACES` exists in source as an exact token;
@@ -889,8 +889,8 @@ one-pager — tiny's NEGATIVE simulated lift, the simulation's circularity, the 
 as the real test), the ARCHITECTURE Amplitude-export mapping (§2.10) + the
 privacy/PII paragraph (§6), and `check-docs` widened over the now-tracked README
 and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
-(`eval/blocks.py`) from `tests/pins.py` + the committed RESULTS blocks — not one
-number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
+(`eval/blocks.py`) from `tests/pins.py` (which the committed RESULTS blocks are
+pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
 Open BACKLOG rows: **16** — Phase 13 opened two (the Composer-runnable DAG via

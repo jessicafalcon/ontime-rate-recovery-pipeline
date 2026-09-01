@@ -1,7 +1,8 @@
 """Phase 13 — the README first-screen block and the findings chart, rendered
-from `tests/pins.py` + the committed `docs/RESULTS.md` numbers by the same
-marker-confined writer Phase 6 uses (`eval/blocks.py`). Not one number here is
-typed by a human: a drift is a red test (`tests/test_readme.py`), never a
+from `tests/pins.py` (which the committed `docs/RESULTS.md` blocks are pinned
+to) by the same marker-confined writer Phase 6 uses (`eval/blocks.py`). Not one
+number here is typed by a human: a drift is a red test (`tests/test_readme.py`),
+never a
 hand-edited constant. `first_screen_rows()` reads the pins; `render_block`
 formats the README table; `render_svg` draws the deterministic bar chart —
 integer coordinates, no clock, no order dependence, so it regenerates

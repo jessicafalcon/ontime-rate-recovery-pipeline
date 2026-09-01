@@ -66,3 +66,8 @@ The pipeline provably attributes lateness and learns a send time, and under the
 data's own rule the served schedule recovers a large chunk of `timing_gap`. That
 is a strong *engineering* result and a *simulated* product result — the A/B in
 [AB_DESIGN.md](AB_DESIGN.md) is what would turn the second into a real one.
+
+Two obligations stay open (tracked in [BACKLOG.md](../BACKLOG.md)): a
+Composer-runnable DAG (Cosmos / `KubernetesPodOperator`, superseding the
+`make`-shelling one) and a real-scale cost run. The project is closed on
+correctness, not on these.

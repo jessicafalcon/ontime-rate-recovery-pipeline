@@ -127,3 +127,7 @@ write-back, Composer-scheduled DAG — is ask-first and metered:
   (`scores_send_time`); Python never computes a score the pipeline serves.
 - **Meter off by default.** Every cloud module is `count`-gated behind a toggle
   that defaults false; `terraform destroy` leaves nothing billable.
+
+Phases 0–13 are complete. Two obligations remain open (see [BACKLOG.md](BACKLOG.md)):
+a Composer-runnable DAG (Cosmos / `KubernetesPodOperator`) and a real-scale cost
+run — the pipeline is complete on correctness, not on these.

@@ -22,8 +22,9 @@ simulate — Phase 6: the counterfactual simulation (eval/simulate.py) rendered
 power  — Phase 6: the A/B power table (eval/power.py) as the block of
          docs/AB_DESIGN.md, same check / --write yes shape.
 readme — Phase 13: the README first-screen block (README.md) and the findings
-         chart (docs/img/lift.svg), rendered from tests/pins.py + the RESULTS
-         blocks; same check / --write yes shape (writes both artifacts)."""
+         chart (docs/img/lift.svg), rendered from tests/pins.py (which the
+         committed RESULTS blocks are pinned to); same check / --write yes shape
+         (writes both artifacts)."""
 
 from __future__ import annotations
 

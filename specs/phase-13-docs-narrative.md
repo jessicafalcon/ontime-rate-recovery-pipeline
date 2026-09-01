@@ -141,8 +141,8 @@ Evidence row 3. It is not one command because it asserts a human can follow pros
    the BACKLOG count line still matches. *Evidence: row 1.*
 2. **Every number on the README first screen and in the chart is sourced from a
    generated block.** The `readme:begin` block and `docs/img/lift.svg` regenerate
-   byte-identically from `tests/pins.py` + the committed RESULTS blocks under
-   `make test`; `make readme` (check mode) diffs both to empty. *Evidence: row 2.*
+   byte-identically from `tests/pins.py` (which the committed RESULTS blocks are
+   pinned to) under `make test`; `make readme` (check mode) diffs both to empty. *Evidence: row 2.*
 3. **A cold reader can run Phases 1–8 from the README alone.** A fresh clone,
    following only the README quickstart (`make setup` … `make pipeline
    PROFILE=tiny`, no cloud), reaches `pipeline OK: tiny`; no quickstart command is
@@ -167,7 +167,7 @@ reporting DONE".
 
 | Invariant ("for all …, … holds") | Falsified by (scenario test) |
 |---|---|
-| For every number a reader sees (the README first-screen block), the block regenerates byte-identically from `tests/pins.py` + the committed RESULTS blocks — nothing in it is hand-authored. | `tests/test_readme.py::test_first_screen_block_matches_committed` — the committed block must equal `eval.readme.render_block()`; a hand-edited figure inside the markers fails it |
+| For every number a reader sees (the README first-screen block), the block regenerates byte-identically from `tests/pins.py` (which the committed RESULTS blocks are pinned to) — nothing in it is hand-authored. | `tests/test_readme.py::test_first_screen_block_matches_committed` — the committed block must equal `eval.readme.render_block()`; a hand-edited figure inside the markers fails it |
 | For the findings chart, `docs/img/lift.svg` regenerates byte-identically from the same medium simulation numbers. | `tests/test_readme.py::test_lift_svg_matches_committed` — the committed SVG must equal `eval.readme.render_svg()`; a hand-edited path/label fails it |
 | For every `make` command the README names, that target exists in the Makefile. | `scripts/check_docs.py` target check over the now-tracked README (`make check-docs`) — a renamed/removed target the README still cites FAILs |
 | For every command in the README quickstart, it is offline and free — no cloud-cost / `CONFIRM` / `tf-*` target appears there (the cold-reader path never bills). | `tests/test_readme.py::test_quickstart_commands_are_cloud_free` — parse the quickstart fenced block; any `make` command carrying `TARGET=bigquery`/`TARGET=spanner`, `CONFIRM=`, or a `tf-` name fails it |
@@ -230,7 +230,7 @@ mutation coverage via `test_simulate.py` / `test_power.py`.)
 ## Scope (files)
 
 - `eval/readme.py` — NEW: `first_screen_rows()` / `render_block(rows)` and
-  `render_svg(rows)`, reading `tests/pins.py` + the committed RESULTS blocks.
+  `render_svg(rows)`, reading `tests/pins.py` (which the committed RESULTS blocks are pinned to).
 - `eval/cli.py` — a `readme` subcommand (check mode / `--write yes`), mirroring
   `power_cmd` + `_block_cmd`; the SVG is a whole-file write, the README block is
   marker-confined via `eval/blocks.py`.
@@ -270,6 +270,9 @@ mutation coverage via `test_simulate.py` / `test_power.py`.)
 - [ ] RESULTS / METRICS / DEPLOYMENT — none (Phase 13 reads RESULTS, writes none
       of these)
 - [ ] `README.md` — the phase's own new file (first screen, quickstart, index)
+- [ ] `docs/INSIGHT.md` — NEW: the one-page honest read (tiny's negative
+      simulated lift, the simulation's circularity, the A/B as the real test)
+- [ ] `docs/img/lift.svg` — NEW: the generated findings chart (`make readme`)
 
 ## Threat model (REQUIRED when the phase adds a Makefile target that takes a variable, deletes anything, touches cloud resources, or takes user input)
 
