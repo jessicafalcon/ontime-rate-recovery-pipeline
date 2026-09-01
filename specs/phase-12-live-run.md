@@ -236,7 +236,14 @@ Python mutation — no write path changes.)
   + a no-import-error DAG in the Airflow UI + one triggered run + the destroy; the
   `send_schedule` evidence comes from the rehearsal, which has the toolchain.
   Rejected: Option B (custom Composer image with the repo + toolchain baked in) —
-  blows the decision cap and the $25 budget and fights managed Airflow.
+  blows the decision cap and the $25 budget and fights managed Airflow. The
+  rehearsal's mechanism is a committed cloud OVERRIDE compose file
+  (`orchestration/docker-compose.cloud.yml`, a second `-f`), used only for the
+  ask-first rehearsal: it sets `OTR_DAG_TARGET=bigquery`/`OTR_DAG_PROJECT` (so
+  `build_tasks` renders the cloud commands, decision 2) and MOUNTS the
+  impersonated-SA ADC read-only from the host's gcloud dir — never a keyfile,
+  never baked (Credential standard). `make test-int-airflow` runs the BASE file
+  alone and stays offline.
 - **Same-session apply/teardown, ask-first every step, operator ADC for
   Terraform.** Every `tf-*` runs on operator ADC (`tukanbuild@gmail.com`), never
   the impersonated SA (§8, the ADC-picks-the-git-account trap — verify the login
@@ -265,6 +272,11 @@ Python mutation — no write path changes.)
   (decision 2).
 - `tests/test_dag_structure.py` — the flat-bucket import test + the two
   cloud-target render tests (invariants 1–2).
+- `orchestration/docker-compose.cloud.yml` — the ask-first rehearsal override
+  (cloud-target env + ADC read-only mount; base file untouched).
+- `tests/test_orchestration_compose.py` — the override's offline shape pin (base
+  stays cloud-free; override targets bigquery, requires a project, mounts ADC
+  `:ro`, no keyfile).
 - `docs/RESULTS.md` — the Phase 12 live-run block (run log + send_schedule
   count/hash).
 - `docs/DEPLOYMENT.md` — the Composer dated apply/run/teardown lines filled; the
@@ -310,6 +322,16 @@ The DAG never runs `make` on the Composer worker (Option A), so on Composer thes
 vars only affect what the DAG *renders*, never what executes there; on the Docker
 rehearsal they render the cloud `make` commands, which carry their own validation.
 
+The rehearsal override `orchestration/docker-compose.cloud.yml` is not a make
+target and is never used by `make test-int-airflow` (base file only). It sets the
+two env vars above and mounts the host's gcloud ADC dir READ-ONLY (`:ro`) at the
+container's default ADC path — no keyfile, no `GOOGLE_APPLICATION_CREDENTIALS`, no
+credential in the repo or the image (Credential standard); the ADC lives outside
+the repo and is mounted, never committed. `OTR_DAG_PROJECT` uses compose's `:?`
+required-variable guard, so a rehearsal with no project errors before anything
+starts. Pinned by `tests/test_orchestration_compose.py` (base cloud-free; override
+targets bigquery, requires a project, mounts `:ro`, no keyfile).
+
 ## Review & stack risk
 
 - **code-reviewer** (triggered — `orchestration/`, `tests/` in Scope): the
@@ -317,10 +339,12 @@ rehearsal they render the cloud `make` commands, which carry their own validatio
   (`make` targets only), the unset default byte-identical to today, determinism
   carve-outs unasserted.
 - **security-reviewer** (triggered — Scope touches `orchestration/` (a
-  container/DAG surface) and the live run drives cloud-cost / destructive
-  `tf-apply`/`tf-destroy`): the two new env vars are validated / single-quoted
-  and never reach a shell or a path unguarded; no credential in any log; operator
-  ADC vs SA discipline; ALLOW_DESTROY on teardown.
+  container/DAG surface, incl. the new compose override) and the live run drives
+  cloud-cost / destructive `tf-apply`/`tf-destroy`): the two new env vars are
+  validated / single-quoted and never reach a shell or a path unguarded; the
+  rehearsal override mounts ADC read-only and bakes no keyfile (no credential in
+  the repo, image, or a log); operator ADC vs SA discipline; ALLOW_DESTROY on
+  teardown.
 - **functionality-tester** (triggered): the DONE command; the flat-bucket import
   test; the cloud-render tests; the mutation block (`build_tasks` neutered → the
   structure tests go red).

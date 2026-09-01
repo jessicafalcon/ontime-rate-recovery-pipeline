@@ -409,6 +409,45 @@ proof is an ask-first `tf-plan` (creates nothing):
   module's resources (`Plan: N to add`, `0 to change`, `0 to destroy` on the
   free-tier layer). Record the observed N and date below when the plan is run.
 
+**Phase 12 — rehearse the zero-Composer path FIRST** (local Docker Airflow → real
+BigQuery + Spanner). Composer creation takes 25–40+ min and can fail; this
+rehearsal is the fallback demo path AND the source of the `send_schedule`
+evidence (Option A — the make-based DAG does not execute on a Composer worker;
+§8). It runs the SAME committed DAG the Composer bucket gets, pointed at the cloud
+by the override `orchestration/docker-compose.cloud.yml` (never used by `make
+test-int-airflow`). Ask-first, cloud-cost, same session. It needs Spanner up
+(not Composer):
+
+1. **Spanner up** (operator ADC — carry every applied toggle in `VARS`):
+   `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=true'`, then
+   `make spanner-load PROFILE=tiny PROJECT=<id> CONFIRM=yes` (as the SA).
+2. **Impersonate the SA for ADC on the host** (the ONE credential; the container
+   mounts this dir read-only — never a keyfile):
+   `gcloud auth application-default login --impersonate-service-account=<pipeline_service_account output>`.
+3. **Build the image and run one DAG** through Docker Airflow with the cloud
+   override (`OTR_DAG_PROJECT` sets both the compose guard and the DAG's rendered
+   `PROJECT`; the build lands on BigQuery `ontime`, the write-back writes the
+   Spanner `send_schedule`):
+   ```
+   BF="-f orchestration/docker-compose.yml -f orchestration/docker-compose.cloud.yml"
+   OTR_DAG_PROJECT=<id> docker compose $BF build
+   OTR_DAG_PROJECT=<id> docker compose $BF up -d
+   docker compose $BF exec -T airflow airflow db migrate
+   docker compose $BF exec -T airflow airflow dags list-import-errors   # empty — the dual-path import resolved
+   docker compose $BF exec -T airflow airflow dags test pipeline <through-date>   # a date that lands all of tiny (test-int-airflow's union interval)
+   ```
+4. **Verify + capture:** the `writeback` task logs
+   `writeback OK: <id>.ontime → spanner, 20 users, 20 written` (a re-run of the
+   DAG writes `0` — idempotent); the Spanner read-back hashes to
+   `SEND_SCHEDULE_SHA256_TINY` (`make test-int-spanner` pins it). Record the green
+   run + the row count in `docs/RESULTS.md` (Phase 12 block).
+5. **Tear down the container:** `docker compose $BF down -v`. Leave Spanner up
+   only if the Composer run below reuses it the same session; otherwise flip it
+   off (step below).
+6. **Switch ADC back to the operator before any `tf-*`** (the git-account trap,
+   step 5 of the BigQuery runbook above): `gcloud auth application-default login`
+   and pick the GCP account.
+
 **Phase 12 (apply / run / teardown — the runbook, mirrors Spanner):**
 
 1. **Apply** (operator ADC, never the SA — §8): `make tf-apply PROJECT=<id>
