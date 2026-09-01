@@ -13,9 +13,10 @@ counterfactual simulation; an idempotent write-back lands the schedule in a
 serving table (DuckDB stand-in locally, Spanner on GCP). Airflow orders the
 steps; Terraform provisions GCP behind toggles that keep the meter off.
 
-`docs/ARCHITECTURE.md` is the spec. `docs/PHASES.md` is the plan.
+`docs/ARCHITECTURE.md` is the spec. `docs/PHASES.md` is the plan (history,
+closed at Phase 13). `docs/ROADMAP.md` is what comes next, in order.
 `PROJECT_BRIEF.md` is the origin and the architecture-review log. Read all
-three before design decisions.
+four before design decisions.
 
 ## Architecture
 
@@ -229,7 +230,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   CLAUDE.md, README (tracked since Phase 13, so read), docs/,
   PROJECT_BRIEF, DECISIONS, BACKLOG resolves; every
   `make <target>` the LIVING docs name exists in the Makefile (ARCHITECTURE,
-  PHASES and PROJECT_BRIEF are plans — link-checked only); every trace token in `TRACES` exists in source as an exact token;
+  PHASES, ROADMAP and PROJECT_BRIEF are plans — link-checked only); every trace token in `TRACES` exists in source as an exact token;
   this file's "Open BACKLOG rows: **N**" equals BACKLOG.md's un-struck rows
 - `make review-gate [SPEC=specs/<f>.md] [BASE=main] [DELETED=a,b]` — the
   offline review gate: `make test` + `ruff check` + `ruff format --check`
@@ -882,7 +883,7 @@ byte-identically under `make test`. The phase-by-phase trail lives in
 pointer, not the log.
 
 **Phase 13** (`phase-13-docs-narrative`, spec
-`specs/phase-13-docs-narrative.md`, PR pending): the docs-and-narrative capstone
+`specs/phase-13-docs-narrative.md`, merged as PR #20): the docs-and-narrative capstone
 — `README.md` (a first-screen `make readme` block + a Mermaid architecture
 diagram + a cloud-free quickstart + the docs index + the stack-roles table),
 `docs/img/lift.svg` (the generated findings chart), `docs/INSIGHT.md` (the honest
@@ -894,7 +895,11 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **22** — the post-13 roadmap (`docs/ROADMAP.md`, 2026-09-01) opened four (the front-door reframe, the scores→`dim_user_current` layering fix, the temporal holdout eval, the append-only landing) beside the four it cites. Phase 13 opened four: two obligations named as their
+Open BACKLOG rows: **22** — the post-13 roadmap (`docs/ROADMAP.md`,
+2026-09-01, branch `fix/roadmap`) opened four (the front-door reframe, the
+scores→`dim_user_current` layering fix, the temporal holdout eval, the
+append-only landing) beside the four rows it cites, and re-anchored the BACKLOG
+review cadence to every `fix/` branch exit. Phase 13 opened four: two obligations named as their
 own future branches (the Composer-runnable DAG via Cosmos / `KubernetesPodOperator`,
 superseding Option A; a real-scale cost run) and two review-exit latent-staleness
 notes (the readme's non-pin-derived structural labels; INSIGHT's hand-typed

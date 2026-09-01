@@ -67,7 +67,9 @@ data's own rule the served schedule recovers a large chunk of `timing_gap`. That
 is a strong *engineering* result and a *simulated* product result — the A/B in
 [AB_DESIGN.md](AB_DESIGN.md) is what would turn the second into a real one.
 
-Two obligations stay open (tracked in [BACKLOG.md](../BACKLOG.md)): a
+The project is closed on correctness, not on scale or on a scheduled cloud
+run: the ordered list of what comes next — a real-scale cost run, a
 Composer-runnable DAG (Cosmos / `KubernetesPodOperator`, superseding the
-`make`-shelling one) and a real-scale cost run. The project is closed on
-correctness, not on these.
+`make`-shelling one), a temporal holdout eval that is not circular, and the
+rest — is [docs/ROADMAP.md](ROADMAP.md), each item a
+[BACKLOG.md](../BACKLOG.md) row with a trigger.

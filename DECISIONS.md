@@ -146,13 +146,37 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/roadmap (after Phase 13, 2026-09-01)
+
+- **A fourth planning file, `docs/ROADMAP.md`, orders the post-close work as
+  `fix/` branches; the project stays closed at Phase 13.** A staff-data-engineer
+  read of the finished repo (scale, a scheduled cloud run, a non-circular
+  offline eval are unproven) produced eight bounded changes to a finished
+  system and a one-week cut (items 1, 2, 3, 5). Neither existing record can
+  hold an ordering: `docs/PHASES.md` is history with one Done-when per phase
+  and is closed by its own last paragraph; `BACKLOG.md` is findings with
+  triggers and has no order or cut by design. ROADMAP orders, cites BACKLOG
+  rows by title, and opened a row for each item that had none, so the trigger
+  machinery still covers everything. It is a plan for `check-docs` (link-checked
+  only, `scripts/check_docs.py::_PLANS`, pinned exactly) because it names
+  targets not built yet by nature; the BACKLOG review cadence is re-anchored to
+  every `fix/` branch exit, since there is no phase exit left to carry the
+  standing Spanner-clean check. Rejected: reopening PHASES with a Phase 14
+  (contradicts the recorded close, and each item is a bounded fix to a finished
+  system, not a stage of the pipeline — the same gate runs either way); rows in
+  BACKLOG only (no order, no cut, nothing to hand a reader who asks "what
+  next"). Every amendment the roadmap foresees (item 4's feature, item 5's
+  generator sharding, item 6's spec + re-freeze) is committed alone at its own
+  branch and STOPs for approval — the roadmap pre-approves nothing.
+
 ### Phase 13 — Docs, dashboard, narrative (2026-09-01)
 
 The docs-and-narrative capstone and the **planned close**: Phase 13 is the last
 phase in `docs/PHASES.md`; there is no Phase 14. The developer's call at phase
 entry — the OUT items (remote tfstate, a real-scale cost run, a Composer-runnable
 DAG, the WIF CI leg) stay BACKLOG rows named as their own future branches, not
-PHASES rows.
+PHASES rows. *The ordering of those branches, and four more, is
+`docs/ROADMAP.md` (fix/roadmap, below).*
 
 - **The README first screen and the findings chart are GENERATED, not typed.**
   `make readme` renders the `readme:begin` block (`README.md`) and
