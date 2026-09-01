@@ -270,10 +270,10 @@ Or wait for the window to close.
 ## Spanner (Phase 10) and Composer (Phase 11) — apply and teardown dates
 
 Both stay off (`enable_spanner`/`enable_composer` default false), so a default
-apply never creates them. **Composer** bills ~$300+/mo — Phase 11 WRITES the
-module (proven plan-clean, nothing applied); **Phase 12** applies it on demo
-day, runs one DAG, and destroys it the same hour. Record the actual apply dates
-in the Composer section below when they land.
+apply never creates them. **Composer** bills ~$300+/mo — Phase 11 WROTE the
+module (proven plan-clean, nothing applied); **Phase 12** applied it on demo day
+(2026-09-01), ran one DAG, and destroyed it the same session. The actual apply /
+teardown dates are in the Composer section below.
 
 ### Spanner: bring-up, run, teardown (Phase 10)
 

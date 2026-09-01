@@ -578,7 +578,7 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   is refused always.
 - **The make-based DAG parses on Cloud Composer but cannot EXECUTE there**
   (Phase 12). The Phase 8b DAG's tasks are `BashOperator`s that shell out to
-  `make … → uv run` with `cwd = REPO` (`Path(__file__).parents[2]`); a Composer
+  `make … → uv run` with `cwd = REPO` (`Path(__file__).resolve().parents[2]`); a Composer
   worker has no repo checkout, no `make`, no project venv, and `parents[2]` of
   `/home/airflow/gcs/dags/pipeline_dag.py` is `/home/airflow` (no Makefile). So
   Composer's contribution is that the module APPLIES and the DAG IMPORTS with no
