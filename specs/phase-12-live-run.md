@@ -301,7 +301,7 @@ a re-freeze in the same commit.
 - [ ] Spec amendments — none (Phase 12 is the last build phase; Phase 13 is docs)
 - [ ] `docs/RESULTS.md` — the Phase 12 live-run block
 - [ ] `docs/DEPLOYMENT.md` — the Composer dated lines + the §8 gotcha
-- [ ] `docs/METRICS.md` — none (no metric changes)
+- [ ] docs/METRICS.md — none (no metric changes)
 - [ ] README — none
 
 ## Threat model (REQUIRED)
