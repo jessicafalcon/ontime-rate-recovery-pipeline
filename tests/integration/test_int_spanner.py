@@ -27,6 +27,7 @@ import pytest
 
 from eval import golden
 from infra.cli import PROJECT_RE, confirmed
+from landing import cli as landing_cli
 from landing import spanner as dims
 from pipeline import cli as pipeline_cli
 from serving import spanner as spanner_wb
@@ -66,7 +67,7 @@ def built() -> Iterator[str]:
     project = _project()
     assert os.environ.get("OTR_PROFILE", "tiny") == "tiny"  # tiny by definition
     confirm, origin = carried_gate()
-    rc = pipeline_cli.spanner_load("tiny", project, confirm, origin)
+    rc = landing_cli.spanner_load("tiny", project, confirm, origin)
     assert rc == 0, "make spanner-load failed"
     rc = pipeline_cli.dbt_build(
         "tiny", "bigquery", confirm, origin, project=project, dim_user_identifier=SWAP
