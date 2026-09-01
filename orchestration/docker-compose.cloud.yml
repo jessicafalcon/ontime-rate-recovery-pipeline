@@ -1,0 +1,38 @@
+# Cloud override for the Phase 12 demo-day REHEARSAL — the zero-Composer path:
+# local Docker Airflow running ONE DAG against REAL BigQuery + Spanner, rehearsed
+# BEFORE the Composer apply (docs/DEPLOYMENT.md § Composer: bring-up / rehearsal).
+# Ask-first, cloud-cost. Never used by `make test-int-airflow` (the offline DuckDB
+# parity run on the base file alone) — only as an explicit second `-f`:
+#
+#   OTR_DAG_PROJECT=<gcp-project-id> \
+#     docker compose -f orchestration/docker-compose.yml \
+#                    -f orchestration/docker-compose.cloud.yml up -d
+#
+# It adds exactly two things the base image never bakes:
+#
+#  1. OTR_DAG_TARGET=bigquery + OTR_DAG_PROJECT → the DAG renders the CLOUD make
+#     commands at parse time (orchestration/tasks.py::build_tasks): the build
+#     lands on BigQuery and the write-back writes the Spanner send_schedule. The
+#     `:?` guard refuses a rehearsal with no project.
+#
+#  2. The impersonated-SA ADC json ALONE, MOUNTED READ-ONLY from the host into
+#     the container's default ADC path (not the whole gcloud dir — that holds
+#     refresh tokens for every account; round 1 security #6) — never a keyfile,
+#     never baked into the image. The ONE credential at rest is gcloud's own ADC file, which
+#     lives OUTSIDE the repo (CLAUDE.md Credential standard); google-auth reads it
+#     from ~/.config/gcloud, so NO cloud-env variable (GOOGLE_APPLICATION_-
+#     CREDENTIALS / *-key.json / a CLOUDSDK_/GOOGLE_ name the pipeline refuses) is
+#     set in the container. Impersonate first on the host:
+#     `gcloud auth application-default login --impersonate-service-account=<sa>`.
+
+services:
+  airflow:
+    environment:
+      OTR_DAG_TARGET: bigquery
+      OTR_DAG_PROJECT: ${OTR_DAG_PROJECT:?set OTR_DAG_PROJECT=<gcp-project-id> for the cloud rehearsal}
+    volumes:
+      # Just the ADC json, not the whole gcloud config dir — the dir also holds
+      # credentials.db / access_tokens.db (OAuth refresh tokens for EVERY
+      # gcloud-logged-in account, incl. the git-only one this repo keeps separate),
+      # and the rehearsal needs only the one impersonated ADC (round 1 security #6).
+      - ${OTR_GCLOUD_ADC:-${HOME}/.config/gcloud/application_default_credentials.json}:/home/airflow/.config/gcloud/application_default_credentials.json:ro

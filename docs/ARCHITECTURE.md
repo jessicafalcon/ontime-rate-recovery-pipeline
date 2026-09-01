@@ -576,3 +576,29 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   Amendment N1 made the gate an action ALLOWLIST — an unreadable plan or an
   action outside `{no-op, read, create, update}` (+ `delete` with the flag)
   is refused always.
+- **The make-based DAG parses on Cloud Composer but cannot EXECUTE there**
+  (Phase 12). The Phase 8b DAG's tasks are `BashOperator`s that shell out to
+  `make … → uv run` with `cwd = REPO` (`Path(__file__).resolve().parents[2]`); a Composer
+  worker has no repo checkout, no `make`, no project venv, and `parents[2]` of
+  `/home/airflow/gcs/dags/pipeline_dag.py` is `/home/airflow` (no Makefile). So
+  Composer's contribution is that the module APPLIES and the DAG IMPORTS with no
+  error (the dual-path import — row 47 — resolves `from tasks import TASKS` in the
+  flat `dags/` bucket); the green DATA run + the `send_schedule` evidence come
+  from the local Docker-Airflow → real-BigQuery+Spanner rehearsal, which has the
+  toolchain (Option A; DECISIONS Phase 12). Making the DAG execute on Composer
+  (a custom image with the repo + toolchain baked in — Option B) was rejected as
+  out of scope. The DAG is pointed at the cloud by config, not code:
+  `orchestration/tasks.py::build_tasks` reads `OTR_DAG_TARGET`/`OTR_DAG_PROJECT`
+  at parse time (unset → the local DuckDB default, byte-identical to Phase 8b).
+- **Enabling `composer.googleapis.com` transitively enables `compute` and can
+  fail with a transient INTERNAL error** (Phase 12, live). The first
+  `enable_composer=true` apply failed at `google_project_service.composer`:
+  `Error code 13 … [composer.googleapis.com]: … with failed services
+  [compute.googleapis.com]` — Composer runs on Compute/GKE, so enabling its API
+  pulls in `compute.googleapis.com`, and the batch enable hit a transient
+  internal error. No resource was created (the API is the module's first
+  resource; nothing billable started). Remedy (a one-time bootstrap, not a code
+  change): `gcloud services enable compute.googleapis.com composer.googleapis.com`
+  by hand, then re-run `tf-apply` (the API enablement is idempotent — the second
+  apply found it on and proceeded to the environment). `docs/DEPLOYMENT.md`
+  carries it as a Composer bootstrap step.

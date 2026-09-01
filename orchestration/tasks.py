@@ -19,12 +19,19 @@ pipeline`'s."""
 
 from __future__ import annotations
 
+import os
+import re
+
 PROFILE = "tiny"
-# The warehouse the build lands in and builds against (Phase 9b): the build's
-# landing is the target's own (duckdb → the DuckDB file; bigquery → GCS →
-# BigQuery), so the DAG names it. The Docker-local DAG is duckdb; Composer
-# (Phase 11) sets bigquery here and adds PROJECT.
-TARGET = "duckdb"
+
+# The recognised cloud target (the only non-duckdb value build_tasks renders).
+CLOUD_TARGET = "bigquery"
+
+# GCP project-id shape — the SAME pattern infra.cli.PROJECT_RE pins (inlined so
+# tasks.py stays stdlib-only for a Composer parse). A malformed project (a shell
+# metacharacter, a quote) never reaches the rendered command — it refuses here,
+# not only at the downstream make/pipeline.cli validator.
+PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]\Z")
 
 # Rendered to YYYY-MM-DD by Airflow, never by us. A per-interval build lands only
 # the files uploaded on or before this date (Phase 8b); the DAG's @daily schedule
@@ -32,14 +39,62 @@ TARGET = "duckdb"
 # explicit backfill converges to the union (catchup=False).
 THROUGH_TEMPLATE = "{{ data_interval_end | ds }}"
 
-# (task_id, make command) in dependency order — make pipeline's WRITING steps.
-# THROUGH is single-quoted so the rendered date is one shell token regardless of
-# what Airflow substitutes (belt-and-suspenders; the date has no metacharacters).
-TASKS: list[tuple[str, str]] = [
-    (
-        "dbt_build",
-        f"make dbt-build PROFILE={PROFILE} TARGET={TARGET} "
-        f"THROUGH='{THROUGH_TEMPLATE}'",
-    ),
-    ("writeback", f"make writeback PROFILE={PROFILE}"),
-]
+
+def build_tasks(target: str, project: str) -> list[tuple[str, str]]:
+    """The ordered (task_id, make command) list — make pipeline's WRITING steps.
+
+    An ALLOWLIST over the target, not a denylist (Boundary contract): `duckdb`
+    renders the local build + local write-back, byte-identical to the Docker-local
+    DAG (Phase 8b); `bigquery` (CLOUD_TARGET) renders the cloud build + Spanner
+    write-back; ANY OTHER value REFUSES (raises) — an unrecognised or mistyped
+    `OTR_DAG_TARGET` can never silently render a cloud-cost command. The cloud
+    branch also refuses a project that is not a valid GCP project id, so no
+    unvalidated value is interpolated into the rendered shell command. Each cloud
+    command carries `PROJECT` (single-quoted) and `CONFIRM=yes` — command-line
+    origin inside the BashOperator, so the `$(origin CONFIRM)` gate accepts it.
+    Selecting a target is config, not logic: every rendered command is a `make`
+    target (CLAUDE.md "Airflow contains no logic"). `THROUGH` is single-quoted so
+    the rendered date is one shell token.
+    """
+    if target == "duckdb":
+        return [
+            (
+                "dbt_build",
+                f"make dbt-build PROFILE={PROFILE} TARGET={target} "
+                f"THROUGH='{THROUGH_TEMPLATE}'",
+            ),
+            ("writeback", f"make writeback PROFILE={PROFILE}"),
+        ]
+    if target == CLOUD_TARGET:
+        if not PROJECT_RE.match(project):
+            raise ValueError(
+                f"OTR_DAG_PROJECT is not a valid GCP project id: {project!r}"
+            )
+        return [
+            (
+                "dbt_build",
+                f"make dbt-build PROFILE={PROFILE} TARGET={target} "
+                f"PROJECT='{project}' CONFIRM=yes THROUGH='{THROUGH_TEMPLATE}'",
+            ),
+            (
+                "writeback",
+                f"make writeback PROFILE={PROFILE} TARGET=spanner "
+                f"PROJECT='{project}' CONFIRM=yes",
+            ),
+        ]
+    raise ValueError(
+        f"unrecognised OTR_DAG_TARGET: {target!r} "
+        f"(expected 'duckdb' or {CLOUD_TARGET!r})"
+    )
+
+
+# The warehouse the build lands in and builds against (Phase 9b): the build's
+# landing is the target's own (duckdb → the DuckDB file; bigquery → GCS →
+# BigQuery), so the DAG names it. Env-driven config (Phase 12): unset → duckdb,
+# the Docker-local DAG unchanged; the live rehearsal and the Composer run set
+# OTR_DAG_TARGET=bigquery + OTR_DAG_PROJECT=<id> so one DAG run builds on BigQuery
+# and writes Spanner. Read at parse time; it selects a target, never a path.
+TARGET = os.environ.get("OTR_DAG_TARGET", "duckdb")
+PROJECT = os.environ.get("OTR_DAG_PROJECT", "")
+
+TASKS: list[tuple[str, str]] = build_tasks(TARGET, PROJECT)

@@ -478,6 +478,24 @@ beforehand with local Airflow → BigQuery as the fallback path.
 **Done when.** Captured run log + `send_schedule` count in `docs/RESULTS.md`;
 billing shows the Composer meter stopped; total spend under $25.
 
+**In flight** (`phase-12-live-run`, spec `specs/phase-12-live-run.md`): OFFLINE
+landed — the DAG is made runnable (dual-path import, BACKLOG row 47; env-driven
+cloud target `OTR_DAG_TARGET`/`OTR_DAG_PROJECT` via
+`orchestration/tasks.py::build_tasks`, unset → the Phase 8b DuckDB default), and
+the rehearsal wiring (`orchestration/docker-compose.cloud.yml` — cloud target +
+ADC read-only mount, base file offline for `test-int-airflow`). Option A: the
+make-based DAG parses on Composer but does not execute there (no repo/`make`/venv
+on a worker — ARCHITECTURE §8); Composer proves the module applies + the DAG
+imports clean, and the green DATA run + `send_schedule` (20 rows,
+`SEND_SCHEDULE_SHA256_TINY`) come from the local Docker-Airflow →
+real-BigQuery+Spanner rehearsal. LIVE run DONE 2026-09-01 (same session): the
+rehearsal DAG green on real BigQuery+Spanner (`20 users, 20 written`, hash ==
+`SEND_SCHEDULE_SHA256_TINY`); Composer applied (`5 added`, env `RUNNING`), the DAG
+imported with no error on managed Airflow, one run triggered (its make-task failed
+on the worker — Option A); torn down the same session (`14 destroyed`, Spanner +
+Composer `Listed 0 items.`), spend ≈ cents (< $25). Captured in `docs/RESULTS.md`
+§ Phase 12; dated lines in `docs/DEPLOYMENT.md`.
+
 ---
 
 ## Phase 13 — Docs, dashboard, narrative

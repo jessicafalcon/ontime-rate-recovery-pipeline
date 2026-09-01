@@ -65,3 +65,66 @@ Lift, recommended − baseline: ontime_rate -0.033333; timing_gap +5; on_time -4
 
 Lift, recommended − baseline: ontime_rate +0.162371; timing_gap -10216; on_time +8964; upload_fault +1252; delivery_fault and unattributed unchanged by construction (4793, 1593). Profile `medium`, 60000 prompts, seed `tests/pins.py::SIMULATE_SEED`.
 <!-- simulate:end medium -->
+
+## Phase 12 — live run (demo day)
+
+The one supervised run of the whole path against real GCP: the committed DAG
+(Phase 8b), pointed at the cloud by `OTR_DAG_TARGET=bigquery` /
+`OTR_DAG_PROJECT`, builds on BigQuery `ontime` and writes the Spanner
+`send_schedule`. The green DATA run comes from the local Docker-Airflow →
+real-BigQuery+Spanner **rehearsal** (Option A — the make-based DAG parses but
+does not execute on a Composer worker; ARCHITECTURE §8); the Composer apply proves
+the module applies and the DAG imports with no error. The pinned evidence is the
+`send_schedule` row count (`tests/pins.py::SEND_SCHEDULE_ROWS_TINY` = 20) and hash
+(`SEND_SCHEDULE_SHA256_TINY`); run ids, task timings and job ids are
+non-deterministic and unasserted.
+
+<!-- phase-12-live-run: filled in the demo-day session (not a generated block) -->
+
+**Session: 2026-09-01** (`ontime-rate-recovery`, operator `tukanbuild@gmail.com`;
+`tf-*` on operator ADC, the build/write-back as the impersonated `ontime-pipeline`
+SA).
+
+### Rehearsal — local Docker Airflow → real BigQuery + Spanner (the green DATA run)
+
+The committed Phase 8b DAG, pointed at the cloud by
+`orchestration/docker-compose.cloud.yml` (`OTR_DAG_TARGET=bigquery`,
+`OTR_DAG_PROJECT=ontime-rate-recovery`, ADC mounted read-only), run once via
+`airflow dags test pipeline 2026-01-13`:
+
+| Step | Result |
+|---|---|
+| Spanner apply (`enable_spanner=true`) | `9 added, 0 changed, 0 destroyed` — 02:42 UTC |
+| `spanner-load` (dims, as SA) | `spanner-load OK: tiny — 22 dim rows` |
+| ADC inside the container | live BigQuery `select 1` → `1` (mounted impersonated SA authenticates) |
+| DAG import in real Airflow | `airflow dags list-import-errors` → none (dual-path import resolved) |
+| DAG run `pipeline 2026-01-13` | `dbt-build OK: tiny/bigquery` → `writeback OK: ontime-rate-recovery.ontime → spanner, 20 users, 20 written` → **`DagRun … state=success`** |
+| Idempotent re-run (write-back) | `20 users, 0 written` |
+| **Spanner `send_schedule`** | **20 rows (= `SEND_SCHEDULE_ROWS_TINY`); hash `4dab2540…e491e` == `SEND_SCHEDULE_SHA256_TINY`** |
+
+The DAG's cloud write is byte-identical to the frozen DuckDB truth — the pipeline
+gives the same answer on real GCP.
+
+### Composer — module applies + DAG parses live (Option A)
+
+| Step | Result |
+|---|---|
+| API bootstrap (§8) | first `enable_composer=true` apply hit a transient `Error code 13` enabling `composer` (transitive `compute`); nothing created; fixed by `gcloud services enable compute.googleapis.com composer.googleapis.com` then re-apply |
+| Composer apply | `Apply complete! Resources: 5 added, 0 changed, 0 destroyed` — environment `ontime` created after 23m16s + the two DAG-bucket objects (03:30 UTC) |
+| Environment | `RUNNING` |
+| DAG import on managed Airflow | `dags list-import-errors` → `No data found` — **imports with NO error** (the dual-path import resolved `from tasks import TASKS` in the flat `dags/` bucket; BACKLOG row 47 proven live) |
+| DAG registered | `dags list` → `pipeline \| /home/airflow/gcs/dags/pipeline_dag.py` |
+| One run triggered (`dags test pipeline 2026-01-13`) | run created (`state:running`); `dbt_build` ran `make` → `make: *** No rule to make target 'dbt-build'. Stop.` → task `FAILED`, `DagRun … state=failed` |
+| Teardown (`enable_*=false … ALLOW_DESTROY=yes`) | `Apply complete! … 14 destroyed` (Composer 5 + Spanner 9); Composer env destroyed after 7m35s (03:41 UTC) |
+| Meters at exit | `gcloud spanner instances list` → `Listed 0 items.`; `gcloud composer environments list` → `Listed 0 items.`; `bq ls` → `raw`, `ontime` (free-tier intact) |
+
+Composer **applies and the DAG imports/registers with no error**, but the
+make-based DAG **cannot execute** on a Composer worker (no repo / `make` / venv —
+`make: No rule to make target 'dbt-build'` at `cwd=/home/airflow`, ARCHITECTURE
+§8), so its task fails there — exactly Option A. The green DATA run and the
+`send_schedule` parity are the rehearsal's (above).
+
+**Spend.** Spanner (100 PU) up ~02:42→~03:32 (~50 min ≈ $0.08); Composer env
+provisioned ~03:00→03:41 (~40 min, small env) — the session is well under $1,
+far below the $25 cap. Exact billing lags a few hours in the console; the
+meter-stopped proof is the two empty environment lists above.

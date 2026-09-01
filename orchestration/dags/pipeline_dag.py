@@ -24,7 +24,14 @@ from pathlib import Path
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 
-from orchestration.tasks import TASKS
+# Dual-path so the DAG parses in both layouts (Phase 12, BACKLOG row 47): the
+# package path resolves offline / in Docker (`orchestration` on sys.path); the
+# flat `import tasks` resolves in a Composer DAG bucket, where only `dags/` is on
+# sys.path and `orchestration` does not exist (ModuleNotFoundError ⊂ ImportError).
+try:
+    from orchestration.tasks import TASKS
+except ImportError:  # flat Composer dags/ bucket — the two files side by side
+    from tasks import TASKS
 
 # The repo root (dags → orchestration → repo); `make` runs here inside the image.
 REPO = Path(__file__).resolve().parents[2]

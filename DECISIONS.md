@@ -146,6 +146,64 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### Phase 12 — Live run and teardown (demo day) (2026-09-01)
+
+- **Option A: Composer proves the module applies and the DAG parses live; the
+  green DATA run is the local Docker-Airflow → real-BigQuery+Spanner rehearsal.**
+  The Phase 8b DAG's tasks are `BashOperator`s over `make … → uv run` with
+  `cwd = REPO`; a Composer worker has no repo, no `make`, no venv (ARCHITECTURE
+  §8), so the make-based DAG parses but cannot execute there. Composer's
+  Done-when contribution is the apply + a no-import-error DAG in the Airflow UI +
+  one triggered run + the destroy; the `send_schedule` count/hash evidence comes
+  from the rehearsal, which has the toolchain. Rejected: Option B (a custom
+  Composer image with the repo + toolchain baked in) — blows the ≤6-decision cap
+  and the $25 budget and fights the managed-Airflow model.
+- **The DAG's cloud target is env-driven config, not code.**
+  `orchestration/tasks.py::build_tasks(target, project)` reads
+  `OTR_DAG_TARGET`/`OTR_DAG_PROJECT` at parse time; unset → `TARGET=duckdb`, the
+  render byte-identical to Phase 8b (so `test-int-airflow` and the offline
+  structure test are unchanged); set → the cloud `make` commands (`dbt-build
+  TARGET=bigquery … CONFIRM=yes`, `writeback TARGET=spanner … CONFIRM=yes`).
+  Selecting a target is config, not logic — every rendered command is a `make`
+  target ("Airflow contains no logic"), and `tasks.py`'s own Phase 8b comment
+  already anticipated "Composer sets bigquery here and adds PROJECT". Rejected:
+  a second hard-coded cloud task list (duplicates the ordering; drifts).
+- **The DAG import is dual-path (`except ImportError`).** `from
+  orchestration.tasks import TASKS` resolves under the package layout (offline /
+  Docker, `orchestration` on `sys.path`); the flat `import tasks` resolves in a
+  Composer `dags/` bucket (only `dags/` on path). Catching `ImportError`
+  (`ModuleNotFoundError` ⊂ it) covers both the real missing package and the
+  flat-bucket test's `None`-blocked import. Rejected: shipping an `orchestration`
+  package into the DAG bucket — Composer scans only `dags/` for DAGs; a nested
+  package is more moving parts than a two-line guard. Closes BACKLOG row 47.
+- **The rehearsal is a committed cloud OVERRIDE compose file, ADC mounted
+  read-only.** `orchestration/docker-compose.cloud.yml` (a second `-f`, never
+  used by `make test-int-airflow`) sets the two env vars and mounts the host's
+  ADC json file ALONE READ-ONLY at the container's default ADC path — not the
+  whole gcloud dir, which holds refresh tokens for every account (review round 1
+  security #6) — no keyfile, no
+  `GOOGLE_APPLICATION_CREDENTIALS`, no credential in the repo or image (Credential
+  standard); `OTR_DAG_PROJECT` uses compose's `:?` guard so a rehearsal with no
+  project errors before anything starts. Rejected: a keyfile mount / a
+  `GOOGLE_APPLICATION_CREDENTIALS` env — both are cloud-env names the pipeline
+  refuses, and a key at rest is banned.
+- **Same-session apply/teardown; the pinned evidence is the `send_schedule`
+  count/hash.** Every `tf-*` runs on operator ADC (never the impersonated SA,
+  §8), dbt-build/write-back as the SA; every applied toggle is carried in `VARS`;
+  the teardown is the toggle-flip with `ALLOW_DESTROY=yes`. `SEND_SCHEDULE_ROWS_TINY`
+  (20) + `SEND_SCHEDULE_SHA256_TINY` are the regression pin; DAG run ids, task
+  timings, and BigQuery/Spanner job ids are non-deterministic by nature and
+  nothing asserts them (Determinism policy carve-out).
+- **BACKLOG at phase entry.** Row 47 done (the dual-path import). Re-deferred:
+  16 (tfstate confidentiality half — a remote backend just before the live
+  apply/destroy adds a failure mode to the exact teardown that must be reliable,
+  and the file is metadata not credentials; new trigger: repo public / project
+  reused / a persistent stack), 37 (DAG↔task attachment — the container test is
+  the killer; no Docker in CI this phase), 44 (cloud-env redirection gate — no
+  `infra/cli.py` env edit here), 30 (CI WIF — orthogonal to the live run).
+  Not built: 17 (budget kill-switch — same-session teardown is the guardrail,
+  not a long-lived apply). Re-confirmed clean: 15 (Spanner `Listed 0 items.`).
+
 ### Phase 11 — Composer module (written, not applied) (2026-08-31)
 
 - **The environment runs as the existing least-privilege pipeline SA, granted

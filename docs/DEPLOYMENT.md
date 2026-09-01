@@ -270,10 +270,10 @@ Or wait for the window to close.
 ## Spanner (Phase 10) and Composer (Phase 11) — apply and teardown dates
 
 Both stay off (`enable_spanner`/`enable_composer` default false), so a default
-apply never creates them. **Composer** bills ~$300+/mo — Phase 11 WRITES the
-module (proven plan-clean, nothing applied); **Phase 12** applies it on demo
-day, runs one DAG, and destroys it the same hour. Record the actual apply dates
-in the Composer section below when they land.
+apply never creates them. **Composer** bills ~$300+/mo — Phase 11 WROTE the
+module (proven plan-clean, nothing applied); **Phase 12** applied it on demo day
+(2026-09-01), ran one DAG, and destroyed it the same session. The actual apply /
+teardown dates are in the Composer section below.
 
 ### Spanner: bring-up, run, teardown (Phase 10)
 
@@ -388,6 +388,14 @@ Dated lines (fill on apply day — the BACKLOG Spanner row's trigger):
   complete! Resources: 0 added, 0 changed, 9 destroyed`; `Listed 0 items.`;
   state 21; re-plan `No changes`. ~35 minutes up ≈ 5¢. **Nothing billable
   is up.**
+- Phase 12 demo-day rehearsal: applied **2026-09-01** (02:42 UTC, operator
+  ADC, `VARS='enable_spanner=true,operator_principal=…'`, `9 added`); as the
+  SA `spanner-load OK: tiny — 22 dim rows`, then the Docker-Airflow → real
+  BigQuery+Spanner DAG run wrote the Spanner `send_schedule` (`20 users, 20
+  written`, idempotent `0` on re-run, hash == `SEND_SCHEDULE_SHA256_TINY`);
+  destroyed the same session **2026-09-01** (03:32–03:41 UTC) in the combined
+  Composer+Spanner toggle-flip (`14 destroyed`), `Listed 0 items.`. ~50 min up
+  ≈ 8¢.
 
 ### Composer: bring-up, run, teardown (Phase 11 module; applied in Phase 12)
 
@@ -409,8 +417,57 @@ proof is an ask-first `tf-plan` (creates nothing):
   module's resources (`Plan: N to add`, `0 to change`, `0 to destroy` on the
   free-tier layer). Record the observed N and date below when the plan is run.
 
+**Phase 12 — rehearse the zero-Composer path FIRST** (local Docker Airflow → real
+BigQuery + Spanner). Composer creation takes 25–40+ min and can fail; this
+rehearsal is the fallback demo path AND the source of the `send_schedule`
+evidence (Option A — the make-based DAG does not execute on a Composer worker;
+§8). It runs the SAME committed DAG the Composer bucket gets, pointed at the cloud
+by the override `orchestration/docker-compose.cloud.yml` (never used by `make
+test-int-airflow`). Ask-first, cloud-cost, same session. It needs Spanner up
+(not Composer):
+
+1. **Spanner up** (operator ADC — carry every applied toggle in `VARS`):
+   `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=true'`, then
+   `make spanner-load PROFILE=tiny PROJECT=<id> CONFIRM=yes` (as the SA).
+2. **Impersonate the SA for ADC on the host** (the ONE credential; the container
+   mounts just this ADC json read-only, not the whole gcloud dir — never a
+   keyfile):
+   `gcloud auth application-default login --impersonate-service-account=<pipeline_service_account output>`.
+3. **Build the image and run one DAG** through Docker Airflow with the cloud
+   override (`OTR_DAG_PROJECT` sets both the compose guard and the DAG's rendered
+   `PROJECT`; the build lands on BigQuery `ontime`, the write-back writes the
+   Spanner `send_schedule`):
+   ```
+   BF="-f orchestration/docker-compose.yml -f orchestration/docker-compose.cloud.yml"
+   OTR_DAG_PROJECT=<id> docker compose $BF build
+   OTR_DAG_PROJECT=<id> docker compose $BF up -d
+   docker compose $BF exec -T airflow airflow db migrate
+   docker compose $BF exec -T airflow airflow dags list-import-errors   # empty — the dual-path import resolved
+   docker compose $BF exec -T airflow airflow dags test pipeline <through-date>   # a date that lands all of tiny (test-int-airflow's union interval)
+   ```
+4. **Verify + capture:** the `writeback` task logs
+   `writeback OK: <id>.ontime → spanner, 20 users, 20 written` (a re-run of the
+   DAG writes `0` — idempotent); the Spanner read-back hashes to
+   `SEND_SCHEDULE_SHA256_TINY` (`make test-int-spanner` pins it). Record the green
+   run + the row count in `docs/RESULTS.md` (Phase 12 block).
+5. **Tear down the container:** `docker compose $BF down -v`. Leave Spanner up
+   only if the Composer run below reuses it the same session; otherwise flip it
+   off (step below).
+6. **Switch ADC back to the operator before any `tf-*`** (the git-account trap,
+   step 5 of the BigQuery runbook above): `gcloud auth application-default login`
+   and pick the GCP account.
+
 **Phase 12 (apply / run / teardown — the runbook, mirrors Spanner):**
 
+0. **Bootstrap the Composer API deps by hand once** (§8, found live Phase 12):
+   `gcloud services enable compute.googleapis.com composer.googleapis.com
+   --project=<id>`. Composer runs on Compute/GKE, so enabling
+   `composer.googleapis.com` transitively enables `compute` — and that batch
+   enable can fail with a transient `Error code 13 … failed services
+   [compute.googleapis.com]` on the first `tf-apply` (nothing is created — the
+   API is the module's first resource). Enabling both by hand first, then
+   re-running the apply, clears it (the enablement is idempotent, so
+   Terraform's `google_project_service.composer` finds it on and proceeds).
 1. **Apply** (operator ADC, never the SA — §8): `make tf-apply PROJECT=<id>
    CONFIRM=yes VARS='enable_composer=true'` (carry EVERY applied toggle — while
    Composer OR Spanner is up, an apply that omits its toggle plans the teardown,
@@ -425,11 +482,30 @@ proof is an ask-first `tf-plan` (creates nothing):
    `composer.googleapis.com` enablement stays on — free, like the root set). A
    full `make tf-destroy … CONFIRM=yes` also removes it.
 
-Dated lines (fill when the plan/apply run):
+Dated lines (Phase 12 demo-day run, 2026-09-01):
 
-- `enable_composer=true` **plan** observed (Phase 11 evidence): **N to add,
-  0 to change, 0 to destroy** — *(fill on the day the ask-first plan is run;
-  the plan creates nothing)*.
-- `enable_composer=true` applied (Phase 12): *(demo day — fill on apply)*.
-- Destroyed (`enable_composer=false … ALLOW_DESTROY=yes`): *(same session —
-  fill on teardown; confirm `gcloud composer environments list` → empty)*.
+- `enable_composer=true` **plan** observed (Phase 12): **5 to add, 0 to change,
+  0 to destroy** — 2026-09-01 (operator ADC; the plan creates nothing).
+- `enable_composer=true` applied (Phase 12): **2026-09-01** (~03:00–03:30 UTC,
+  `ontime-rate-recovery`, operator ADC, carrying `enable_spanner=true` +
+  `operator_principal`). The FIRST apply failed at
+  `google_project_service.composer` with a transient `Error code 13 … failed
+  services [compute.googleapis.com]` (nothing created — the API is the module's
+  first resource; §8 gotcha); `gcloud services enable compute.googleapis.com
+  composer.googleapis.com` by hand, then re-apply → `Apply complete! Resources:
+  5 added, 0 changed, 0 destroyed` (environment `ontime` after 23m16s + the two
+  DAG-bucket objects). Environment `RUNNING`; `dags list-import-errors` → `No
+  data found` (the committed DAG imports with no error on managed Airflow — the
+  dual-path import); `dags list` shows `pipeline`; one `dags test pipeline
+  2026-01-13` run was triggered (`state:running`) and its `dbt_build` task
+  failed on the worker — `make: No rule to make target 'dbt-build'` at
+  `cwd=/home/airflow` (no repo/toolchain — Option A, §8). The green DATA run is
+  the Docker-Airflow rehearsal (`docs/RESULTS.md § Phase 12`).
+- Destroyed (`enable_spanner=false,enable_composer=false … ALLOW_DESTROY=yes`):
+  **2026-09-01** (~03:32–03:41 UTC, operator ADC): plan `0 to add, 0 to change,
+  14 to destroy` (Composer 5 + Spanner 9) → `Apply complete! … 14 destroyed`
+  (Composer env destroyed after 7m35s); `gcloud composer environments list` →
+  `Listed 0 items.`, `gcloud spanner instances list` → `Listed 0 items.`, `bq
+  ls` → `raw`, `ontime`. **Nothing billable is up.** Session spend ≈ cents (well
+  under the $25 cap). The `composer.googleapis.com` / `compute` API enablements
+  stay on (free); the state keeps the free-tier layer + `operator_principal`.
