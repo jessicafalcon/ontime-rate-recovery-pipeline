@@ -173,8 +173,8 @@ reporting DONE".
 | For every command in the README quickstart, it is offline and free — no cloud-cost / `CONFIRM` / `tf-*` target appears there (the cold-reader path never bills). | `tests/test_readme.py::test_quickstart_commands_are_cloud_free` — parse the quickstart fenced block; any `make` command carrying `TARGET=bigquery`/`TARGET=spanner`, `CONFIRM=`, or a `tf-` name fails it |
 
 ```mutations
-eval/readme.py::render_block      constant-return:x
-eval/readme.py::render_svg        constant-return:x
+eval/readme.py::render_block      constant-return:""
+eval/readme.py::render_svg        constant-return:""
 ```
 
 (The two offline invariants 1–2 are upheld by the two new renderers in
