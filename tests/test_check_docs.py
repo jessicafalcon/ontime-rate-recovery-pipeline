@@ -36,14 +36,47 @@ def test_every_named_make_target_exists_today() -> None:
     assert errors == []
 
 
-def test_plans_set_is_exact() -> None:
+def test_plans_set_is_exact_and_every_plan_exists() -> None:
     """The plans — link-checked only, free to name targets not built yet — are
-    exactly these four; a living doc joining them is a visible edit here."""
+    exactly these three, each on disk (a vanished plan would drop silently from
+    `_docs()` and `_LINK_ONLY`); a living doc joining them is a visible edit."""
     assert [p.relative_to(check_docs.ROOT).as_posix() for p in check_docs._PLANS] == [
         "docs/ARCHITECTURE.md",
         "docs/PHASES.md",
-        "docs/ROADMAP.md",
         "PROJECT_BRIEF.md",
+    ]
+    assert all(p.exists() for p in check_docs._PLANS)
+
+
+def test_plans_are_link_checked() -> None:
+    """Every plan is in the link-checked set — dropping the `_PLANS` splat from
+    `_LINK_ONLY` left the suite green (functionality-tester, fix/roadmap)."""
+    assert all(p in check_docs._LINK_ONLY for p in check_docs._PLANS)
+
+
+def test_future_targets_set_is_exact_and_none_is_built_yet() -> None:
+    """The targets a living doc may name before they exist: exactly this set,
+    and RED once one lands in the Makefile — remove the entry in that branch."""
+    assert check_docs.FUTURE_TARGETS == frozenset({"tf-migrate-state"})
+    assert not check_docs.FUTURE_TARGETS & check_docs.make_targets(check_docs.ROOT)
+
+
+def test_living_doc_may_name_a_future_target_but_no_other_missing_one(
+    tmp_path, monkeypatch
+) -> None:
+    _tree(
+        tmp_path,
+        monkeypatch,
+        {
+            "CLAUDE.md": "run `make real`, `make planned` and `make nope`\n",
+            "Makefile": "real:\n\techo\n",
+        },
+    )
+    monkeypatch.setattr(check_docs, "FUTURE_TARGETS", frozenset({"planned"}))
+    errors: list[str] = []
+    check_docs.check_make_targets(errors)
+    assert errors == [
+        "CLAUDE.md: names `make nope` but the Makefile has no such target"
     ]
 
 

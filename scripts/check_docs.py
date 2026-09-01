@@ -11,7 +11,9 @@ Four checks (1 over the living docs, records and plans; 2-3 over the living docs
      Makefile (a removed target must be removed from the docs in the same PR).
      ARCHITECTURE.md, PHASES.md and PROJECT_BRIEF.md are plans — they describe
      targets not built yet by design (DECISIONS "Plans are link-checked only")
-     — so they are link-checked only, like the records.
+     — so they are link-checked only, like the records. A LIVING doc that names
+     the next branch's target before it is built (docs/ROADMAP.md) lists it in
+     FUTURE_TARGETS, an exact closed set that goes red the day the target lands.
   3. Traces — every (file, token) in TRACES exists in source as an EXACT token
      (a partial rename such as `label_accuracy` → `label_accuracy_v2` FAILS).
      Starts with the tooling's own guards; add a row when a doc cites a symbol.
@@ -71,12 +73,14 @@ TRACES: list[tuple[str, str]] = [
 
 
 # Plans: allowed to name targets that do not exist yet. Link-checked only.
-_PLANS = [
-    DOCS / "ARCHITECTURE.md",
-    DOCS / "PHASES.md",
-    DOCS / "ROADMAP.md",
-    ROOT / "PROJECT_BRIEF.md",
-]
+_PLANS = [DOCS / "ARCHITECTURE.md", DOCS / "PHASES.md", ROOT / "PROJECT_BRIEF.md"]
+
+# Targets a LIVING doc may name before they are built (docs/ROADMAP.md names the
+# next branch's target by nature, and stays living so its real citations keep
+# rename detection). An exact closed set, pinned by tests/test_check_docs.py,
+# which is also RED once a listed name exists in the Makefile — the entry is
+# removed in the branch that builds it, so the set cannot go stale.
+FUTURE_TARGETS: frozenset[str] = frozenset({"tf-migrate-state"})
 
 
 def _docs() -> list[Path]:
@@ -179,7 +183,7 @@ def check_make_targets(errors: list[str]) -> int:
         text = _living(md.read_text())
         for t in sorted(named_targets(text)):
             n += 1
-            if t not in known:
+            if t not in known and t not in FUTURE_TARGETS:
                 errors.append(
                     f"{md.relative_to(ROOT)}: names `make {t}` but the Makefile "
                     "has no such target"
