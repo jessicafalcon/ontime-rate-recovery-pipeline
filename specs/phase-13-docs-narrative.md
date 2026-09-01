@@ -267,8 +267,8 @@ mutation coverage via `test_simulate.py` / `test_power.py`.)
       Composer-runnable DAG; the large-profile cost run; row 30 re-stated); row 15
       re-confirmed at exit
 - [ ] Spec amendments — none (Phase 13 is the docs capstone; no later spec exists)
-- [ ] `docs/RESULTS.md` / `docs/METRICS.md` / `docs/DEPLOYMENT.md` — none (Phase
-      13 reads RESULTS, writes none of these)
+- [ ] RESULTS / METRICS / DEPLOYMENT — none (Phase 13 reads RESULTS, writes none
+      of these)
 - [ ] `README.md` — the phase's own new file (first screen, quickstart, index)
 
 ## Threat model (REQUIRED when the phase adds a Makefile target that takes a variable, deletes anything, touches cloud resources, or takes user input)
