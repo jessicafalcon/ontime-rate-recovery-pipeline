@@ -1101,10 +1101,13 @@ Phase 12 rehearsal+Composer tables, DEPLOYMENT dated lines + the API-bootstrap s
 ARCHITECTURE §8 make-on-Composer + transient-API-enable gotchas, BACKLOG row 15 exit
 re-confirm). **Phase 12's Done-when is met.** NEXT (ask-first): review agents, then
 push + PR (developer merges).
-Open BACKLOG rows: **15** (Phase 12 struck the flat-Composer-DAG-import row
-(47) — the DAG import is now dual-path — opened one (the
+Open BACKLOG rows: **14** (`fix/force-color-scrub-test` struck the
+`test_conftest_scrub_uses_the_cloud_env_policy` `FORCE_COLOR` brittleness row
+(48) — the child pytest runs with `--color=no`, green with `FORCE_COLOR` set or
+unset. Phase 12 struck the flat-Composer-DAG-import row
+(47) — the DAG import is now dual-path — opened row 48 (the
 `test_conftest_scrub_uses_the_cloud_env_policy` `FORCE_COLOR` brittleness, found
-in review prep under the harness — out of Phase 12 scope), and re-deferred the tfstate
+in review prep under the harness — out of Phase 12 scope, now struck), and re-deferred the tfstate
 confidentiality half (16), the DAG↔task attachment row (37), the cloud-env
 redirection gate (44) and the CI-WIF row (30), left the budget kill-switch (17)
 unbuilt, and re-confirmed Spanner clean (15) at entry. Phase 11 struck the
