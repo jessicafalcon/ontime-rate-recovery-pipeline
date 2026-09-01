@@ -122,12 +122,17 @@ module "budget" {
   depends_on = [google_project_service.required]
 }
 
-# Written, not applied: the toggle lands here (false); the body is Phase 11.
+# Phase 11: the Cloud Composer orchestration layer (environment, one scoped
+# composer.worker grant, the DAG-bucket upload of the committed 8b DAG). Still
+# count-gated: a default plan creates zero of these; the environment bills
+# ~$300+/mo from creation, so it is applied for one demo-day run (Phase 12) and
+# the toggle flipped back is the scoped teardown (docs/DEPLOYMENT.md).
 module "composer" {
   source     = "./modules/composer"
   count      = var.enable_composer ? 1 : 0
   project_id = var.project_id
   region     = var.region
+  sa_email   = module.iam.service_account_email
 }
 
 # Phase 10: the Spanner serving layer (instance, database DDL, federation

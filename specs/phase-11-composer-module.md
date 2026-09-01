@@ -165,17 +165,17 @@ DECISIONS are authoritative if the landing diverges.)
 | For all DAG code Composer runs, it is the byte-for-byte committed `pipeline_dag.py` — the upload sources the file, never an inline copy. | `tests/test_infra.py::test_composer_uploads_the_committed_dag` — the object `source` is the repo path; `tests/test_dag_structure.py` still passes (DAG unedited) |
 | For all files Terraform loads under `infra/`, the content equals the re-frozen manifest. | `tests/test_infra.py::test_tf_tree_matches_manifest` — any edited `.tf` without a matching `tf-freeze` fails |
 
-Rules: the composer module is HCL, not Python — its invariants are pinned by the
-static `test_infra.py` property checks (the same kind that pin the Spanner
-module), not a `mutations` block. No Python on any pipeline path changes this
-phase, so the sole mutable Python is test/doc glue with no invariant to mutate;
-the `mutations` block below is therefore the minimal placeholder the gate
-requires, over the one helper this phase may touch — the manifest hasher already
-covered by existing tests. (If implementation adds a Python helper that upholds
-an invariant, a mutation line is added for it before it lands.)
+Rules: the composer module is HCL, not Python — its invariants 2/3/4 are pinned
+by the static `test_infra.py` property checks (the same kind that pin the Spanner
+module), which no mutation operator addresses (the Phase 7/9a/10 treatment of
+`.tf`). Phase 11 changes no pipeline Python. Invariant 5 (the `.tf` tree equals
+the re-frozen manifest) is the one invariant upheld by Python — `infra/cli.py`'s
+manifest gate — so the `mutations` block names it (the 9a precedent: `manifest_diff`
+neutered reddens `tests/test_infra.py`). No new Python is added; if
+implementation adds a helper upholding an invariant, a line is added for it.
 
 ```mutations
-generator/manifest.py::files_with_hashes        delete-call
+infra/cli.py::manifest_diff        constant-return:[]
 ```
 
 ## Pinned decisions (do not re-litigate)
