@@ -9,14 +9,19 @@ byte-identically."""
 
 from __future__ import annotations
 
+from eval.simulate import ontime_rate
+
 BEGIN = "<!-- readme:begin -->"
 END = "<!-- readme:end -->"
 
 
-def _sim_rate(counts: dict[str, int], sent: int) -> float:
-    """on_time / (sent − delivery_fault) — the METRICS denominator, off the
-    simulation's own per-arm counts (a simulated arm re-draws delivery_fault)."""
-    return counts["on_time"] / (sent - counts["delivery_fault"])
+def _sim_rate(counts: dict[str, int]) -> float:
+    """on_time / (sent − delivery_fault) via `simulate.ontime_rate`, so the
+    README's tiny rate is computed exactly as the RESULTS block's is — the two
+    cannot diverge (a simulated arm re-draws delivery_fault)."""
+    rate = ontime_rate(counts)
+    assert rate is not None  # a simulated arm always delivers something
+    return rate
 
 
 def first_screen_rows() -> dict[str, object]:
@@ -24,8 +29,8 @@ def first_screen_rows() -> dict[str, object]:
     numbers backing the committed RESULTS blocks, read here, never restated."""
     from tests import pins  # every pin lives there
 
-    tiny_base = _sim_rate(pins.SIMULATED_TINY["baseline"], pins.STG_PROMPT_ROWS)
-    tiny_reco = _sim_rate(pins.SIMULATED_TINY["recommended"], pins.STG_PROMPT_ROWS)
+    tiny_base = _sim_rate(pins.SIMULATED_TINY["baseline"])
+    tiny_reco = _sim_rate(pins.SIMULATED_TINY["recommended"])
     med_base, med_cohort, med_reco = pins.SIMULATED_MEDIUM_ONTIME_RATE
     return {
         "label_accuracy_tiny": pins.LABEL_ACCURACY,
