@@ -36,6 +36,41 @@ def test_every_named_make_target_exists_today() -> None:
     assert errors == []
 
 
+def test_plans_set_is_exact_and_every_plan_exists() -> None:
+    """The plans — link-checked only, free to name targets not built yet — are
+    exactly these three, each on disk (a vanished plan would drop silently from
+    `_docs()` and `_LINK_ONLY`); a living doc joining them is a visible edit."""
+    assert [p.relative_to(check_docs.ROOT).as_posix() for p in check_docs._PLANS] == [
+        "docs/ARCHITECTURE.md",
+        "docs/PHASES.md",
+        "PROJECT_BRIEF.md",
+    ]
+    assert all(p.exists() for p in check_docs._PLANS)
+
+
+def test_plans_are_link_checked() -> None:
+    """Every plan is in the link-checked set — dropping the `_PLANS` splat from
+    `_LINK_ONLY` left the suite green (functionality-tester, fix/roadmap)."""
+    assert all(p in check_docs._LINK_ONLY for p in check_docs._PLANS)
+
+
+def test_future_targets_set_is_exact_and_every_pair_is_live() -> None:
+    """The (doc, target) pairs a living doc may name before the target exists:
+    exactly this set, and RED in both stale directions — the target landed in
+    the Makefile, or the doc no longer names it — so an entry lives exactly as
+    long as its citation (round 3: the one-sided pin let a dead entry linger)."""
+    assert check_docs.FUTURE_TARGETS == frozenset(
+        {("docs/ROADMAP.md", "tf-migrate-state")}
+    )
+    built = check_docs.make_targets(check_docs.ROOT)
+    living = {p.relative_to(check_docs.ROOT).as_posix(): p for p in check_docs._docs()}
+    for doc, target in check_docs.FUTURE_TARGETS:
+        assert target not in built, f"{target} is built: remove the entry"
+        assert doc in living, f"{doc} is not a living doc"
+        named = check_docs.named_targets(check_docs._living(living[doc].read_text()))
+        assert target in named, f"{doc} no longer names `make {target}`: remove it"
+
+
 def test_backticked_link_text_is_still_a_link() -> None:
     assert check_docs._links("see [`docs/X.md`](docs/X.md#a) now") == ["docs/X.md#a"]
     assert check_docs._links("[plain](docs/X.md)") == ["docs/X.md"]
@@ -117,6 +152,35 @@ def test_check_links_reports_a_broken_link_and_anchor(tmp_path, monkeypatch) -> 
     assert any("broken anchor" in e and "#nope" in e for e in errors)
     assert any("broken anchor #zzz" in e for e in errors)
     assert len(errors) == 3
+
+
+def test_future_target_exemption_is_the_named_doc_alone(tmp_path, monkeypatch) -> None:
+    _tree(
+        tmp_path,
+        monkeypatch,
+        {
+            "CLAUDE.md": "run `make real`, `make planned` and `make nope`\n",
+            "README.md": "also `make planned`\n",
+            "Makefile": "real:\n\techo\n",
+        },
+    )
+    monkeypatch.setattr(
+        check_docs, "FUTURE_TARGETS", frozenset({("CLAUDE.md", "planned")})
+    )
+    errors: list[str] = []
+    check_docs.check_make_targets(errors)
+    assert sorted(errors) == [
+        "CLAUDE.md: names `make nope` but the Makefile has no such target",
+        "README.md: names `make planned` but the Makefile has no such target",
+    ]  # the pair admits planned in CLAUDE.md only; README's citation still fails
+
+
+def test_check_links_reports_a_vanished_record(tmp_path, monkeypatch) -> None:
+    _tree(tmp_path, monkeypatch, {"CLAUDE.md": "no links\n"})
+    monkeypatch.setattr(check_docs, "_LINK_ONLY", [tmp_path / "GONE.md"])
+    errors: list[str] = []
+    check_docs.check_links(errors)
+    assert errors == ["GONE.md: missing — a checked doc or record vanished"]
 
 
 def test_check_make_targets_reports_an_unknown_target(tmp_path, monkeypatch) -> None:

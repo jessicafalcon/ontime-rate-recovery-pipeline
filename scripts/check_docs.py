@@ -3,15 +3,19 @@
 (the CI lint job runs it too). Not a pytest file, so a docs-only edit does not
 re-trigger the full suite.
 
-Four checks (1 over the living docs, records and plans; 2-3 over the living docs
-= CLAUDE.md + README + docs/*.md minus the plans; 4 over CLAUDE.md/BACKLOG.md):
+Four checks (1 over the living docs, records and plans; 2 over the living docs
+= CLAUDE.md + README + docs/*.md minus the plans; 3 over the source files
+TRACES names; 4 over CLAUDE.md/BACKLOG.md):
   1. Links/anchors — every relative markdown link points at a real file inside
      the repo, and a `#anchor` resolves to a heading there (GitHub-style slug).
   2. Make targets — every `make <target>` the LIVING docs name exists in the
      Makefile (a removed target must be removed from the docs in the same PR).
      ARCHITECTURE.md, PHASES.md and PROJECT_BRIEF.md are plans — they describe
      targets not built yet by design (DECISIONS "Plans are link-checked only")
-     — so they are link-checked only, like the records.
+     — so they are link-checked only, like the records. A LIVING doc that names
+     the next branch's target before it is built (docs/ROADMAP.md) lists the
+     (doc, target) pair in FUTURE_TARGETS, an exact closed set that goes red the
+     day the target lands or the citation goes.
   3. Traces — every (file, token) in TRACES exists in source as an EXACT token
      (a partial rename such as `label_accuracy` → `label_accuracy_v2` FAILS).
      Starts with the tooling's own guards; add a row when a doc cites a symbol.
@@ -46,6 +50,7 @@ _TICK = re.compile(r"`([^`\n]*)`")
 # source phrases the docs name by identity. Add a row when a doc cites a symbol.
 TRACES: list[tuple[str, str]] = [
     ("Makefile", "unexport SPEC BASE DELETED CONFIRM PROFILE TARGET WRITE"),
+    ("scripts/check_docs.py", "FUTURE_TARGETS"),
     ("scripts/review_common.py", "resolve_spec"),
     ("scripts/mutate.py", "OPERATORS"),
     ("eval/simulate.py", "simulate:begin"),
@@ -73,6 +78,16 @@ TRACES: list[tuple[str, str]] = [
 # Plans: allowed to name targets that do not exist yet. Link-checked only.
 _PLANS = [DOCS / "ARCHITECTURE.md", DOCS / "PHASES.md", ROOT / "PROJECT_BRIEF.md"]
 
+# (doc, target) pairs a LIVING doc may name before the target is built
+# (docs/ROADMAP.md names the next branch's target by nature, and stays living so
+# its real citations keep rename detection; the exemption is that doc's alone).
+# An exact closed set, pinned by tests/test_check_docs.py, which is also RED in
+# both stale directions — the target exists in the Makefile, or the doc no
+# longer names it — so an entry lives exactly as long as its citation.
+FUTURE_TARGETS: frozenset[tuple[str, str]] = frozenset(
+    {("docs/ROADMAP.md", "tf-migrate-state")}
+)
+
 
 def _docs() -> list[Path]:
     """The living docs: CLAUDE.md, README (if present), docs/*.md minus the plans."""
@@ -83,8 +98,9 @@ def _docs() -> list[Path]:
 
 
 # Link/anchor-checked only: the records name removed targets on purpose
-# (history) and the plans name targets not built yet (by design).
-_LINK_ONLY = [ROOT / "DECISIONS.md", BACKLOG, *(p for p in _PLANS if p.exists())]
+# (history) and the plans name targets not built yet (by design). A missing
+# file here is an ERROR in check_links, never a silent skip.
+_LINK_ONLY = [ROOT / "DECISIONS.md", BACKLOG, *_PLANS]
 
 
 def _slug(heading: str) -> str:
@@ -118,10 +134,11 @@ def _links(text: str) -> list[str]:
 def check_links(errors: list[str]) -> int:
     n = 0
     for md in [*_docs(), *_LINK_ONLY]:
+        where = md.relative_to(ROOT)
         if not md.exists():
+            errors.append(f"{where}: missing — a checked doc or record vanished")
             continue
         text = md.read_text()
-        where = md.relative_to(ROOT)
         for raw in _links(text):
             n += 1
             path_part, _, anchor = raw.partition("#")
@@ -172,12 +189,12 @@ def check_make_targets(errors: list[str]) -> int:
     known = make_targets(ROOT)
     for md in _docs():
         text = _living(md.read_text())
+        where = md.relative_to(ROOT).as_posix()
         for t in sorted(named_targets(text)):
             n += 1
-            if t not in known:
+            if t not in known and (where, t) not in FUTURE_TARGETS:
                 errors.append(
-                    f"{md.relative_to(ROOT)}: names `make {t}` but the Makefile "
-                    "has no such target"
+                    f"{where}: names `make {t}` but the Makefile has no such target"
                 )
     return n
 

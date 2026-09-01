@@ -510,7 +510,8 @@ from README alone.
 
 **Delivered** (`phase-13-docs-narrative`, spec
 `specs/phase-13-docs-narrative.md`): the docs-and-narrative capstone and the
-**planned close** — Phase 13 is the last phase; there is no Phase 14. A tracked
+**planned close** — Phase 13 is the last phase; there is no Phase 14 (the work
+after the close is ordered as `fix/` branches in [ROADMAP.md](ROADMAP.md)). A tracked
 `README.md` front door: a first-screen `<!-- readme:begin -->` block written by
 `make readme` (label accuracy, tiny/medium MAE + coverage, on-time rates, the
 simulated lift — every figure read from `tests/pins.py` (which the committed

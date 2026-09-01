@@ -113,6 +113,7 @@ write-back, Composer-scheduled DAG — is ask-first and metered:
 - [docs/INSIGHT.md](docs/INSIGHT.md) — the one-page honest read: what the numbers
   mean and what they do not.
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — GCP bring-up, cost, teardown (ask-first).
+- [docs/ROADMAP.md](docs/ROADMAP.md) — what comes next, in order, and the one-week cut.
 - [DECISIONS.md](DECISIONS.md) — the why-not-X log. [BACKLOG.md](BACKLOG.md) —
   deferred findings with triggers. [CLAUDE.md](CLAUDE.md) — the operating manual.
 
@@ -128,6 +129,9 @@ write-back, Composer-scheduled DAG — is ask-first and metered:
 - **Meter off by default.** Every cloud module is `count`-gated behind a toggle
   that defaults false; `terraform destroy` leaves nothing billable.
 
-Phases 0–13 are complete. Two obligations remain open (see [BACKLOG.md](BACKLOG.md)):
-a Composer-runnable DAG (Cosmos / `KubernetesPodOperator`) and a real-scale cost
-run — the pipeline is complete on correctness, not on these.
+Phases 0–13 are complete: the pipeline is complete on correctness, not yet on
+scale or a scheduled cloud run. What comes next, in order, is
+[docs/ROADMAP.md](docs/ROADMAP.md) — a reframed front door, remote Terraform
+state, one layering fix, then a real-scale cost run, a non-circular holdout
+eval, a Composer-runnable DAG, an append-only landing and the CI parity leg —
+each item a [BACKLOG.md](BACKLOG.md) row with a trigger.
