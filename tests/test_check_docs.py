@@ -36,6 +36,17 @@ def test_every_named_make_target_exists_today() -> None:
     assert errors == []
 
 
+def test_plans_set_is_exact() -> None:
+    """The plans — link-checked only, free to name targets not built yet — are
+    exactly these four; a living doc joining them is a visible edit here."""
+    assert [p.relative_to(check_docs.ROOT).as_posix() for p in check_docs._PLANS] == [
+        "docs/ARCHITECTURE.md",
+        "docs/PHASES.md",
+        "docs/ROADMAP.md",
+        "PROJECT_BRIEF.md",
+    ]
+
+
 def test_backticked_link_text_is_still_a_link() -> None:
     assert check_docs._links("see [`docs/X.md`](docs/X.md#a) now") == ["docs/X.md#a"]
     assert check_docs._links("[plain](docs/X.md)") == ["docs/X.md"]

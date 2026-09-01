@@ -71,7 +71,12 @@ TRACES: list[tuple[str, str]] = [
 
 
 # Plans: allowed to name targets that do not exist yet. Link-checked only.
-_PLANS = [DOCS / "ARCHITECTURE.md", DOCS / "PHASES.md", ROOT / "PROJECT_BRIEF.md"]
+_PLANS = [
+    DOCS / "ARCHITECTURE.md",
+    DOCS / "PHASES.md",
+    DOCS / "ROADMAP.md",
+    ROOT / "PROJECT_BRIEF.md",
+]
 
 
 def _docs() -> list[Path]:
