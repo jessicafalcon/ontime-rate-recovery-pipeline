@@ -430,7 +430,8 @@ test-int-airflow`). Ask-first, cloud-cost, same session. It needs Spanner up
    `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=true'`, then
    `make spanner-load PROFILE=tiny PROJECT=<id> CONFIRM=yes` (as the SA).
 2. **Impersonate the SA for ADC on the host** (the ONE credential; the container
-   mounts this dir read-only — never a keyfile):
+   mounts just this ADC json read-only, not the whole gcloud dir — never a
+   keyfile):
    `gcloud auth application-default login --impersonate-service-account=<pipeline_service_account output>`.
 3. **Build the image and run one DAG** through Docker Airflow with the cloud
    override (`OTR_DAG_PROJECT` sets both the compose guard and the DAG's rendered
