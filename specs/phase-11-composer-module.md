@@ -152,7 +152,7 @@ DECISIONS are authoritative if the landing diverges.)
 | 3 | `tests/test_infra.py::test_composer_runtime_grant_scope` — the env's `service_account` is `var.sa_email` and the only grant is `roles/composer.worker` to that member |
 | 4 | `tests/test_infra.py::test_composer_uploads_the_committed_dag` — the `google_storage_bucket_object` `source` points at `orchestration/dags/pipeline_dag.py`; `tests/test_dag_structure.py` unchanged (DAG not edited) |
 | 5 | `tests/test_infra.py::test_tf_tree_matches_manifest` (re-frozen `infra/MANIFEST.sha256`); `make tf-validate` → `tf-validate OK` |
-| 6 | `tests/test_infra.py::test_every_resource_type_is_on_the_allowlist` / `::test_every_data_source_type_is_on_the_allowlist` (the module reads no `data` source) |
+| 6 | `tests/test_infra.py::test_every_declared_resource_type_is_on_the_allowlist` / `::test_every_data_source_type_is_on_the_allowlist` (the module reads no `data` source) |
 | 7 | grep: no `.py` under `landing/ pipeline/ dbt/ serving/ eval/ generator/` changed (git diff main...HEAD); DONE command adds no live apply |
 
 ## Invariants (REQUIRED)
@@ -224,7 +224,11 @@ infra/cli.py::manifest_diff        constant-return:[]
 - `infra/modules/composer/main.tf` — the module body (API enablement, the
   environment, the DAG-bucket upload, the one scoped grant).
 - `infra/modules/composer/variables.tf` — add `sa_email` (+ any input the body
-  needs; each interpolated var shape-validated, per round 2 #6).
+  needs). `region` keeps the shape check (round 2 #6 — interpolated into the
+  environment config); `sa_email` follows the Spanner `sa_email` precedent — it
+  is root-derived (`module.iam.service_account_email`), never caller/tfvars-set,
+  so it carries no validation block (the tfvars-bypass check that motivates the
+  `region`/`project_id` regexes does not apply to a derived value).
 - `infra/modules/composer/outputs.tf` — the env name / DAG-bucket prefix (for the
   runbook), if useful.
 - `infra/main.tf` — pass `sa_email = module.iam.service_account_email` to the

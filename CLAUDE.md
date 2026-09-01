@@ -1056,10 +1056,12 @@ the intro "Phase 11 applies" corrected), CLAUDE status/Repo map/count, BACKLOG
 37/44 re-deferred. NEXT: run the review agents (code + functionality + security
 + coherence — `infra/`/IAM/cloud-toggle surface), report verdicts, then the
 ask-first live `tf-plan` evidence, then push + PR (developer merges).
-Open BACKLOG rows: **14** (Phase 11 struck the `docs/PHASES.md`
-Delivered-narrative trail — row 46, the Phase 10 O/P/Q append — and re-deferred
+Open BACKLOG rows: **15** (Phase 11 struck the `docs/PHASES.md`
+Delivered-narrative trail — row 46, the Phase 10 O/P/Q append — re-deferred
 the offline DAG↔task attachment row to Phase 12 and the cloud-env redirection
-gate row with a sharper trigger. The security re-review of P opened three: the
+gate row with a sharper trigger, and opened one (review round 1): the flat
+Composer DAG-bucket upload does not satisfy the 8b DAG's `orchestration.tasks`
+import — a Phase 12 pre-first-parse fix. The security re-review of P opened three: the
 cloud-env redirection gate's residual — proxy-spelling/exact-pin/entry-point
 test, `grpc_proxy` closed now — the `APPDATA`/Windows classification, and the
 `docs/PHASES.md` Delivered-narrative trail (**now struck by Phase 11**). Phase 10 struck: the write-back

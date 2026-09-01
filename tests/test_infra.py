@@ -213,7 +213,8 @@ ALLOWED_RESOURCE_TYPES = {
 # The count-gated modules are NOT exempt (Phase 10 round 1 #11): each has its
 # own exact allowlist, so a `null_resource` + local-exec (runs on the
 # operator's machine during the ask-first apply) or a second billable type
-# dropped into a module is caught the same way. composer is still a stub.
+# dropped into a module is caught the same way. Both modules now declare their
+# exact sets (Phase 11 filled composer).
 GATED_ALLOWED_RESOURCE_TYPES = {
     INFRA / "modules" / "composer": {
         "google_project_service",
@@ -439,11 +440,16 @@ def test_composer_uploads_the_committed_dag() -> None:
     committed 8b DAG file (never an inline `content` heredoc that could drift),
     and that file exists in the repo."""
     text = _stripped("modules", "composer", "main.tf")
-    dag = _block(text, r'resource "google_storage_bucket_object" "dag"')
-    src = re.search(r'source\s*=\s*"([^"]+)"', dag).group(1)
-    assert src.endswith("orchestration/dags/pipeline_dag.py"), src
-    assert not _has_arg(dag, "content"), dag  # a file source, not an inline copy
-    assert (ROOT / "orchestration" / "dags" / "pipeline_dag.py").is_file()
+    for obj, repo_path in (
+        ("dag", "orchestration/dags/pipeline_dag.py"),
+        ("tasks", "orchestration/tasks.py"),  # Done-when 4: "and tasks.py"
+    ):
+        block = _block(text, rf'resource "google_storage_bucket_object" "{obj}"')
+        src = re.search(r'source\s*=\s*"([^"]+)"', block).group(1)
+        assert src.endswith(repo_path), src
+        # a file source, not an inline copy that could drift
+        assert not _has_arg(block, "content"), block
+        assert (ROOT / repo_path).is_file()
 
 
 def test_region_is_validated_wherever_it_is_declared() -> None:
