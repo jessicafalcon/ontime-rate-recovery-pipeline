@@ -65,3 +65,25 @@ Lift, recommended − baseline: ontime_rate -0.033333; timing_gap +5; on_time -4
 
 Lift, recommended − baseline: ontime_rate +0.162371; timing_gap -10216; on_time +8964; upload_fault +1252; delivery_fault and unattributed unchanged by construction (4793, 1593). Profile `medium`, 60000 prompts, seed `tests/pins.py::SIMULATE_SEED`.
 <!-- simulate:end medium -->
+
+## Phase 12 — live run (demo day)
+
+The one supervised run of the whole path against real GCP: the committed DAG
+(Phase 8b), pointed at the cloud by `OTR_DAG_TARGET=bigquery` /
+`OTR_DAG_PROJECT`, builds on BigQuery `ontime` and writes the Spanner
+`send_schedule`. The green DATA run comes from the local Docker-Airflow →
+real-BigQuery+Spanner **rehearsal** (Option A — the make-based DAG parses but
+does not execute on a Composer worker; ARCHITECTURE §8); the Composer apply proves
+the module applies and the DAG imports with no error. The pinned evidence is the
+`send_schedule` row count (`tests/pins.py::SEND_SCHEDULE_ROWS_TINY` = 20) and hash
+(`SEND_SCHEDULE_SHA256_TINY`); run ids, task timings and job ids are
+non-deterministic and unasserted.
+
+<!-- phase-12-live-run: filled in the demo-day session (not a generated block) -->
+
+_Pending the live run (ask-first, same session). On the day, capture here: the
+green `airflow dags test pipeline <date>` tail, the `writeback OK: <project>.ontime
+→ spanner, 20 users, N written` line, the idempotent re-run (`0 written`), and the
+teardown proof (`gcloud composer environments list` empty, `gcloud spanner
+instances list` → `Listed 0 items.`, session spend < $25). Dated apply/teardown
+lines live in `docs/DEPLOYMENT.md`._

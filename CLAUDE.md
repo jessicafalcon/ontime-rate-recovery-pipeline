@@ -116,14 +116,24 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   in the terraform module, pinned to the same columns).
   Reads `scores_send_time` + `dim_user_current` (tz), writes `send_schedule`;
   never truth/raw. A pipeline dir — guarded by `test_truth_isolation.py`.
-- `orchestration/` *(Phase 8b)* — the Airflow DAG (Docker-local), no logic, only
+- `orchestration/` *(Phase 8b; 12)* — the Airflow DAG (Docker-local), no logic, only
   ordering: `dags/pipeline_dag.py` (BashOperators over `make` targets, `dbt_build
   >> writeback`, `max_active_runs=1`, `catchup=False`, `THROUGH` via `{{
-  data_interval_end | ds }}`), `tasks.py` (the Airflow-free ordered-command
-  manifest the DAG and the offline structure test share), `Dockerfile` +
-  `docker-compose.yml` (lean `SequentialExecutor`/SQLite; `apache-airflow` never
-  in `uv.lock`). A pipeline dir — `test_truth_isolation.py` covers it. `eval` is
-  NOT a DAG task (union-only gate — reads truth, asserts full-data pins).
+  data_interval_end | ds }}`; Phase 12: a dual-path import — `from
+  orchestration.tasks` offline/Docker, falling back to the flat `import tasks` in a
+  Composer `dags/` bucket, `except ImportError`), `tasks.py` (the Airflow-free
+  ordered-command manifest the DAG and the offline structure test share; Phase 12:
+  `build_tasks(target, project)` reads `OTR_DAG_TARGET`/`OTR_DAG_PROJECT` at parse
+  time — unset → the local DuckDB default byte-identical to 8b, set → the cloud
+  `make` commands), `Dockerfile` + `docker-compose.yml` (lean
+  `SequentialExecutor`/SQLite; `apache-airflow` never in `uv.lock`) +
+  `docker-compose.cloud.yml` *(Phase 12)* — the ask-first rehearsal override
+  (cloud target + ADC read-only mount; never used by `make test-int-airflow`,
+  which is base-file-only). A pipeline dir — `test_truth_isolation.py` covers it.
+  `eval` is NOT a DAG task (union-only gate — reads truth, asserts full-data pins).
+  The make-based DAG parses on Composer but does NOT execute there (no
+  repo/`make`/venv on a worker — §8; the Composer run proves parse+apply, the
+  green data run is the local Docker → real-BigQuery+Spanner rehearsal).
 - `infra/` *(Phase 9a; 10; 11)* — Terraform. `main.tf`/`variables.tf`/`outputs.tf` +
   `modules/{bigquery,gcs,iam,budget}` (unconditional, free/near-free) and
   `modules/{composer,spanner}` `count`-gated behind `enable_*` toggles that
@@ -1037,8 +1047,8 @@ pipeline.cli). `tests/test_loader.py`→`tests/test_landing.py`; the tree-derive
 truth-isolation guard covers both new packages with no edit. Suite 575 green,
 mutate/review-gate/check-docs clean; struck the `loader/` package-shape BACKLOG
 row. **Merged to main (`891c898`, 2026-08-31).**
-**Phase 11 in flight** (`phase-11-composer-module`, spec approved 2026-08-31):
-the composer module — a count-gated stub since 9a — filled behind the
+**Phase 11 complete (merged PR #17, `b7f20dc`, 2026-09-01).**
+The composer module — a count-gated stub since 9a — filled behind the
 still-default-false `enable_composer` toggle. Offline complete: the module body
 (`composer.googleapis.com` enablement kept-on; the smallest environment running
 as the pipeline SA, not a default Compute SA; one project-level
@@ -1051,17 +1061,40 @@ admitted beside bigquery.jobUser, `seen == 9`, LEAST_PRIVILEGE_ROLES), the `.tf`
 re-freeze (22 files). **Nothing applied — plan-only Done-when.** Suite 578
 green, `tf-validate OK`, mutate 1/1 (`manifest_diff` neutered → red). Records:
 DECISIONS Phase 11, PHASES Delivered + the Phase 10 O/P/Q narrative (BACKLOG row
-46 struck), DEPLOYMENT Composer bring-up/run/teardown runbook (Phase 12 applies;
-the intro "Phase 11 applies" corrected), CLAUDE status/Repo map/count, BACKLOG
-37/44 re-deferred. NEXT: run the review agents (code + functionality + security
-+ coherence — `infra/`/IAM/cloud-toggle surface), report verdicts, then the
-ask-first live `tf-plan` evidence, then push + PR (developer merges).
-Open BACKLOG rows: **15** (Phase 11 struck the `docs/PHASES.md`
-Delivered-narrative trail — row 46, the Phase 10 O/P/Q append — re-deferred
-the offline DAG↔task attachment row to Phase 12 and the cloud-env redirection
-gate row with a sharper trigger, and opened one (review round 1): the flat
-Composer DAG-bucket upload does not satisfy the 8b DAG's `orchestration.tasks`
-import — a Phase 12 pre-first-parse fix. The security re-review of P opened three: the
+46 struck), DEPLOYMENT Composer bring-up/run/teardown runbook, CLAUDE
+status/Repo map/count, BACKLOG 37/44 re-deferred.
+**Phase 12 in flight** (`phase-12-live-run`, spec approved 2026-09-01):
+the demo-day live run + teardown. OFFLINE complete — the DAG is made runnable:
+a dual-path import (`except ImportError`, BACKLOG row 47 struck) and an
+env-driven cloud target (`orchestration/tasks.py::build_tasks` reading
+`OTR_DAG_TARGET`/`OTR_DAG_PROJECT`; unset → the Phase 8b DuckDB default,
+byte-identical), + the rehearsal wiring `orchestration/docker-compose.cloud.yml`
+(cloud target + ADC read-only mount; base file offline for `test-int-airflow`),
++ 4 new DAG tests and `tests/test_orchestration_compose.py`. **Option A** (the
+developer's phase-entry call): the make-based DAG parses on Composer but does
+NOT execute on a worker (no repo/`make`/venv — ARCHITECTURE §8), so Composer
+proves the module applies + the DAG imports clean, and the green DATA run +
+`send_schedule` (20 rows, `SEND_SCHEDULE_SHA256_TINY`) come from the local
+Docker-Airflow → real-BigQuery+Spanner rehearsal (rehearsed FIRST). Suite 585
+green (was 578; +4 DAG, +3 compose), mutate 2/2 (`build_tasks` neutered → red),
+ruff clean. Records: DECISIONS Phase 12, PHASES in-flight, ARCHITECTURE §8
+(make-on-Composer gotcha), CLAUDE status/Repo map/count, BACKLOG (47 struck;
+16/37/44/30 re-deferred, 17 not-built, 15 re-confirmed), RESULTS Phase 12 block
+(pending the live run), DEPLOYMENT rehearsal runbook. Meters confirmed OFF at
+entry — Spanner `Listed 0 items.`, Composer API `SERVICE_DISABLED`. **Nothing
+applied.** NEXT (ask-first, developer authorizes each): review agents, then the
+live rehearsal → Composer apply → one DAG run → capture into RESULTS → teardown
+(prove meter stopped, spend < $25) → push + PR (developer merges).
+Open BACKLOG rows: **14** (Phase 12 struck the flat-Composer-DAG-import row
+(47) — the DAG import is now dual-path — and re-deferred the tfstate
+confidentiality half (16), the DAG↔task attachment row (37), the cloud-env
+redirection gate (44) and the CI-WIF row (30), left the budget kill-switch (17)
+unbuilt, and re-confirmed Spanner clean (15) at entry. Phase 11 struck the
+`docs/PHASES.md` Delivered-narrative trail — row 46, the Phase 10 O/P/Q append —
+re-deferred the offline DAG↔task attachment row to Phase 12 and the cloud-env
+redirection gate row with a sharper trigger, and opened one (review round 1):
+the flat Composer DAG-bucket upload does not satisfy the 8b DAG's
+`orchestration.tasks` import — **now struck by Phase 12**. The security re-review of P opened three: the
 cloud-env redirection gate's residual — proxy-spelling/exact-pin/entry-point
 test, `grpc_proxy` closed now — the `APPDATA`/Windows classification, and the
 `docs/PHASES.md` Delivered-narrative trail (**now struck by Phase 11**). Phase 10 struck: the write-back

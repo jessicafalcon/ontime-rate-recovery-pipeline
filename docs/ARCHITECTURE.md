@@ -576,3 +576,17 @@ power calculation, pre-registered primary metric, guardrails, send-time jitter).
   Amendment N1 made the gate an action ALLOWLIST — an unreadable plan or an
   action outside `{no-op, read, create, update}` (+ `delete` with the flag)
   is refused always.
+- **The make-based DAG parses on Cloud Composer but cannot EXECUTE there**
+  (Phase 12). The Phase 8b DAG's tasks are `BashOperator`s that shell out to
+  `make … → uv run` with `cwd = REPO` (`Path(__file__).parents[2]`); a Composer
+  worker has no repo checkout, no `make`, no project venv, and `parents[2]` of
+  `/home/airflow/gcs/dags/pipeline_dag.py` is `/home/airflow` (no Makefile). So
+  Composer's contribution is that the module APPLIES and the DAG IMPORTS with no
+  error (the dual-path import — row 47 — resolves `from tasks import TASKS` in the
+  flat `dags/` bucket); the green DATA run + the `send_schedule` evidence come
+  from the local Docker-Airflow → real-BigQuery+Spanner rehearsal, which has the
+  toolchain (Option A; DECISIONS Phase 12). Making the DAG execute on Composer
+  (a custom image with the repo + toolchain baked in — Option B) was rejected as
+  out of scope. The DAG is pointed at the cloud by config, not code:
+  `orchestration/tasks.py::build_tasks` reads `OTR_DAG_TARGET`/`OTR_DAG_PROJECT`
+  at parse time (unset → the local DuckDB default, byte-identical to Phase 8b).
