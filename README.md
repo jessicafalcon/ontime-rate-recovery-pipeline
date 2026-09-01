@@ -129,7 +129,9 @@ write-back, Composer-scheduled DAG — is ask-first and metered:
 - **Meter off by default.** Every cloud module is `count`-gated behind a toggle
   that defaults false; `terraform destroy` leaves nothing billable.
 
-Phases 0–13 are complete: the pipeline is complete on correctness. What comes
-next — a real-scale cost run, a Composer-runnable DAG, a non-circular holdout
-eval and the rest — is ordered in [docs/ROADMAP.md](docs/ROADMAP.md), each item
-a [BACKLOG.md](BACKLOG.md) row with a trigger.
+Phases 0–13 are complete: the pipeline is complete on correctness, not yet on
+scale or a scheduled cloud run. What comes next, in order, is
+[docs/ROADMAP.md](docs/ROADMAP.md) — a reframed front door, remote Terraform
+state, one layering fix, then a real-scale cost run, a non-circular holdout
+eval, an append-only landing, a Composer-runnable DAG and the CI parity leg —
+each item a [BACKLOG.md](BACKLOG.md) row with a trigger.

@@ -3,7 +3,7 @@
 One entry per non-obvious choice. **"Decisions still in force"** (first) is the
 binding set — ≤ 20 entries, by component, each linking to the phase entry that
 argued it. **"Process"** records how the phases are run. **"Appendix — by
-phase"** is the full log, oldest first; an entry a later phase reverses is
+phase"** is the full log, newest first; an entry a later phase reverses is
 annotated **Superseded by …** in place and never deleted.
 
 ## Decisions still in force
@@ -157,11 +157,24 @@ annotated **Superseded by …** in place and never deleted.
   and is closed by its own last paragraph; `BACKLOG.md` is findings with
   triggers and has no order or cut by design. ROADMAP orders, cites BACKLOG
   rows by title, and opened a row for each item that had none, so the trigger
-  machinery still covers everything. It is a plan for `check-docs` (link-checked
-  only, `scripts/check_docs.py::_PLANS`, pinned exactly) because it names
-  targets not built yet by nature; the BACKLOG review cadence is re-anchored to
-  every `fix/` branch exit, since there is no phase exit left to carry the
-  standing Spanner-clean check. Rejected: reopening PHASES with a Phase 14
+  machinery still covers everything; a roadmap row in BACKLOG carries only the
+  title, a pointer and the trigger, because the first round's full copies
+  drifted twice against the plan in one review. For `check-docs` ROADMAP stays
+  a LIVING doc — the seven real targets it names keep rename detection — and
+  the one target it names before its branch builds it is admitted by name from
+  `FUTURE_TARGETS` (`scripts/check_docs.py`), an exact closed set whose test is
+  also red once a listed name exists in the Makefile, so it self-prunes
+  (round 2 replaced the first mechanism, demoting the whole file to a plan,
+  which traded seven live checks for one exemption). The plans set is pinned
+  exactly by the same test file — a stronger pin than a `TRACES` row, which is
+  why the citation has none. The BACKLOG review and the mandatory whole-repo
+  coherence audit are re-anchored to every `fix/` branch exit as well as every
+  phase exit (CLAUDE.md Repo map, Workflow rules, the agent table, the
+  agent's own description), since there is no phase exit left to carry the
+  standing Spanner-clean check — this branch ran it first. A `fix/` branch
+  that re-freezes a fixture or changes a write path carries a spec
+  (`specs/fix-<slug>.md`, same template — the gate's `Freeze:` check needs a
+  SPEC file), listed here, not in PHASES. Rejected: reopening PHASES with a Phase 14
   (contradicts the recorded close, and each item is a bounded fix to a finished
   system, not a stage of the pipeline — the same gate runs either way); rows in
   BACKLOG only (no order, no cut, nothing to hand a reader who asks "what
@@ -176,7 +189,7 @@ phase in `docs/PHASES.md`; there is no Phase 14. The developer's call at phase
 entry — the OUT items (remote tfstate, a real-scale cost run, a Composer-runnable
 DAG, the WIF CI leg) stay BACKLOG rows named as their own future branches, not
 PHASES rows. *The ordering of those branches, and four more, is
-`docs/ROADMAP.md` (fix/roadmap, below).*
+`docs/ROADMAP.md` (fix/roadmap, the entry above).*
 
 - **The README first screen and the findings chart are GENERATED, not typed.**
   `make readme` renders the `readme:begin` block (`README.md`) and
@@ -1968,5 +1981,7 @@ allowlist (M); the root `workload_identity_provider` output (J); two datasets,
   and PROJECT_BRIEF.md name targets not built yet by design. First thing the
   gate caught on itself (the plans' future targets); the alternative — a `(Phase N)`
   marker syntax the scanner parses — was rejected as a second grammar.
+  *Extended by fix/roadmap (2026-09-01): a LIVING doc may name a not-yet-built
+  target only from the exact `FUTURE_TARGETS` set, red once the target lands.*
 - **PROJECT_BRIEF.md stays at the repo root as the origin record**; it is not a
   living doc (ARCHITECTURE/PHASES supersede it) and is link-checked only.

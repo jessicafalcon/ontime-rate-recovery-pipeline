@@ -1,6 +1,6 @@
 ---
 name: coherence-auditor
-description: Whole-repo drift audit for the ontime-rate-recovery repo. MANDATORY once at each docs/PHASES.md phase exit (before the phase PR merges), never per spec; also the ONLY agent for a docs-only range, scoped to the changed docs. Checks the codebase against CLAUDE.md, docs/ARCHITECTURE.md, docs/PHASES.md, and DECISIONS.md for cross-stage contract drift (generator ↔ dbt sources ↔ models ↔ eval ↔ write-back ↔ Airflow ↔ Terraform), architecture erosion, stale records, and whether the finished phase actually supports the next one. Read-only — reports; never edits.
+description: Whole-repo drift audit for the ontime-rate-recovery repo. MANDATORY once at each docs/PHASES.md phase exit and, since the Phase 13 close, at each `fix/` branch exit (before the PR merges), never per spec; also the ONLY agent for a docs-only range, scoped to the changed docs. Checks the codebase against CLAUDE.md, docs/ARCHITECTURE.md, docs/PHASES.md, and DECISIONS.md for cross-stage contract drift (generator ↔ dbt sources ↔ models ↔ eval ↔ write-back ↔ Airflow ↔ Terraform), architecture erosion, stale records, and whether the finished phase actually supports the next one. Read-only — reports; never edits.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---

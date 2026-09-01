@@ -39,7 +39,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
 ## Repo map
 
 - `specs/` — one spec per phase, from `specs/TEMPLATE.md`. ONE DONE command
-  each. `docs/PHASES.md` is the list; specs are the executable contracts.
+  each. `docs/PHASES.md` is the list; specs are the executable contracts. Since
+  the Phase 13 close a `fix/` branch that re-freezes a fixture or changes a
+  write path also carries one (`specs/fix-<slug>.md`, same template; the gate's
+  `Freeze:` check needs a SPEC) — listed in `docs/ROADMAP.md`, not PHASES.
 - `generator/` — `models.py` (pydantic, schema source of truth), `profiles.py`
   + `profiles/*.json` (every knob a required field), `generate.py` (cause-first,
   one `Random`, `SIM_START` fixed), `response.py` (the one response function,
@@ -214,7 +217,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   it.
 - `DECISIONS.md` — why-not-X log. One entry per non-obvious choice.
 - `BACKLOG.md` — deferred findings with revisit triggers. Reviewed at every
-  phase exit: do due items or re-defer with a new trigger, never drop.
+  phase exit and, since the Phase 13 close, at every `fix/` branch exit: do due
+  items or re-defer with a new trigger, never drop.
 - `data/` — gitignored working output (`data/out/<profile>/`, `data/truth/`,
   `*.duckdb`).
 
@@ -230,7 +234,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   CLAUDE.md, README (tracked since Phase 13, so read), docs/,
   PROJECT_BRIEF, DECISIONS, BACKLOG resolves; every
   `make <target>` the LIVING docs name exists in the Makefile (ARCHITECTURE,
-  PHASES, ROADMAP and PROJECT_BRIEF are plans — link-checked only); every trace token in `TRACES` exists in source as an exact token;
+  PHASES and PROJECT_BRIEF are plans — link-checked only; a living doc may name
+  a not-yet-built target only from the exact `FUTURE_TARGETS` set, red once built); every trace token in `TRACES` exists in source as an exact token;
   this file's "Open BACKLOG rows: **N**" equals BACKLOG.md's un-struck rows
 - `make review-gate [SPEC=specs/<f>.md] [BASE=main] [DELETED=a,b]` — the
   offline review gate: `make test` + `ruff check` + `ruff format --check`
@@ -717,8 +722,8 @@ simple, standard way over the clever way.
   the profile.
 - `fixtures/tiny/` is read-only after Phase 1. Re-freezing is a deliberate,
   signed-off change with a DECISIONS entry and a new MANIFEST.
-- At each phase exit: run the coherence audit and review BACKLOG.md for due
-  items.
+- At each phase exit, and at each `fix/` branch exit now that phases are over:
+  run the coherence audit and review BACKLOG.md for due items.
 - Stack surprises: check official docs before working around; log under
   ARCHITECTURE.md §8 Gotchas.
 - Do not add features outside ARCHITECTURE.md without asking.
@@ -822,7 +827,7 @@ range. Agents run only when the range touches their surface — derived from
 | Code: `*.py`, `dbt/**` (models, macros, tests, yml), `Makefile`, `scripts/`, `tests/`, `generator/`, `eval/`, `serving/`, `orchestration/`, `infra/**/*.tf` | code-reviewer, then functionality-tester |
 | Sensitive: `.github/`, `infra/`, `serving/`, `orchestration/` (Docker image / `docker-compose` / the container-spinning `test-int-airflow`), `.env*`, `.dockerignore`, `dbt/profiles.yml`, `.claude/hooks/`, `.claude/settings*.json`, any target that deletes / applies / takes `CONFIRM` | + security-reviewer |
 | Docs and records only: `*.md` (incl. `specs/`, `docs/`, `DECISIONS.md`, `BACKLOG.md`, `CLAUDE.md`, `.claude/agents|commands/*.md`) | coherence-auditor only, scoped to the changed docs (drift and stale-record checks; no code to review or run) |
-| Any of the above at a phase exit | + coherence-auditor over the whole repo (mandatory) |
+| Any of the above at a phase exit, or a `fix/` branch exit since the Phase 13 close | + coherence-auditor over the whole repo (mandatory) |
 
 A range that mixes surfaces runs the union. A docs-only range still runs the
 gate (`check-docs`, the BACKLOG count, Evidence/Record checks). Running an

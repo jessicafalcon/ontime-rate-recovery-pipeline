@@ -6,9 +6,13 @@ staff-data-engineer read of the repo (`docs/INSIGHT.md` states what is proven;
 this states what is next and why). Every item is its own `fix/<slug>` branch
 from `main`, one PR each, the same gate as a phase. Items that were already
 [BACKLOG.md](../BACKLOG.md) rows are cited by row title; the four that were not
-got a row in the same commit as this file. This is a plan (link-checked only,
-like ARCHITECTURE and PHASES), so it may name a target not built yet. BACKLOG
-is reviewed at every `fix/` branch exit now that phases are over.
+got a row in the same commit as this file; a roadmap row in BACKLOG carries
+only the title, a pointer here and the trigger — the detail lives in this file
+alone, so the two cannot drift. This is a living doc for `check-docs` (every
+`make` target it names must exist), except a target named before its branch
+builds it, admitted by name from the exact `FUTURE_TARGETS` set in
+`scripts/check_docs.py` and removed there when it lands. BACKLOG is reviewed
+at every `fix/` branch exit now that phases are over.
 
 ## The gap the plan closes
 
