@@ -50,6 +50,7 @@ _TICK = re.compile(r"`([^`\n]*)`")
 # source phrases the docs name by identity. Add a row when a doc cites a symbol.
 TRACES: list[tuple[str, str]] = [
     ("Makefile", "unexport SPEC BASE DELETED CONFIRM PROFILE TARGET WRITE"),
+    ("scripts/check_docs.py", "FUTURE_TARGETS"),
     ("scripts/review_common.py", "resolve_spec"),
     ("scripts/mutate.py", "OPERATORS"),
     ("eval/simulate.py", "simulate:begin"),
