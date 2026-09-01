@@ -19,7 +19,7 @@ ROOT = Path(__file__).parent.parent
 TINY = ROOT / "fixtures" / "tiny"
 
 
-def test_loader_globs_every_raw_file(tmp_path: Path) -> None:
+def test_landing_globs_every_raw_file(tmp_path: Path) -> None:
     files = landing.event_files(TINY)
     assert [f.name for f in files][0] == "events_2026-01-04.jsonl"  # the Tokyo day
     assert len(files) == pins.RAW_FILES

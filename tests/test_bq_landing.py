@@ -52,7 +52,7 @@ def _factory() -> tuple[list[Recorder], bq.ClientFactory]:
     return made, make
 
 
-def test_selects_the_same_files_as_the_duckdb_loader() -> None:
+def test_selects_the_same_files_as_the_duckdb_landing() -> None:
     for through in (None, "2026-01-07", "2026-01-13", "2025-01-01"):
         files = bq.selected_files(TINY, through)
         assert files["events"] == landing.event_files(TINY, through)
