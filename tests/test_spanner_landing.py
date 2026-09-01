@@ -393,7 +393,20 @@ def test_conftest_scrub_uses_the_cloud_env_policy(tmp_path: Path) -> None:
         if with_conftest:
             shutil.copy(root / "tests" / "conftest.py", d / "conftest.py")
         r = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(d)],
+            # --color=no keeps the child's output plain no matter what colour env
+            # it inherited (the harness exports FORCE_COLOR through **os.environ);
+            # otherwise ANSI codes split "::test_probe" and the tail assertions
+            # below read a false negative on a correct scrub.
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "--color=no",
+                "-p",
+                "no:cacheprovider",
+                str(d),
+            ],
             env=poisoned,
             cwd=root,
             capture_output=True,
