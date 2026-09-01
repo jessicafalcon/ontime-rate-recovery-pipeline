@@ -281,6 +281,16 @@ def test_build_tasks_refuses_unknown_target_and_bad_project() -> None:
     assert tasks.build_tasks("bigquery", "ontime-rate-recovery")[1][0] == "writeback"
 
 
+def test_project_re_matches_the_infra_source_of_truth() -> None:
+    """Round 2 #R2-1: tasks.py inlines the project-id shape (it cannot import
+    infra.cli — that pulls generator.manifest, absent from a flat Composer DAG
+    bucket), so pin the copy EQUAL to the source of truth here (the full repo is
+    present offline) — a drift in infra.cli.PROJECT_RE fails this, not silently."""
+    from infra.cli import PROJECT_RE as INFRA_PROJECT_RE
+
+    assert tasks.PROJECT_RE.pattern == INFRA_PROJECT_RE.pattern
+
+
 def test_module_target_and_project_come_from_env(monkeypatch: Any) -> None:
     """Invariant 2 (the env wiring): the module-level TARGET/PROJECT are read from
     OTR_DAG_TARGET/OTR_DAG_PROJECT, and TASKS is build_tasks of them — so setting

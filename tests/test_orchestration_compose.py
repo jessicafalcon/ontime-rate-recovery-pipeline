@@ -29,6 +29,7 @@ def _override_env_and_volumes() -> tuple[list[str], list[str]]:
     lines = CLOUD.read_text().splitlines()
     env_i = next(i for i, ln in enumerate(lines) if ln.strip() == "environment:")
     vol_i = next(i for i, ln in enumerate(lines) if ln.strip() == "volumes:")
+    assert env_i < vol_i, "parser assumes environment: precedes volumes:"
     env_keys = [
         ln.strip().split(":", 1)[0]
         for ln in lines[env_i + 1 : vol_i]
