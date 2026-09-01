@@ -146,6 +146,58 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### Phase 13 — Docs, dashboard, narrative (2026-09-01)
+
+The docs-and-narrative capstone and the **planned close**: Phase 13 is the last
+phase in `docs/PHASES.md`; there is no Phase 14. The developer's call at phase
+entry — the OUT items (remote tfstate, a real-scale cost run, a Composer-runnable
+DAG, the WIF CI leg) stay BACKLOG rows named as their own future branches, not
+PHASES rows.
+
+- **The README first screen and the findings chart are GENERATED, not typed.**
+  `make readme` renders the `readme:begin` block (`README.md`) and
+  `docs/img/lift.svg` from `tests/pins.py` + the committed `docs/RESULTS.md`
+  numbers, through Phase 6's marker-confined writer (`eval/blocks.py`);
+  `tests/test_readme.py` regenerates both byte-identically under `make test`
+  (the CI proof, exactly as `test_power.py` pins the AB_DESIGN block). Rejected:
+  typing the numbers into README prose — the hiring-review's exact complaint is
+  un-sourced figures, and a typed number drifts the instant a pin moves. The one
+  place prose still names a figure (the medium lift, in `docs/INSIGHT.md`) is the
+  author's essay, link-checked not pinned, and it cites the RESULTS block it came
+  from.
+- **The chart is a deterministic SVG string, no new dependency.** `render_svg`
+  builds `docs/img/lift.svg` from the medium simulation numbers with
+  integer-only coordinates (no clock, no order dependence), so it regenerates
+  byte-identically. Rejected: matplotlib / plotly — a plotting package for a
+  static picture is a STOP-and-ask (CLAUDE.md allowlist); a hand-drawn SVG —
+  not regenerable, so it drifts silently.
+- **The README quickstart is the local, no-cloud chain; the cloud is a runbook
+  link.** The quickstart is `setup → seed → dbt-build → eval → report →
+  simulate → writeback → pipeline` on tiny — a cold reader reaches `pipeline OK:
+  tiny` with no GCP account and no cost; Phases 9–12 are one link to
+  `docs/DEPLOYMENT.md`. `tests/test_readme.py::test_quickstart_commands_are_cloud_free`
+  pins that no quickstart command is a `TARGET=bigquery`/`spanner`, `CONFIRM`, or
+  `tf-*` target. Rejected: putting `tf-apply` / `TARGET=bigquery` on the front
+  page — a cold reader would bill GCP following the quickstart.
+- **`check-docs` widens by tracking the README and extending `TRACES`; no guard
+  logic changes.** `scripts/check_docs.py` already read the README "if tracked";
+  committing it turns its link/target checks on, and `TRACES` gains one row per
+  guard/target the new docs name by identity (`readme:begin`,
+  `first_screen_rows`, `render_svg`, `generator.response.open_probability`).
+  Rejected: a bespoke README linter (duplicates `check_docs.py`).
+- **The narrative is honest, not promotional.** `docs/INSIGHT.md` states plainly
+  that tiny's simulated lift is NEGATIVE (a 20-user bin-tie — a regression pin,
+  not a result) and that the simulation is CIRCULAR (outcomes re-drawn from the
+  same latent that generated the data, so it validates the served schedule under
+  the data's own rule and says nothing about real users — the A/B in
+  `docs/AB_DESIGN.md` is the real test). Rejected: a promotional one-pager that
+  leads with the medium +0.162371 alone.
+- **CLAUDE.md's "Current status" condenses to a pointer; the phase history stays
+  in PHASES.md / DECISIONS.** The multi-paragraph running log became a short
+  "Phases 0–13 complete" paragraph + a Phase 13 paragraph + the BACKLOG-count
+  line. Rejected: leaving the ~290-line status block — it is the opposite of a
+  front door, and PHASES/DECISIONS already carry the trail.
+
 ### Phase 12 — Live run and teardown (demo day) (2026-09-01)
 
 - **Option A: Composer proves the module applies and the DAG parses live; the
