@@ -8,7 +8,8 @@ This pipeline separates the three causes of a miss, hands the two the app
 caused back to engineering, and fixes the one it can: it learns when each user
 is actually reachable and recommends a send time inside their cohort's shared
 moment. It runs end to end on a laptop with no cloud account, and the same code
-runs on BigQuery and Spanner, ordered by the same Airflow DAG. The results
+runs on BigQuery and Spanner, ordered by an Airflow DAG run locally against
+those services (a scheduled Composer run is future work). The results
 block and the chart below are generated from pinned test data and regenerate
 byte for byte; no figure in them is typed by hand.
 
@@ -167,14 +168,19 @@ expects a red test. A frozen fixture only one gated command may rewrite, and
 only with a signed-off spec line, plus the truth-isolation grep, hold the data
 still. The work was done with an
 AI coding assistant inside that loop; the loop, not the assistant, is what kept
-the numbers honest. The operating manual is [CLAUDE.md](CLAUDE.md); the why-not-X
-log is [DECISIONS.md](DECISIONS.md); deferred findings with their triggers are
-in [BACKLOG.md](BACKLOG.md).
+the numbers honest. [docs/PROCESS.md](docs/PROCESS.md) is the one page on how:
+what the machine checked, what held the data still, what the assistant did and
+did not. The operating manual is [CLAUDE.md](CLAUDE.md); the why-not-X log is
+[DECISIONS.md](DECISIONS.md); deferred findings with their triggers are in
+[BACKLOG.md](BACKLOG.md).
 
 ## Where to read next
 
 - [docs/INSIGHT.md](docs/INSIGHT.md) — the one-page honest read: what the
   numbers mean and what they do not.
+- [docs/PROCESS.md](docs/PROCESS.md) — how it was built and what kept it
+  honest: the gate, the mutation sweep, the frozen fixture, the pins, the
+  review loop, the assistant's part.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the spec: data model, labels,
   metrics, boundaries, the Amplitude-export mapping, deployment posture, gotchas.
 - [docs/METRICS.md](docs/METRICS.md) — the single definition of every served
@@ -192,8 +198,7 @@ in [BACKLOG.md](BACKLOG.md).
 
 The pipeline is complete on correctness at 2,000 users, not yet on scale or on
 a scheduled cloud run. What would change that, in order, is
-[docs/ROADMAP.md](docs/ROADMAP.md): the rest of this front door (a page on the
-process), remote Terraform state, one layering fix, a real-scale cost run, a
-holdout evaluation that is not circular, a Composer-runnable DAG, an
+[docs/ROADMAP.md](docs/ROADMAP.md): remote Terraform state, one layering fix,
+a real-scale cost run, a holdout evaluation that is not circular, a Composer-runnable DAG, an
 append-only landing and the CI parity leg. Each is a [BACKLOG.md](BACKLOG.md)
 row with a trigger.

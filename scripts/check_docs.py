@@ -80,6 +80,8 @@ TRACES: list[tuple[str, str]] = [
     ("eval/readme.py", "first_screen_rows"),
     ("eval/readme.py", "render_svg"),
     ("generator/response.py", "open_probability"),
+    # fix/process-doc — docs/PROCESS.md names the truth guard's derived list.
+    ("tests/test_truth_isolation.py", "pipeline_dirs"),
 ]
 
 

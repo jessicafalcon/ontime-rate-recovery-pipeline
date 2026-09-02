@@ -46,6 +46,9 @@ simulation result, and this document calls it one.
 
 ## Why the architecture makes these caveats checkable
 
+The process that enforced these properties is one page,
+[docs/PROCESS.md](PROCESS.md); this section is what it produced.
+
 - **Truth isolation.** The generator's assigned causes are a side-file only
   `eval/` reads — never a pipeline input. Label accuracy vs that truth is
   **1.000** on `tiny`: the attribution recovers exactly the causes the generator
@@ -67,9 +70,9 @@ data's own rule the served schedule recovers a large chunk of `timing_gap`. That
 is a strong *engineering* result and a *simulated* product result — the A/B in
 [AB_DESIGN.md](AB_DESIGN.md) is what would turn the second into a real one.
 
-The project is closed on correctness, not on scale or on a scheduled cloud
-run. What would change this page is three of the items
-[docs/ROADMAP.md](ROADMAP.md) orders: a real-scale cost run (item 5), a
-temporal holdout eval that is not circular (item 4), and a Composer-runnable
-DAG (item 7; Cosmos / `KubernetesPodOperator`, superseding the `make`-shelling
-one). Each is a [BACKLOG.md](../BACKLOG.md) row with a trigger.
+The pipeline is complete on correctness, not on scale or on a scheduled cloud
+run. Three things would change this page, each ordered in
+[docs/ROADMAP.md](ROADMAP.md) with a [BACKLOG.md](../BACKLOG.md) trigger: a
+holdout evaluation on data the model never saw, which is not circular; a
+real-scale run with its cost measured; and a scheduled run on the managed
+scheduler rather than the local one.
