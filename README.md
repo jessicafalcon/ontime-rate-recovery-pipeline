@@ -8,7 +8,8 @@ This pipeline separates the three causes of a miss, hands the two the app
 caused back to engineering, and fixes the one it can: it learns when each user
 is actually reachable and recommends a send time inside their cohort's shared
 moment. It runs end to end on a laptop with no cloud account, and the same code
-runs on BigQuery and Spanner, ordered by the same Airflow DAG. The results
+runs on BigQuery and Spanner, ordered by an Airflow DAG run locally against
+those services (a scheduled Composer run is future work). The results
 block and the chart below are generated from pinned test data and regenerate
 byte for byte; no figure in them is typed by hand.
 
