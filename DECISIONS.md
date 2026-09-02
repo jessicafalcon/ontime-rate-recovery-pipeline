@@ -206,6 +206,26 @@ STOP). STOP for approval before implementing.*
   only for independent-process generation, which the sequential threaded-counter
   path does not need today (minimal-but-scalable: the renumber is a DECISIONS
   note for the parallel future, not code now).
+- **Delivered (2026-09-02).** `profile.shards` (required knob; tiny/medium set
+  1), the `large` profile (200k×30, 200 shards), `generate.py` split into
+  `_prepare` / `_generate_shard` / `iter_shards` (shard-major, arrival order
+  within a shard), and the streaming write path (`write_output_streaming` +
+  `writer.JsonlAppender` + `truth.TruthStream`) that bounds a sharded run to one
+  shard in memory; `seed()` branches shards==1 (in-memory, the proven path) vs
+  >1 (streaming). Byte-identity held (`make seed PROFILE=tiny` manifest match;
+  the three DuckDB goldens 0 differ; tiny/medium eval pins). The BigQuery cost
+  run is in `docs/RESULTS.md`. One measured surprise, recorded there and carried
+  to ROADMAP item 6: `raw.events` is unpartitioned, so the incremental re-run
+  does NOT prune the source scan (it re-reads all of raw, 19.45 GB — *more* than
+  the full build once the dynamic `insert_overwrite` merge is added). The output
+  marts ARE partitioned and prune (a one-`prompt_date` filter on `attribution`
+  scans 0 bytes). The run used the operator ADC (Owner), not the SA: bytes/slots
+  /cost are identity-independent, and the SA path is proven in Phase 9b/10.
+- **Rejected: 35 M pydantic `Event` objects in memory.** The original
+  `generate()` builds one list of every event, then sorts — tens of GB. The
+  streaming writer holds one shard (~200k events, ~60 MB) and appends per
+  upload-day; the in-memory `generate()` stays for tests and the equivalence pin
+  (streaming == in-memory at 2 shards, byte-for-byte).
 
 ### fix/scores-dim-current (after Phase 13, 2026-09-02)
 

@@ -952,8 +952,25 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **19** — `fix/scores-dim-current` (2026-09-02, ROADMAP item
-3) closed the last layering wart: `scores_send_time`'s `users` CTE now reads
+Open BACKLOG rows: **18** — `fix/large-profile` (2026-09-02, ROADMAP item 5, the
+last branch in the one-week cut) published the real-scale cost numbers: a `large`
+profile (200,000 users × 30 days, `shards` 200; ~35.5 M events / 11 GB) and the
+generator sharded into `profile.shards` derived `(seed + s·P_SHARD)` streams —
+an amendment to the one-`Random` invariant, committed alone first (DECISIONS),
+emit order preserved within a shard, counter ids threaded across shards, so
+`tiny` (MANIFEST match) and `medium` reproduce byte-for-byte at shard 1 and every
+DuckDB golden is untouched. The streaming writer (`write_output_streaming`,
+`JsonlAppender`, `TruthStream`) bounds a sharded run to one shard in memory. On
+BigQuery (ask-first, ≤ $5 cap, session ≈ $0.28 on the already-applied free-tier;
+state migrated to the GCS backend this session — ROADMAP item 2's deferred step,
+`tf-plan` 0/0): the full `--full-refresh` build scanned 18.33 GB / 1.37 M slot-ms
+/ ≈ $0.11 in 5 m 11 s (`PASS=126`, identical to tiny), per-model bytes and the
+mart partition-pruning proof are in `docs/RESULTS.md`. The measured item-6 case:
+raw is unpartitioned, so the incremental re-run re-scans all of raw (19.45 GB, no
+cheaper) — `fix/append-landing` is now backed by a number. Struck the real-scale
+BACKLOG row, marked ROADMAP item 5 landed, and re-confirmed Spanner/Composer
+clean (`Listed 0 items.`) at exit. Prior: `fix/scores-dim-current` (2026-09-02,
+ROADMAP item 3) closed the last layering wart: `scores_send_time`'s `users` CTE now reads
 `ref('dim_user_current')` for the open dim row instead of re-deriving it from
 `source('raw', 'dim_user')` — the mart already computes that open row (and the
 write-back already reads it). A zero-behaviour refactor (no spec amendment; the
