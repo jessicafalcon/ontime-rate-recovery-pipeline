@@ -328,9 +328,21 @@ def inject_clock_skew(
             )
 
 
+def _insert_seq(insert_id: str) -> int:
+    """The numeric emit sequence inside an `insert_id` (`e-<n>`). The tie-break
+    sorts on this, not the string: at `large` scale n exceeds the 7-digit pad, and
+    `"e-10000000" < "e-9999999"` lexicographically would reorder a shared-upload
+    tie. For tiny/medium (≤ 7 digits, equal width) numeric == lexicographic, so
+    the frozen output is unchanged; duplicates share the id and stay stable."""
+    return int(insert_id.rsplit("-", 1)[1])
+
+
 def arrival_order(events: list[Event]) -> list[Event]:
-    """Emit order is arrival order: upload time, then insert_id (the tie-break)."""
-    return sorted(events, key=lambda e: (e.server_upload_time, e.insert_id))
+    """Emit order is arrival order: upload time, then the numeric emit sequence
+    of insert_id (the tie-break)."""
+    return sorted(
+        events, key=lambda e: (e.server_upload_time, _insert_seq(e.insert_id))
+    )
 
 
 @dataclass
@@ -373,7 +385,7 @@ def _partition(user_ids: list[str], shards: int) -> list[list[str]]:
     ]
 
 
-def _prepare(profile: Profile) -> Prepared:
+def prepare(profile: Profile) -> Prepared:
     user_ids = [f"u-{i:06d}" for i in range(1, profile.users + 1)]
     blocks = _partition(user_ids, profile.shards)
     cohorts = sorted(profile.cohorts)
@@ -465,7 +477,7 @@ def generate(profile: Profile) -> Output:
     """In-memory over all shards: events are shard-major, each shard internally
     in arrival order. At shards == 1 that is the whole stream in arrival order —
     byte-identical to the old single-`Random` generator."""
-    prep = _prepare(profile)
+    prep = prepare(profile)
     events: list[Event] = []
     latent_users: list[LatentUser] = []
     causes: list[PromptCause] = []

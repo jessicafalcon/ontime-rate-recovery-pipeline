@@ -31,8 +31,10 @@ class TruthStream:
         self._users.write(shard.latent_users)
         self._prompts.write(shard.prompt_causes)
 
-    def close(self) -> int:
-        n = self._users.n + self._prompts.n
+    @property
+    def n_written(self) -> int:
+        return self._users.n + self._prompts.n
+
+    def close(self) -> None:
         self._users.close()
         self._prompts.close()
-        return n

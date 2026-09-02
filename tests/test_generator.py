@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from generator import cli, manifest, profiles, writer
-from generator.generate import _partition, arrival_order, generate
+from generator import cli, manifest, profiles, truth, writer
+from generator.generate import _partition, arrival_order, generate, iter_shards, prepare
 from generator.models import SKEW_MAX_MIN, Cause, Event, EventType
 from tests._gen import by_prompt, gen, tiny, types
 
@@ -214,6 +214,28 @@ def test_streaming_at_one_shard_reproduces_the_frozen_generator_keys(
     assert (
         cli.generated_drift(tmp_path, ROOT / "fixtures" / "tiny" / manifest.NAME) == []
     )
+
+
+def test_shards_draw_independent_streams() -> None:
+    """The `(seed + s·P_SHARD)` offset must actually decorrelate the shards. Under
+    a broken offset (P_SHARD == 0) the two equal half-blocks would draw the SAME
+    sequence, so aligned users across shards would share cohort choice and gauss —
+    identical latent centres position-by-position. This catches that."""
+    p = tiny(shards=2)  # 20 users → blocks [0:10], [10:20], aligned
+    shards = list(iter_shards(p, prepare(p)))
+    assert len(shards) == 2
+    c0 = [lu.reachable_center_local_hour for lu in shards[0].latent_users]
+    c1 = [lu.reachable_center_local_hour for lu in shards[1].latent_users]
+    assert c0 != c1  # equal lists ⇒ a shared stream ⇒ the offset did nothing
+
+
+def test_streaming_writers_refuse_fixtures() -> None:
+    """`JsonlAppender` and `TruthStream` carry the same fixtures refusal as
+    `write_jsonl`/`write_csv` — `make freeze` is the only writer under fixtures/."""
+    with pytest.raises(writer.FixtureWriteRefused):
+        writer.JsonlAppender(ROOT / "fixtures" / "tiny" / "raw" / "x.jsonl")
+    with pytest.raises(writer.FixtureWriteRefused):
+        truth.TruthStream(ROOT / "fixtures" / "tiny")
 
 
 def test_large_profile_shards_and_partitions_cleanly() -> None:

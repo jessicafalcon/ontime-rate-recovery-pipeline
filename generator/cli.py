@@ -12,11 +12,11 @@ import argparse
 import shutil
 import sys
 from collections import defaultdict
+from contextlib import ExitStack
 from pathlib import Path
 
 from generator import manifest, profiles, truth
-from generator.generate import Output, arrival_order, generate, iter_shards
-from generator.generate import _prepare as prepare_shards
+from generator.generate import Output, arrival_order, generate, iter_shards, prepare
 from generator.profiles import Profile
 from generator.writer import ROOT, JsonlAppender, write_csv, write_jsonl
 
@@ -49,24 +49,24 @@ def write_output_streaming(out: Path, profile: Profile) -> int:
     per-upload-day files, and its truth appended, so no run holds every event.
     Byte-equivalent to `write_output(generate(profile))` (shard-major, arrival
     order within a shard), pinned on a small 2-shard profile in test_generator."""
-    prep = prepare_shards(profile)
+    prep = prepare(profile)
     n = write_csv(out / "dims" / "dim_user.csv", prep.dims)
-    ts = truth.TruthStream(out)
-    day_writers: dict[str, JsonlAppender] = {}
-    for so in iter_shards(profile, prep):
-        for ev in arrival_order(so.events):
-            day = ev.server_upload_time.strftime("%Y-%m-%d")
-            w = day_writers.get(day)
-            if w is None:
-                w = day_writers[day] = JsonlAppender(
-                    out / "raw" / f"events_{day}.jsonl"
-                )
-            w.write_one(ev)
-        ts.write_shard(so)
-    for w in day_writers.values():
-        n += w.n
-        w.close()
-    n += ts.close()
+    with ExitStack() as stack:  # every appender closes even if a shard raises
+        ts = truth.TruthStream(out)
+        stack.callback(ts.close)
+        day_writers: dict[str, JsonlAppender] = {}
+        for so in iter_shards(profile, prep):
+            for ev in arrival_order(so.events):
+                day = ev.server_upload_time.strftime("%Y-%m-%d")
+                w = day_writers.get(day)
+                if w is None:
+                    w = day_writers[day] = JsonlAppender(
+                        out / "raw" / f"events_{day}.jsonl"
+                    )
+                    stack.callback(w.close)
+                w.write_one(ev)
+            ts.write_shard(so)
+        n += sum(w.n for w in day_writers.values()) + ts.n_written
     return n
 
 
