@@ -358,8 +358,9 @@ demo day, destroyed the same hour. Budget alerts do not stop spend — stated,
 with the optional billing-disable function as the real guardrail. Terraform
 state: a local `infra/terraform.tfstate` today — the GCS backend is
 bootstrap-documented and commented out (BACKLOG row; trigger: the first
-apply NOT torn down in the same session — the Phase 12 demo — and the
-Phase 12 exit for its confidentiality half); WIF for CI, never JSON keys.
+apply NOT torn down in the same session — the Phase 12 demo — and, for its
+confidentiality half, BEFORE the repository is made public —
+`fix/tf-remote-state`, ROADMAP item 2); WIF for CI, never JSON keys.
 
 Implemented in Phase 9a (`infra/`, behind `enable_*` toggles that default false;
 `project_id` the only required var; one least-privilege service account, with

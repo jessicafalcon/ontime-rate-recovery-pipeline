@@ -21,7 +21,7 @@ filled, the plan-first apply gate (`SAFE_ACTIONS`), the cloud-env allowlist
 (`CLOUD_ENV_ALLOW` / `in_cloud_namespace` / `REDIRECTION_NAMES`), the env
 allowlist (`ENV_ALLOW`) all live in `infra/cli.py`; `fix/landing-package`
 merged — `loader/` → `landing/`, `pipeline/cli.py` split out. The GCP stack on
-`ontime-rate-recovery`: the free-tier layer (two datasets, bucket, SA + grants,
+`<project_id>`: the free-tier layer (two datasets, bucket, SA + grants,
 budget) is UP; nothing billable is up (Spanner torn down 2026-08-31, `Listed 0
 items.`). Terraform runs on operator ADC, never the impersonated SA (§8). The
 `ontime-pipeline` SA is live and in state (Phase 10's apply imported it — no

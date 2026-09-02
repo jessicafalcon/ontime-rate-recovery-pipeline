@@ -24,16 +24,26 @@ logs
 **/.terraform.lock.hcl
 
 # Secrets must never be baked by `COPY . /opt/otr` (review rounds 1–2, #7/#1).
-# `.dockerignore` matches with filepath.Match — a leading `*` does NOT cross `/`,
-# so every pattern is `**/`-anchored to catch nested files (infra/.env,
-# infra/sa-key.json, orchestration/.env). None are committed; these mirror
-# CLAUDE.md's never-commit list.
+# Docker's matcher (moby/patternmatcher — NOT Go's filepath.Match, which has no
+# `**`) expands a leading `**/` to any depth INCLUDING the root, so one form
+# catches infra/.env, infra/sa-key.json, orchestration/.env and ./.env alike.
+# None are committed; the set is .gitignore's secrets block, `**/`-anchored —
+# equal by construction (tests/test_infra.py::test_gitignore_and_dockerignore_secret_globs_agree).
+# secrets:begin
 **/.env
 **/.env.*
+**/.envrc
 **/*.tfvars
+**/*.tfvars.json
 **/*.tfstate
 **/*.tfstate.*
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*.key
+**/*.p8
 **/*-key.json
 **/*-credentials.json
 **/credentials*
 **/service-account*.json
+# secrets:end

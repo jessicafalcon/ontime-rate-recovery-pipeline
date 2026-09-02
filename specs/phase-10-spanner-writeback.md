@@ -18,7 +18,7 @@ Main as it actually is: 9b merged (PR #13), `fix/tf-vars-argv` merged
 (`a7e22bf` — toggles reach Terraform only as command-line `VARS='name=value,…'`
 → argv `-var`; any `TF_VAR_*`/`TF_CLI_ARGS*` refuses every `tf-*`; the
 terraform child runs under an env allowlist). The GCP stack on
-`ontime-rate-recovery` was destroyed 2026-08-30 — nothing is up; the
+`<project_id>` was destroyed 2026-08-30 — nothing is up; the
 `ontime-pipeline` SA id is soft-deleted until ~2026-09-29, so any apply before
 then runs the undelete + import detour (docs/DEPLOYMENT.md). Terraform runs on
 operator ADC, never the impersonated SA (§8). Positions, numbered as posed:
@@ -203,7 +203,7 @@ make test && make lint && make review-gate SPEC=specs/phase-10-spanner-writeback
 | 5 | `tests/test_infra.py::test_spanner_module_is_count_gated_and_default_off`, `…::test_every_declared_resource_type_is_on_the_allowlist` (the gated modules' own exact allowlists), `…::test_spanner_grants_are_scoped_to_the_one_database_and_connection`, `…::test_spanner_custom_role_is_the_exact_data_plane_set` (Amendment E), `…::test_spanner_names_pin_the_python_constants`, `…::test_input_shape_validations_exist` + `…::test_region_is_validated_wherever_it_is_declared` (`region`, root and every module) (static), live `tf-plan` outputs (default: `No changes` — no spanner resource; toggled: only the module's), the dated `docs/DEPLOYMENT.md` lines, teardown apply output |
 | 6 | `tests/test_makefile.py::test_writeback_target_confirm_from_command_line_only`, `…::test_writeback_passes_target_and_project_as_one_literal`, `…::test_spanner_targets_pass_variables_as_one_literal`, `…::test_tf_apply_allow_destroy_from_command_line_only`, `tests/test_spanner_landing.py::test_int_spanner_cli_refuses_a_non_tiny_profile`, `…::test_cloud_landings_refuse_manifest_drift`, `…::test_spanner_clients_disable_the_builtin_metrics_exporter` (the whole tracked tree), `…::test_every_cloud_command_refuses_a_credential_in_the_env` (Amendments G → N2 → O1: six entry points × thirteen unlisted names — illustrative; the policy is the `CLOUD_ENV_ALLOW` allowlist over the closed domain), `…::test_conftest_scrub_uses_the_cloud_env_policy` (N2/O6 — a child pytest proves the scrub, and that the probe bites without it), `…::test_int_spanner_fixture_refuses_without_the_carried_gate` (origin re-checked through `infra.cli.confirmed`, the one predicate — round 3 #4), `tests/test_infra.py::test_apply_plans_first_and_refuses_destroys_without_allow_destroy` + `…::test_apply_refuses_unknown_actions_even_with_allow_destroy` (Amendments F → K → N1: the action allowlist, `SAFE_ACTIONS` pinned exactly), `…::test_cli_refuses_a_credential_in_the_env_loudly` (N2/O3/Q: unlisted names refuse — incl. the redirection class — the three listed settings pass), `…::test_cli_child_env_is_an_allowlist` (P3: the child's vendor names ⊆ the allowlist, via `in_cloud_namespace`), `…::test_cloud_env_domain_is_a_declared_closed_set` (O1/P1/Q — the declared cloud-env domain is a closed set: the enumerated refuse domain + `REDIRECTION_NAMES` pinned exactly, every vendor-declared name classified once, the scan a coverage aid); the audited table in Threat model |
 
-**Live status (2026-08-30, `ontime-rate-recovery`; re-proven 2026-08-31 —
+**Live status (2026-08-30, `<project_id>`; re-proven 2026-08-31 —
 02:30 UTC for Amendments E–F and 06:07 UTC for N3, those amendments carry
 the lines):** the live halves of
 Done-when 1, 4 and 5 ran after the ask-first apply:
@@ -216,13 +216,13 @@ Done-when 1, 4 and 5 ran after the ask-first apply:
   D** removed it; the toggled re-plan: `No changes. Your infrastructure
   matches the configuration.` (module = 8 resources).
 - As the SA (impersonated ADC): `spanner-load OK: tiny — 22 dim rows`;
-  `make test-int-spanner PROJECT=ontime-rate-recovery CONFIRM=yes` →
+  `make test-int-spanner PROJECT=<project_id> CONFIRM=yes` →
   **`4 passed in 221.01s`** (view rows ≡ seed; dbt's manifest resolved
   `dim_user` to `raw.dim_user_spanner`; three goldens byte-identical off the
   federated build; write-back twice, second writes 0, read-back hash ==
   `SEND_SCHEDULE_SHA256_TINY`); then `make writeback TARGET=spanner
-  PROJECT=ontime-rate-recovery CONFIRM=yes` → `writeback OK:
-  ontime-rate-recovery.ontime → spanner, 20 users, 0 written`.
+  PROJECT=<project_id> CONFIRM=yes` → `writeback OK:
+  <project_id>.ontime → spanner, 20 users, 0 written`.
 - Teardown, same session (operator ADC): `make tf-plan …
   VARS='operator_principal=user:<operator>'` → `Plan: 0 to add, 0 to change,
   8 to destroy` (exactly the module's), `make tf-apply … CONFIRM=yes` →
@@ -232,7 +232,7 @@ Done-when 1, 4 and 5 ran after the ask-first apply:
   default, operator grant kept): `No changes. Your infrastructure matches the
   configuration.` — zero Spanner resources (Done-when 5's first clause,
   round 2 #21). **Done-when 1–6 are met, live and offline** at that HEAD.
-- **Amendments E–F verified live (2026-08-31, `ontime-rate-recovery`):**
+- **Amendments E–F verified live (2026-08-31, `<project_id>`):**
   - F first, by accident: `make tf-apply … CONFIRM=yes
     VARS='enable_spanner=true'` (the applied `operator_principal` omitted)
     planned `9 to add, 0 to change, 1 to destroy` and was refused — `tf-apply:
@@ -247,7 +247,7 @@ Done-when 1, 4 and 5 ran after the ask-first apply:
     = the module's 11 permissions exactly (GA, no `updateDdl`); the database's
     IAM policy holds that one binding → the pipeline SA. As the SA under it:
     `spanner-load OK: tiny — 22 dim rows`; `make test-int-spanner …` →
-    **`4 passed in 239.42s`**; `writeback OK: ontime-rate-recovery.ontime →
+    **`4 passed in 239.42s`**; `writeback OK: <project_id>.ontime →
     spanner, 20 users, 0 written`.
   - Teardown (02:48 UTC, operator ADC): `make tf-apply … CONFIRM=yes
     VARS='enable_spanner=false,operator_principal=…' ALLOW_DESTROY=yes` →
@@ -801,7 +801,7 @@ closed set or the real type; no per-case patch is applied.
   ADC for `tf-*`, the SA for the data path): toggled apply `9 added`
   (the custom role re-created with no undelete detour), re-plan `No
   changes`; `spanner-load OK: tiny — 22 dim rows`; `test-int-spanner`
-  `4 passed in 248.70s`; `writeback OK: ontime-rate-recovery.ontime →
+  `4 passed in 248.70s`; `writeback OK: <project_id>.ontime →
   spanner, 20 users, 0 written`; toggle-flip `9 destroyed`, `Listed 0
   items.`, state 21, re-plan `No changes` — the `to_dict_list` adapter is
   the read path that ran. (A first teardown attempt failed at refresh: the

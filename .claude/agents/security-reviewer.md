@@ -26,8 +26,18 @@ When invoked:
       Federation only — a service-account key file anywhere is CRITICAL.
 - [ ] Nothing echoes a secret into logs, Makefile output, Airflow logs, or CI
       (`env` dumps, `set -x`, `terraform output` of sensitive values).
-- [ ] `.gitignore` still covers `.env*`, `data/`, `*.duckdb`, `*.tfvars`,
-      `*.tfstate*`, `.terraform/`, `.claude/settings.local.json`.
+- [ ] `.gitignore` still covers `data/`, `*.duckdb`, `.terraform/`,
+      `.claude/settings.local.json`, and its `# secrets:begin/end` block still
+      EQUALS `tests/test_infra.py::SECRET_GLOBS` (`.env*`, `.envrc`, tfvars,
+      tfstate, every private-key suffix, key/credential JSON) — the same block
+      `**/`-anchored in `.dockerignore`
+      (`test_gitignore_and_dockerignore_secret_globs_agree`, equality both ways).
+- [ ] No live account identifier in a record. `make check-docs` check 5 covers
+      the VALUE POSITIONS (`NAME=value`, `--flag value`, `gs://` buckets,
+      `<x>.ontime` qualifiers, addresses) across the tracked records; a bare
+      project id, address or repository slug in PROSE has no position and is
+      YOURS to catch — records name `<project_id>` / `<operator>` /
+      `<owner>/<repo>`. Pasted live-run output is redacted BEFORE it lands.
 
 **CI boundary:**
 - [ ] CI runs only offline targets (`lint`, `check-docs`, `test`, DuckDB dbt
@@ -44,9 +54,11 @@ When invoked:
       defaulting to `false`; nothing billable created by a plain `apply`.
 - [ ] Terraform state backend is GCS with versioning; state never in git
       (today: local `infra/terraform.tfstate`, gitignored — the BACKLOG row's
-      trigger is "the first apply NOT torn down in the same session" and the
-      Phase 12 exit; a prove-and-teardown session is accepted; FLAG a
-      long-lived Spanner apply planned without the migration).
+      trigger is "the first apply NOT torn down in the same session" and,
+      for the confidentiality half, BEFORE the repository is made public
+      (`fix/tf-remote-state`, ROADMAP item 2); a prove-and-teardown session
+      is accepted; FLAG a long-lived Spanner apply planned without the
+      migration, or a visibility flip planned before it).
 - [ ] Credential standard (CLAUDE.md Engineering contracts): every cloud
       command refuses any name in the cloud-env domain (O1/P1/Q: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read, and the transport-redirection class `REDIRECTION_NAMES` — an enumerated closed set, the vendor scan a coverage aid) outside
       `infra.cli.CLOUD_ENV_ALLOW`, names only (Amendments N2/O1/P1/Q;

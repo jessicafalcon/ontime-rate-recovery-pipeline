@@ -683,6 +683,37 @@ def ignored(tmp_path_factory: pytest.TempPathFactory) -> Callable[[str], bool]:
 
 
 PRIVATE_KEY_SUFFIXES = (".pem", ".p12", ".pfx", ".key", ".p8")
+# The ONE secret-glob set both never-commit lists carry (fix/public-release):
+# bare in .gitignore, `**/`-anchored in .dockerignore, each inside a
+# `# secrets:begin` / `# secrets:end` block that must EQUAL this tuple (order
+# included) — red in both stale directions. The key-file globs derive from
+# PRIVATE_KEY_SUFFIXES so the two lists in this file cannot disagree.
+SECRET_GLOBS = (
+    ".env",
+    ".env.*",
+    ".envrc",
+    "*.tfvars",
+    "*.tfvars.json",
+    "*.tfstate",
+    "*.tfstate.*",
+    *(f"*{suffix}" for suffix in PRIVATE_KEY_SUFFIXES),
+    "*-key.json",
+    "*-credentials.json",
+    "credentials*",
+    "service-account*.json",
+)
+
+
+def _secrets_block(path: Path) -> list[str]:
+    """The non-comment lines between the `# secrets:begin` / `# secrets:end`
+    markers — exactly one pair, or the file has lost its block."""
+    lines = path.read_text().splitlines()
+    begins = [i for i, ln in enumerate(lines) if ln.startswith("# secrets:begin")]
+    ends = [i for i, ln in enumerate(lines) if ln.startswith("# secrets:end")]
+    assert len(begins) == 1 and len(ends) == 1 and begins[0] < ends[0], path
+    return [ln for ln in lines[begins[0] + 1 : ends[0]] if not ln.startswith("#")]
+
+
 BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".duckdb", ".pyc", ".ico"}
 
 
@@ -1890,3 +1921,36 @@ def test_cli_module_runs() -> None:
     )
     assert res.returncode != 0
     assert "Traceback" not in res.stderr
+
+
+def test_gitignore_and_dockerignore_secret_globs_agree(
+    ignored: Callable[[str], bool],
+) -> None:
+    """fix/public-release: the exit audit found the two never-commit lists had
+    drifted apart while two records claimed they mirrored each other. Each
+    file's secrets block EQUALS SECRET_GLOBS (bare / `**/`-anchored) — a glob
+    added or dropped on one side alone is red — and the gitignore rules ignore a
+    nested instance of every class while still admitting the tracked
+    `terraform.tfvars.example`."""
+    assert _secrets_block(ROOT / ".gitignore") == list(SECRET_GLOBS)
+    assert _secrets_block(ROOT / ".dockerignore") == [f"**/{g}" for g in SECRET_GLOBS]
+    for rel in (
+        ".envrc",
+        "infra/.envrc",
+        "infra/.env.prod",
+        "infra/sa.pem",
+        "orchestration/x.p12",
+        "x.pfx",
+        "infra/sa.key",
+        "infra/sa.p8",
+        "infra/sa-key.json",
+        "landing/gcp-credentials.json",
+        "credentials.json",
+        "infra/service-account-prod.json",
+        "infra/prod.tfvars",
+        "infra/prod.tfvars.json",
+        "infra/terraform.tfstate",
+        "infra/terraform.tfstate.backup",
+    ):
+        assert ignored(rel), rel
+    assert not ignored("infra/terraform.tfvars.example")

@@ -23,11 +23,11 @@ module is filled (Phase 10), count-gated behind `enable_spanner` (default false)
 The plan-first apply gate (`SAFE_ACTIONS`), the cloud-env allowlist
 (`CLOUD_ENV_ALLOW` / `in_cloud_namespace` / `REDIRECTION_NAMES`), the env
 allowlist (`ENV_ALLOW`) all live in `infra/cli.py`. The GCP stack on
-`ontime-rate-recovery` (confirmed at phase entry): the free-tier layer (two
+`<project_id>` (confirmed at phase entry): the free-tier layer (two
 datasets, bucket, SA + grants, budget) is UP; **nothing billable is up** —
 `gcloud spanner instances list` → `Listed 0 items.`, `composer.googleapis.com`
 is `SERVICE_DISABLED` (no environment can exist). Terraform runs on operator
-ADC (`tukanbuild@gmail.com`), never the impersonated SA (§8). The
+ADC (`<operator>`), never the impersonated SA (§8). The
 `ontime-pipeline` SA is live and in state (no undelete detour until the next
 full `tf-destroy`).
 
@@ -254,7 +254,7 @@ Python mutation — no write path changes.)
   never baked (Credential standard). `make test-int-airflow` runs the BASE file
   alone and stays offline.
 - **Same-session apply/teardown, ask-first every step, operator ADC for
-  Terraform.** Every `tf-*` runs on operator ADC (`tukanbuild@gmail.com`), never
+  Terraform.** Every `tf-*` runs on operator ADC (`<operator>`), never
   the impersonated SA (§8, the ADC-picks-the-git-account trap — verify the login
   account); dbt-build and write-back run as the SA. EVERY applied toggle is
   carried in `VARS` (an omitted toggle plans the teardown, which `tf-apply`

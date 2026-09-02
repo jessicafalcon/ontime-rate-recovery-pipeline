@@ -46,6 +46,13 @@ Decided 2026-09-01: build **items 1, 2, 3 and 5** first, in that order. The
 reframed front door plus a real cost table changes the application more than
 anything else. Item 4 is next if a second week appears, then 7, then 6 and 8.
 
+The repository is made public only AFTER item 2 lands. `fix/public-release`
+(2026-09-01) did the redaction half — every record names `<project_id>` /
+`<operator>`, pinned by `make check-docs` — and the BACKLOG row **Terraform state
+is a local, unversioned `infra/terraform.tfstate`** holds the confidentiality half
+to the flip; the flip-day steps are the row **The public-repo GitHub-side settings
+are outside the tree**.
+
 ## Why this order
 
 - Item 1 before anything: every later PR's README text should already read as

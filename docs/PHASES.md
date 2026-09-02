@@ -373,7 +373,7 @@ read-only `fixtures/tiny/expected/`, re-asserts the pins, and asserts exactly
 two datasets exist. The CI leg (opt-in WIF apply) is a runbook step and a
 dated BACKLOG row, not a job. The partition-overwrite seam's BigQuery half is
 the adapter's native `insert_overwrite` (dbt-bigquery admits no custom
-strategy — Amendment U, §8). **Live 2026-08-30** on `ontime-rate-recovery`,
+strategy — Amendment U, §8). **Live 2026-08-30** on `<project_id>`,
 as the SA, after the undelete + import detour: `dbt-build OK: tiny/bigquery`
 (PASS=126, the DuckDB count) and `test-int-bigquery` `4 passed` (round 2 added a planted conflict on BigQuery) — the three
 goldens byte-identical, pins hold, two datasets. Phase 9's Done-when is met.
@@ -416,10 +416,10 @@ own exact allowlists. `dbt_build`'s one validated var seam
 (`dim_user_identifier`) + the manifest-proven swap (C). Every cloud command
 refuses a credential in the environment (G); `tf-apply` plans first and
 refuses a destroying plan without `ALLOW_DESTROY=yes` (F). Live
-2026-08-30 on `ontime-rate-recovery`: toggled apply, `spanner-load OK: tiny
+2026-08-30 on `<project_id>`: toggled apply, `spanner-load OK: tiny
 — 22 dim rows`, `make test-int-spanner` `4 passed` (view ≡ seed, manifest
 resolved the source to the view, three goldens byte-identical, write-back
-idempotent with the DuckDB hash), `writeback OK: ontime-rate-recovery.ontime
+idempotent with the DuckDB hash), `writeback OK: <project_id>.ontime
 → spanner, 20 users, 0 written`, then the same-day toggle-flip teardown
 (`8 destroyed`, `Listed 0 items.`, default plan `No changes`); no trial
 clock — the instance is `PROVISIONED` and bills from creation, so it is

@@ -81,7 +81,7 @@ non-deterministic and unasserted.
 
 <!-- phase-12-live-run: filled in the demo-day session (not a generated block) -->
 
-**Session: 2026-09-01** (`ontime-rate-recovery`, operator `tukanbuild@gmail.com`;
+**Session: 2026-09-01** (`<project_id>`, operator `<operator>`;
 `tf-*` on operator ADC, the build/write-back as the impersonated `ontime-pipeline`
 SA).
 
@@ -89,7 +89,7 @@ SA).
 
 The committed Phase 8b DAG, pointed at the cloud by
 `orchestration/docker-compose.cloud.yml` (`OTR_DAG_TARGET=bigquery`,
-`OTR_DAG_PROJECT=ontime-rate-recovery`, ADC mounted read-only), run once via
+`OTR_DAG_PROJECT=<project_id>`, ADC mounted read-only), run once via
 `airflow dags test pipeline 2026-01-13`:
 
 | Step | Result |
@@ -98,7 +98,7 @@ The committed Phase 8b DAG, pointed at the cloud by
 | `spanner-load` (dims, as SA) | `spanner-load OK: tiny — 22 dim rows` |
 | ADC inside the container | live BigQuery `select 1` → `1` (mounted impersonated SA authenticates) |
 | DAG import in real Airflow | `airflow dags list-import-errors` → none (dual-path import resolved) |
-| DAG run `pipeline 2026-01-13` | `dbt-build OK: tiny/bigquery` → `writeback OK: ontime-rate-recovery.ontime → spanner, 20 users, 20 written` → **`DagRun … state=success`** |
+| DAG run `pipeline 2026-01-13` | `dbt-build OK: tiny/bigquery` → `writeback OK: <project_id>.ontime → spanner, 20 users, 20 written` → **`DagRun … state=success`** |
 | Idempotent re-run (write-back) | `20 users, 0 written` |
 | **Spanner `send_schedule`** | **20 rows (= `SEND_SCHEDULE_ROWS_TINY`); hash `4dab2540…e491e` == `SEND_SCHEDULE_SHA256_TINY`** |
 
