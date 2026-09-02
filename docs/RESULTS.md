@@ -151,9 +151,9 @@ was migrated to the GCS backend this session (ROADMAP item 2's deferred step —
 
 | Stage | Value |
 |---|---|
-| Generator (local, single process, `shards` 200) | 41,908,258 records, ~11 GB JSONL, ≈ 13 min |
+| Generator (local, single process, `shards` 200) | 41,908,258 records, ~10.5 GB JSONL (raw events ~10 GB + truth 535 MB + dims 15 MB), ≈ 13 min |
 | GCS upload + BigQuery load (2 `LOAD` jobs, free) | 3.044 GB loaded; upload ~63 min on the laptop link |
-| `raw.events` | **35,498,190 rows / 3.03 GB** stored (columnar, from ~11 GB JSONL) |
+| `raw.events` | **35,498,190 rows / 3.03 GB** stored (columnar, from ~10 GB of events JSONL) |
 | `stg_events` (deduped) | 34,465,045 (≈ 1.03 M duplicate `insert_id` dropped) |
 | `stg_prompts` = `attribution` | 6,000,000 each (one per prompt×user) |
 | `features_user_hour` / `scores_send_time` / `ontime_rate_daily` | 2,086,202 / 200,000 / 91 cohort-days |
@@ -179,8 +179,10 @@ $6.25/TiB rate.
 | `ontime_rate_daily` | 0.185 | 2,541 |
 | `dim_user_current` | 0.008 | 2,509 |
 
-(Per-model rows fold each incremental model's temp-table build into the model;
-data/unit tests add the rest of the 165 jobs at ≤ 10 MB each.)
+(Per-model rows fold each incremental model's temp-table build into the model
+and sum to 11.78 GB across 40 build jobs; the other 6.55 GB is the 126
+data/unit-test jobs — `accepted_values` / `not_null` / `unique` / singular tests
+over the 6 M-row `attribution` and `stg_*` tables are real scans, not free.)
 
 ### Incremental re-run is NOT cheaper here — the item-6 case, measured
 

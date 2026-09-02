@@ -954,7 +954,8 @@ byte-identically. No pin, fixture, model, or `.tf` moved.
 
 Open BACKLOG rows: **18** — `fix/large-profile` (2026-09-02, ROADMAP item 5, the
 last branch in the one-week cut) published the real-scale cost numbers: a `large`
-profile (200,000 users × 30 days, `shards` 200; ~35.5 M events / 11 GB) and the
+profile (200,000 users × 30 days, `shards` 200; 35,498,190 events, ~10 GB events
+JSONL, 41.9 M records incl. truth/dims) and the
 generator sharded into `profile.shards` derived `(seed + s·P_SHARD)` streams —
 an amendment to the one-`Random` invariant, committed alone first (DECISIONS),
 emit order preserved within a shard, counter ids threaded across shards, so
