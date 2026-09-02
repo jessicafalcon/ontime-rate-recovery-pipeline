@@ -173,14 +173,19 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   back (`tf-apply … VARS='enable_spanner=false' ALLOW_DESTROY=yes`), no
   `MODULE`, no `-target`; an apply that omits `enable_spanner=true` while
   Spanner is up is REFUSED by the plan-first apply (DEPLOYMENT).
-  `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`/`tf-freeze` on
+  `cli.py` (validates `PROJECT`, gates `tf-apply`/`tf-destroy`/`tf-migrate-state`/`tf-freeze` on
   `CONFIRM=yes $(origin)`; toggles only as a command-line `VARS` → argv
   `-var`, refuses `TF_VAR_*`/`TF_CLI_ARGS*`, auto-loaded tfvars and
   any name in the cloud-env domain (O1/P1/Q: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read, and the transport-redirection class `REDIRECTION_NAMES` — an enumerated closed set pinned by a test, the vendor scan a coverage aid) outside `CLOUD_ENV_ALLOW` (the
   one allowlist every cloud command shares — Amendments N2/O1/Q; the plan-first
   apply's action allowlist `SAFE_ACTIONS` is N1/O2); runs terraform under an
   env allowlist (`ENV_ALLOW`, seven names — `fix/tf-vars-argv`)) drives
-  `make tf-validate|tf-plan|tf-apply|tf-destroy|tf-freeze`.
+  `make tf-validate|tf-plan|tf-apply|tf-destroy|tf-migrate-state|tf-freeze`.
+  State is a GCS remote backend (`fix/tf-remote-state`: the drafted `backend
+  "gcs"` in `main.tf` uncommented as a PARTIAL config — `prefix` only; the
+  `<project_id>-tfstate` bucket is bootstrapped by hand and supplied at init as
+  `-backend-config=bucket=<project>-tfstate`, so no id in the `.tf`;
+  `tf-migrate-state` runs `init -migrate-state` under the shared `tf-*` gates).
   `terraform.tfvars.example` only (never a `*.tfvars`); `.terraform.lock.hcl`
   is tracked (the provider pin); ADC/WIF, never a key. A pipeline dir — guarded
   by `test_truth_isolation.py`; the `.tf` tree is pinned byte-for-byte by
@@ -465,6 +470,20 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   the `workload_identity_provider` output. `operator_principal` (default null)
   adds one grant — `serviceAccountTokenCreator` ON the SA — so that principal
   can impersonate it for manual BigQuery builds
+- `make tf-migrate-state PROJECT=<id> CONFIRM=yes` *(`fix/tf-remote-state`)* —
+  migrates Terraform state onto the GCS remote backend (`infra/cli.py
+  migrate-state` runs `terraform init -migrate-state -input=false
+  -lockfile=readonly -force-copy -backend-config=bucket=<project>-tfstate`).
+  The versioned `<project_id>-tfstate` bucket is bootstrapped ONCE by hand
+  (a bucket cannot create its own backend — `docs/DEPLOYMENT.md` §
+  state-backend bootstrap, ask-first as the operator's ADC); the bucket is a
+  PARTIAL backend config derived from the validated `PROJECT`, so no id enters
+  the tracked `.tf`. Cloud-touching (writes state to GCS): `CONFIRM=yes`
+  command-line origin, `PROJECT` validated first, and the same env gates as
+  every `tf-*` (cloud-env refusal, no `TF_VAR_*` / auto-`tfvars`, `ENV_ALLOW`
+  child env); prints `tf-migrate-state OK: <project>`. Takes no `VARS` (`init`
+  has no toggles). Follow with `make tf-freeze CONFIRM=yes` for the `main.tf`
+  change. Ask first
 - `make tf-freeze CONFIRM=yes` *(Phase 9a)* — the ONLY writer of
   `infra/MANIFEST.sha256`, the content pin over every file Terraform loads
   under `infra/` (`*.tf`, `*.tf.json`) plus `.terraform.lock.hcl`, computed by
@@ -924,7 +943,17 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **21** — `fix/process-doc` (2026-09-01, ROADMAP item 1b) landed
+Open BACKLOG rows: **20** — `fix/tf-remote-state` (2026-09-01, ROADMAP item 2)
+moved Terraform state to a versioned GCS remote backend: the drafted `backend
+"gcs"` in `infra/main.tf` is uncommented as a PARTIAL config (no project id in
+the `.tf` — the bucket is a `-backend-config` from the validated `PROJECT`), a
+new gated target `make tf-migrate-state PROJECT=<id> CONFIRM=yes` runs `init
+-migrate-state` under the shared `tf-*` env gates, the versioned
+`<project_id>-tfstate` bucket is a hand-bootstrapped ask-first operator step
+(`docs/DEPLOYMENT.md`), and `tf-freeze` re-pinned the manifest. Struck the
+tfstate row (durable, recoverable state before a persisting apply), emptied
+`FUTURE_TARGETS` (the target is built), and re-confirmed Spanner clean at exit.
+`fix/process-doc` (2026-09-01, ROADMAP item 1b) landed
 `docs/PROCESS.md`, the INSIGHT closing pass and `tests/test_insight.py` (the
 essay's typed figures equal their pins; the six-decimal set is exact), struck
 the phase-log row and the INSIGHT value-parity row, opened one at exit (the

@@ -553,6 +553,30 @@ def test_tf_freeze_confirm_from_command_line_only() -> None:
     assert "--confirm 'yes' --confirm-origin 'environment'" in out
 
 
+@pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_tf_migrate_state_passes_project_and_confirm_as_literals(value: str) -> None:
+    """fix/tf-remote-state: tf-migrate-state reaches infra.cli with PROJECT as
+    one single-quoted token (validated as a GCP project-id, never a path) and
+    CONFIRM with `$(origin CONFIRM)` verbatim; it takes no VARS (`init` has no
+    toggles)."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for origin in ("cmdline", "env"):
+        out = _make_n(
+            "tf-migrate-state",
+            {"PROJECT": value} if origin == "cmdline" else {},
+            {"PROJECT": value} if origin == "env" else {},
+        )
+        assert f"infra.cli migrate-state --project {quoted}" in out, (origin, out)
+        assert "--vars" not in out
+        assert "pwned" not in out.replace(value, "")
+    out = _make_n("tf-migrate-state", {"PROJECT": "p", "CONFIRM": "yes"}, {})
+    assert "--confirm 'yes' --confirm-origin 'command line'" in out
+    out = _make_n("tf-migrate-state", {"PROJECT": "p"}, {"CONFIRM": "yes"})
+    assert "--confirm 'yes' --confirm-origin 'environment'" in out
+
+
 def test_tf_apply_allow_destroy_from_command_line_only() -> None:
     """Round 2 #3: tf-apply carries ALLOW_DESTROY with `$(origin ALLOW_DESTROY)`
     verbatim (unexported, one literal); an exported one reads `environment`

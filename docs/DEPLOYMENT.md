@@ -72,13 +72,16 @@ the rest of the service set on.
 
 ## One-time state-backend bootstrap
 
-Terraform's state lives locally by default, so a fresh clone plans with no
-setup. To share state (team / CI), bootstrap the GCS backend once — the bucket
-cannot create the backend that stores its own state, so it is **created by hand
-and never managed by Terraform** (distinct from the `module.gcs`
-artifacts/staging bucket `<project_id>-ontime`, which Terraform does manage and
-`tf-destroy` removes). The state bucket therefore survives `tf-destroy` on
-purpose, and is hardened to match the managed bucket:
+State lives remotely on GCS: the `backend "gcs"` block in `infra/main.tf` is
+committed (uncommented since `fix/tf-remote-state`, ROADMAP item 2), so the
+teardown path survives a lost laptop — an `enable_spanner=true` apply that
+persists beyond one session stays recoverable. The versioned state bucket is
+bootstrapped ONCE by hand — the bucket cannot create the backend that stores
+its own state, so it is **created by hand and never managed by Terraform**
+(distinct from the `module.gcs` artifacts/staging bucket `<project_id>-ontime`,
+which Terraform does manage and `tf-destroy` removes). The state bucket
+therefore survives `tf-destroy` on purpose, and is hardened to match the managed
+bucket. Ask-first, as the operator's own ADC (not the impersonated SA):
 
 ```
 gcloud storage buckets create gs://<project_id>-tfstate \
@@ -87,8 +90,22 @@ gcloud storage buckets create gs://<project_id>-tfstate \
 gcloud storage buckets update gs://<project_id>-tfstate --versioning
 ```
 
-Then uncomment the `backend "gcs"` block in `infra/main.tf` and
-`terraform -chdir=infra init -migrate-state`.
+Then migrate the local state onto it — the bucket is a **partial backend
+config** supplied at init time from the validated `PROJECT` (so no live project
+id sits in a tracked `.tf`), and the migration runs under the same gates as
+every `tf-*` (CONFIRM command-line origin, cloud-env refusal, no `TF_VAR_*` /
+auto-`tfvars`, allowlisted child env, `-lockfile=readonly`):
+
+```
+make tf-migrate-state PROJECT=<project_id> CONFIRM=yes   # init -migrate-state → GCS — ask first
+make tf-freeze CONFIRM=yes                               # re-pin the manifest for the main.tf change
+```
+
+After migration, `make tf-plan` / `make tf-apply` read the remote state. A
+fresh clone must run `make tf-migrate-state` (or `terraform -chdir=infra init
+-backend-config=bucket=<project_id>-tfstate`) before its first plan; until the
+backend is initialized locally, plan/apply ask for `terraform init` by design.
+`make tf-validate` is unaffected (it inits `-backend=false`).
 
 ## Apply and plan
 

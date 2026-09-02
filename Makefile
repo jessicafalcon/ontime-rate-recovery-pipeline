@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power readme writeback pipeline test-int-airflow bq-load test-int-bigquery spanner-load test-int-spanner tf-validate tf-plan tf-apply tf-destroy tf-freeze
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power readme writeback pipeline test-int-airflow bq-load test-int-bigquery spanner-load test-int-spanner tf-validate tf-plan tf-apply tf-destroy tf-migrate-state tf-freeze
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -254,6 +254,18 @@ tf-apply:
 
 tf-destroy:
 	uv run python -m infra.cli destroy --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --vars $(call _Q,$(value VARS)) --vars-origin '$(origin VARS)'
+
+# tf-migrate-state runs `terraform init -migrate-state` onto the GCS backend
+# (fix/tf-remote-state, ROADMAP item 2): the versioned <project_id>-tfstate
+# bucket is bootstrapped ONCE by hand (docs/DEPLOYMENT.md § state-backend
+# bootstrap — a bucket cannot create its own backend), the backend block is
+# uncommented in infra/main.tf, then this migrates the local state to it. The
+# bucket is supplied as a partial backend config from the validated PROJECT (no
+# id in the .tf); same gates as every tf-* — CONFIRM=yes command-line origin,
+# cloud-env refusal, no TF_VAR_*/auto-tfvars, allowlisted child env,
+# -lockfile=readonly. Cloud-touching (writes state to GCS): ask first.
+tf-migrate-state:
+	uv run python -m infra.cli migrate-state --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
 # The ONLY writer of infra/MANIFEST.sha256 — the content pin over every file
 # Terraform loads (*.tf, *.tf.json) and the provider lock (Amendments P/R): any

@@ -93,10 +93,10 @@ _PLANS = [DOCS / "ARCHITECTURE.md", DOCS / "PHASES.md", ROOT / "PROJECT_BRIEF.md
 # its real citations keep rename detection; the exemption is that doc's alone).
 # An exact closed set, pinned by tests/test_check_docs.py, which is also RED in
 # both stale directions — the target exists in the Makefile, or the doc no
-# longer names it — so an entry lives exactly as long as its citation.
-FUTURE_TARGETS: frozenset[tuple[str, str]] = frozenset(
-    {("docs/ROADMAP.md", "tf-migrate-state")}
-)
+# longer names it — so an entry lives exactly as long as its citation. Empty
+# since `fix/tf-remote-state` built `tf-migrate-state` (ROADMAP item 2); the
+# next item that names an unbuilt target adds its pair.
+FUTURE_TARGETS: frozenset[tuple[str, str]] = frozenset()
 
 
 def _docs() -> list[Path]:

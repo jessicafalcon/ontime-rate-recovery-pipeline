@@ -193,6 +193,49 @@ backend is a design change).*
   (d) `make tf-freeze CONFIRM=yes` re-pins `infra/MANIFEST.sha256` in the same
   commit as the `main.tf` change. STOP for approval before implementing.
 
+*Approved 2026-09-01; implemented same branch. The decisions the amendment
+did not settle:*
+
+- **Partial backend config, not a literal bucket.** The drafted block hardcoded
+  `bucket = "<project_id>-tfstate"`; a real id cannot sit in a tracked `.tf`
+  (the redaction standard, and the security-reviewer would flag it), so the
+  committed block carries `prefix` only and `make tf-migrate-state` supplies
+  `-backend-config=bucket=<project>-tfstate` from the validated `PROJECT` —
+  `PROJECT` stays the one project input, no id in the tree. Rejected: a
+  `terraform.tfvars`-style backend file (auto-loaded, gitignored, unpinned — the
+  exact class Amendment T refuses); a `<project_id>` placeholder literal in the
+  block (would need a sed step, and `terraform init` reads the block verbatim).
+- **`-force-copy`, so `CONFIRM=yes` is the only prompt.** `init -migrate-state`
+  otherwise asks interactively to copy the existing state; the make-level
+  `CONFIRM=yes` (command-line origin) is already the operator's explicit yes, and
+  every other `tf-*` runs `-input=false`. `-lockfile=readonly` keeps the pinned
+  provider lock un-rewritten (Amendment R), and `init` takes no `-var`, so
+  migrate-state carries no `VARS` (its subparser adds none). Rejected: leaving
+  the interactive prompt (a second confirmation the gate already covers, and it
+  would block `-input=false`).
+- **Remote state becomes the default; the local-plan convenience is the cost.**
+  With the block committed, a machine that has only run `tf-validate`
+  (`-backend=false`) must init the GCS backend before its first `tf-plan`
+  (documented in DEPLOYMENT). This is inherent to shared remote state and is the
+  intended end state — the whole point of the branch is that state outlives one
+  laptop. `tf-validate` stays offline and backend-free, and `make test` never
+  runs real terraform (the infra tests inject `_FakeRunner`), so CI is
+  unaffected. Rejected: keeping the block commented and running a bare
+  `terraform init -migrate-state` by hand (a hand-run terraform outside the
+  credential standard — the row's non-negotiable), or a `-backend=false` default
+  that leaves state local (does not restore the invariant).
+- **The gate is the existing `tf-*` machinery, one new command.** `migrate-state`
+  reuses `require_confirm`, `refuse_env_tf_vars`, `validate_project`,
+  `refuse_auto_tfvars`, `refuse_cloud_env` and the `ENV_ALLOW` child env
+  unchanged — the same allowlists every cloud command shares — so the boundary
+  contract needs no new closed set. The shared-gate tests iterate the new command
+  beside plan/apply/destroy; the argv (`init -migrate-state -input=false
+  -lockfile=readonly -force-copy -backend-config=bucket=<p>-tfstate`) and the
+  bucket derivation are pinned in `tests/test_infra.py`, PROJECT/CONFIRM literal
+  passing in `tests/test_makefile.py`.
+
+### fix/process-doc (after Phase 13, 2026-09-01)
+
 *The second half of ROADMAP item 1: the one page on the process, and INSIGHT
 read as a product statement.*
 

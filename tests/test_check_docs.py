@@ -62,9 +62,10 @@ def test_future_targets_set_is_exact_and_every_pair_is_live() -> None:
     exactly this set, and RED in both stale directions — the target landed in
     the Makefile, or the doc no longer names it — so an entry lives exactly as
     long as its citation (round 3: the one-sided pin let a dead entry linger)."""
-    assert check_docs.FUTURE_TARGETS == frozenset(
-        {("docs/ROADMAP.md", "tf-migrate-state")}
-    )
+    # Empty since `fix/tf-remote-state` built `tf-migrate-state` (the loop below
+    # would flag it as built otherwise). The next unbuilt target a living doc
+    # names re-populates it.
+    assert check_docs.FUTURE_TARGETS == frozenset()
     built = check_docs.make_targets(check_docs.ROOT)
     living = {p.relative_to(check_docs.ROOT).as_posix(): p for p in check_docs._docs()}
     for doc, target in check_docs.FUTURE_TARGETS:
