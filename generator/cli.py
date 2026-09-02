@@ -12,11 +12,13 @@ import argparse
 import shutil
 import sys
 from collections import defaultdict
+from contextlib import ExitStack
 from pathlib import Path
 
 from generator import manifest, profiles, truth
-from generator.generate import Output, generate
-from generator.writer import ROOT, write_csv, write_jsonl
+from generator.generate import Output, arrival_order, generate, iter_shards, prepare
+from generator.profiles import Profile
+from generator.writer import ROOT, JsonlAppender, write_csv, write_jsonl
 
 DATA_OUT = ROOT / "data" / "out"
 FIXTURES = ROOT / "fixtures"
@@ -28,7 +30,8 @@ def die(msg: str, code: int = 2) -> None:
 
 
 def write_output(out: Path, output: Output) -> int:
-    """raw/events_<upload date>.jsonl (the Phase 7 landing unit), dims/, truth/."""
+    """raw/events_<upload date>.jsonl (the Phase 7 landing unit), dims/, truth/.
+    In-memory: holds every event. Used at shards == 1 (tiny/medium/tests)."""
     by_day: dict[str, list] = defaultdict(list)
     for ev in output.events:  # already in arrival order
         by_day[ev.server_upload_time.strftime("%Y-%m-%d")].append(ev)
@@ -40,6 +43,33 @@ def write_output(out: Path, output: Output) -> int:
     return n
 
 
+def write_output_streaming(out: Path, profile: Profile) -> int:
+    """The memory-bounded write for a sharded run (shards > 1): dims once, then
+    each shard's events — arrival-ordered within the shard — appended to
+    per-upload-day files, and its truth appended, so no run holds every event.
+    Byte-equivalent to `write_output(generate(profile))` (shard-major, arrival
+    order within a shard), pinned on a small 2-shard profile in test_generator."""
+    prep = prepare(profile)
+    n = write_csv(out / "dims" / "dim_user.csv", prep.dims)
+    with ExitStack() as stack:  # every appender closes even if a shard raises
+        ts = truth.TruthStream(out)
+        stack.callback(ts.close)
+        day_writers: dict[str, JsonlAppender] = {}
+        for so in iter_shards(profile, prep):
+            for ev in arrival_order(so.events):
+                day = ev.server_upload_time.strftime("%Y-%m-%d")
+                w = day_writers.get(day)
+                if w is None:
+                    w = day_writers[day] = JsonlAppender(
+                        out / "raw" / f"events_{day}.jsonl"
+                    )
+                    stack.callback(w.close)
+                w.write_one(ev)
+            ts.write_shard(so)
+        n += sum(w.n for w in day_writers.values()) + ts.n_written
+    return n
+
+
 def seed(name: str) -> int:
     try:
         profile = profiles.load(name)
@@ -48,8 +78,10 @@ def seed(name: str) -> int:
     out = DATA_OUT / name
     if out.exists():
         shutil.rmtree(out)
-    output = generate(profile)
-    n = write_output(out, output)
+    if profile.shards == 1:
+        n = write_output(out, generate(profile))  # the proven in-memory path
+    else:
+        n = write_output_streaming(out, profile)  # bounded to one shard at a time
     files = manifest.compute(out)
     frozen = FIXTURES / name / manifest.NAME
     if frozen.exists():

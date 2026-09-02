@@ -158,6 +158,75 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/large-profile (after Phase 13, 2026-09-02)
+
+*ROADMAP item 5, the last branch in the one-week cut. This entry is the opening
+amendment, committed alone before any code (CLAUDE.md, Fix amendments: changing
+the generator's determinism mechanism — the single `Random` — is a design
+change to a determinism invariant; ROADMAP "Approvals recorded" requires the
+STOP). STOP for approval before implementing.*
+
+- **Amendment — the invariant is unchanged; its mechanism generalizes from one
+  stream to `shards` streams.** ARCHITECTURE §4 invariant 1 ("for all (seed,
+  profile), two generator runs are byte-identical") still holds. What changes is
+  the MECHANISM recorded in `generator/generate.py` ("one `Random`") and the
+  CLAUDE.md Repo map ("one `Random`"): the event stream is drawn from `shards`
+  independent streams instead of one, so a large profile can be generated
+  shard-by-shard with per-shard memory instead of holding ~35 M events at once.
+  The change:
+  (a) a NEW required profile field `shards: int` (`Field(gt=0)`; every knob is a
+  required field, `generator/profiles.py` — so `tiny.json` and `medium.json`
+  each gain `"shards": 1`, editing a profile input, never a fixture);
+  (b) user ids are partitioned into `shards` contiguous index-blocks; shard `s`
+  draws from `Random(profile.seed + s·P)` for a fixed large prime `P` — a
+  derived `(seed, shard)` seed, and at `s == 0` it is `Random(profile.seed)`
+  exactly;
+  (c) each shard consumes its stream in the SAME day-major / user-major order as
+  today over ITS users (cohort choice → latent draw → the per-day loop → the
+  three injectors, all per shard), so **emit order is preserved within a
+  shard**; the `dim_user` stream is untouched (its own `seed·7919+1` `Random`
+  over all users — dims never shard);
+  (d) counter ids (`insert_id`, `prompt_id`, `response_id`) are threaded across
+  shards in shard order (shard 0 starts at 0), so no id is renumbered and no
+  `prompt_id` reference is rewritten;
+  (e) at `shards == 1` there is one shard, its seed is `profile.seed + 0·P =
+  profile.seed`, it covers all users, and every draw, emit, injector and counter
+  is identical to today — so the frozen `tiny` and the seeded `medium` reproduce
+  BYTE-FOR-BYTE. Proof: `make seed PROFILE=tiny` matches `fixtures/tiny/
+  MANIFEST.sha256`; `make seed PROFILE=medium` output hashes unchanged, and the
+  `medium` MAE/coverage pins and the three DuckDB goldens (`attribution`,
+  `ontime_rate_daily`, `scores_send_time`) are untouched.
+  Not decided here (implementation, post-approval): the memory-bounded write
+  path for `shards > 1` (per-(shard, upload-day) files merged per upload day —
+  `large` is unfrozen, no golden, so only its within-file order must be
+  deterministic, not byte-identical to anything), and the `large` profile's
+  knobs. Alternatives rejected: (i) a separate `shards == 1` code path — a
+  strict special case is a denylist smell; the derived seed makes one path
+  degenerate exactly. (ii) a global id-renumber pass after all shards — needed
+  only for independent-process generation, which the sequential threaded-counter
+  path does not need today (minimal-but-scalable: the renumber is a DECISIONS
+  note for the parallel future, not code now).
+- **Delivered (2026-09-02).** `profile.shards` (required knob; tiny/medium set
+  1), the `large` profile (200k×30, 200 shards), `generate.py` split into
+  `_prepare` / `_generate_shard` / `iter_shards` (shard-major, arrival order
+  within a shard), and the streaming write path (`write_output_streaming` +
+  `writer.JsonlAppender` + `truth.TruthStream`) that bounds a sharded run to one
+  shard in memory; `seed()` branches shards==1 (in-memory, the proven path) vs
+  >1 (streaming). Byte-identity held (`make seed PROFILE=tiny` manifest match;
+  the three DuckDB goldens 0 differ; tiny/medium eval pins). The BigQuery cost
+  run is in `docs/RESULTS.md`. One measured surprise, recorded there and carried
+  to ROADMAP item 6: `raw.events` is unpartitioned, so the incremental re-run
+  does NOT prune the source scan (it re-reads all of raw, 19.45 GB — *more* than
+  the full build once the dynamic `insert_overwrite` merge is added). The output
+  marts ARE partitioned and prune (a one-`prompt_date` filter on `attribution`
+  scans 0 bytes). The run used the operator ADC (Owner), not the SA: bytes/slots
+  /cost are identity-independent, and the SA path is proven in Phase 9b/10.
+- **Rejected: 35 M pydantic `Event` objects in memory.** The original
+  `generate()` builds one list of every event, then sorts — tens of GB. The
+  streaming writer holds one shard (~200k events, ~60 MB) and appends per
+  upload-day; the in-memory `generate()` stays for tests and the equivalence pin
+  (streaming == in-memory at 2 shards, byte-for-byte).
+
 ### fix/scores-dim-current (after Phase 13, 2026-09-02)
 
 - **`scores_send_time` reads `ref('dim_user_current')` for the open dim row,

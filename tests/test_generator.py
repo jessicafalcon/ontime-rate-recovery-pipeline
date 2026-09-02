@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from generator import cli, manifest, writer
-from generator.generate import arrival_order
+from generator import cli, manifest, profiles, truth, writer
+from generator.generate import _partition, arrival_order, generate, iter_shards, prepare
 from generator.models import SKEW_MAX_MIN, Cause, Event, EventType
-from tests._gen import by_prompt, gen, types
+from tests._gen import by_prompt, gen, tiny, types
 
 ROOT = Path(__file__).parent.parent
 
@@ -155,6 +155,98 @@ def test_freeze_copies_out_to_fixtures_and_writes_manifest(
     dst = tmp_path / "fix" / "tiny"
     assert (dst / manifest.NAME).exists()
     assert manifest.matches(dst, dst / manifest.NAME)
+
+
+# ------------------------------------------- fix/large-profile: sharded streams
+
+
+def test_partition_is_contiguous_and_covers_every_user() -> None:
+    """Blocks are contiguous, in order, lose no user, and are near-equal —
+    so the (seed, shard) partition is a pure function of `users` and `shards`."""
+    users = [f"u-{i:06d}" for i in range(1, 21)]
+    for shards in (1, 2, 3, 7, 20):
+        blocks = _partition(users, shards)
+        assert len(blocks) == shards
+        assert [u for b in blocks for u in b] == users
+        sizes = [len(b) for b in blocks]
+        assert max(sizes) - min(sizes) <= 1
+
+
+def test_prompt_count_is_invariant_to_shard_count() -> None:
+    """Sharding repartitions the streams; it never adds or drops a prompt×user.
+    Every cause is still exercised, and there is one latent user per user."""
+    for shards in (1, 2, 5):
+        out = generate(tiny(shards=shards))
+        assert len(out.prompt_causes) == 20 * 7
+        assert len(out.latent_users) == 20
+        assert {c.cause for c in out.prompt_causes} == set(Cause)
+
+
+def test_streaming_write_equals_in_memory_at_two_shards(tmp_path: Path) -> None:
+    """The memory-bounded streaming writer is byte-for-byte the in-memory
+    writer at shards > 1: shard-major, arrival order within a shard."""
+    p = tiny(shards=2)
+    a, b = tmp_path / "mem", tmp_path / "stream"
+    cli.write_output(a, generate(p))
+    cli.write_output_streaming(b, p)
+    assert manifest.compute(a) == manifest.compute(b)
+    for rel in manifest.compute(a):
+        assert (a / rel).read_bytes() == (b / rel).read_bytes()
+
+
+def test_sharded_run_is_byte_identical_across_runs(tmp_path: Path) -> None:
+    """Invariant 1 holds under sharding: two streaming runs of a 3-shard
+    profile are byte-identical (derived seeds, no clock, sorted iteration)."""
+    p = tiny(shards=3)
+    a, b = tmp_path / "a", tmp_path / "b"
+    cli.write_output_streaming(a, p)
+    cli.write_output_streaming(b, p)
+    assert manifest.compute(a) == manifest.compute(b)
+
+
+def test_streaming_at_one_shard_reproduces_the_frozen_generator_keys(
+    tmp_path: Path,
+) -> None:
+    """At shards == 1 the streaming path reproduces the frozen generator keys
+    too, so the seed() branch (in-memory vs streaming) is a memory choice, not
+    a behaviour fork."""
+    cli.write_output_streaming(tmp_path, profiles.load("tiny"))
+    assert (
+        cli.generated_drift(tmp_path, ROOT / "fixtures" / "tiny" / manifest.NAME) == []
+    )
+
+
+def test_shards_draw_independent_streams() -> None:
+    """The `(seed + s·P_SHARD)` offset must actually decorrelate the shards. Under
+    a broken offset (P_SHARD == 0) the two equal half-blocks would draw the SAME
+    sequence, so aligned users across shards would share cohort choice and gauss —
+    identical latent centres position-by-position. This catches that."""
+    p = tiny(shards=2)  # 20 users → blocks [0:10], [10:20], aligned
+    shards = list(iter_shards(p, prepare(p)))
+    assert len(shards) == 2
+    c0 = [lu.reachable_center_local_hour for lu in shards[0].latent_users]
+    c1 = [lu.reachable_center_local_hour for lu in shards[1].latent_users]
+    assert c0 != c1  # equal lists ⇒ a shared stream ⇒ the offset did nothing
+
+
+def test_streaming_writers_refuse_fixtures() -> None:
+    """`JsonlAppender` and `TruthStream` carry the same fixtures refusal as
+    `write_jsonl`/`write_csv` — `make freeze` is the only writer under fixtures/."""
+    with pytest.raises(writer.FixtureWriteRefused):
+        writer.JsonlAppender(ROOT / "fixtures" / "tiny" / "raw" / "x.jsonl")
+    with pytest.raises(writer.FixtureWriteRefused):
+        truth.TruthStream(ROOT / "fixtures" / "tiny")
+
+
+def test_large_profile_shards_and_partitions_cleanly() -> None:
+    """The committed `large` profile is multi-shard and partitions its users
+    with no loss (a small guard that its knobs stay coherent)."""
+    p = profiles.load("large")
+    assert p.shards > 1
+    users = [f"u-{i:06d}" for i in range(1, p.users + 1)]
+    blocks = _partition(users, p.shards)
+    assert sum(len(b) for b in blocks) == p.users
+    assert all(b for b in blocks)  # no empty shard (shards <= users)
 
 
 # ------------------------------------------------- Phase 3: expected/ via freeze

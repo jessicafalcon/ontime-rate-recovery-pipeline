@@ -1,8 +1,18 @@
 """The seeded generator. `generate(profile)` is a pure function of the profile
-(which carries the seed): every draw derives from `profile.seed` — the event
-stream here, plus a separate `dim_user` stream seeded `profile.seed*7919+1` in
-`dims.py` (see DECISIONS) — with a fixed `SIM_START`, counter ids, sorted
-iteration everywhere, emit order = arrival order.
+(which carries the seed): every draw derives from `profile.seed`.
+
+Sharding (fix/large-profile): the event stream is drawn from `profile.shards`
+independent streams — shard `s` is `Random(profile.seed + s·P_SHARD)`, users
+partitioned into `shards` contiguous blocks. Each shard is drawn in the same
+day-major / user-major order as a single stream would be over its users (cohort
+choice → latent draw → the per-day loop → the three injectors), so **emit order
+is preserved within a shard**; counter ids thread across shards in shard order.
+At `shards == 1` there is one block, its seed is `profile.seed + 0·P_SHARD =
+profile.seed`, and every draw, emit and id is identical to the old single
+`Random(profile.seed)` — so `tiny` and `medium` reproduce byte-for-byte
+(DECISIONS, fix/large-profile). The `dim_user` stream is separate and never
+sharded (`profile.seed*7919+1` in `dims.py`). Fixed `SIM_START`, counter ids,
+sorted iteration everywhere.
 
 Cause-first: for every prompt×user the cause is drawn, then the events that
 cause implies are emitted; injectors run after and never change it (skew sets
@@ -10,6 +20,7 @@ cause implies are emitted; injectors run after and never change it (skew sets
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from random import Random
@@ -29,6 +40,10 @@ from generator.profiles import Profile
 from generator.response import responds
 
 SIM_START = datetime(2026, 1, 5, tzinfo=UTC)  # a Monday; fixed forever
+# The per-shard seed offset: shard s draws from Random(seed + s·P_SHARD). At
+# s == 0 this is Random(seed) exactly, which is what preserves byte-identity at
+# shards == 1 (Knuth's multiplicative constant, an arbitrary large odd stride).
+P_SHARD = 2_654_435_761
 CLIENT_SIDE = {
     EventType.prompt_opened,
     EventType.capture_started,
@@ -313,28 +328,103 @@ def inject_clock_skew(
             )
 
 
+def _insert_seq(insert_id: str) -> int:
+    """The numeric emit sequence inside an `insert_id` (`e-<n>`). The tie-break
+    sorts on this, not the string: at `large` scale n exceeds the 7-digit pad, and
+    `"e-10000000" < "e-9999999"` lexicographically would reorder a shared-upload
+    tie. For tiny/medium (≤ 7 digits, equal width) numeric == lexicographic, so
+    the frozen output is unchanged; duplicates share the id and stay stable."""
+    return int(insert_id.rsplit("-", 1)[1])
+
+
 def arrival_order(events: list[Event]) -> list[Event]:
-    """Emit order is arrival order: upload time, then insert_id (the tie-break)."""
-    return sorted(events, key=lambda e: (e.server_upload_time, e.insert_id))
+    """Emit order is arrival order: upload time, then the numeric emit sequence
+    of insert_id (the tie-break)."""
+    return sorted(
+        events, key=lambda e: (e.server_upload_time, _insert_seq(e.insert_id))
+    )
 
 
-def generate(profile: Profile) -> Output:
-    rng = Random(profile.seed)
-    ctx = _Ctx(profile=profile, rng=rng)
+@dataclass
+class _Counters:
+    """The three id counters, threaded across shards in shard order so ids stay
+    globally unique and contiguous (shard 0 starts at 0)."""
+
+    n_insert: int = 0
+    n_prompt: int = 0
+    n_response: int = 0
+
+
+@dataclass
+class Prepared:
+    """The per-run, cross-shard state built before any shard is generated: the
+    user blocks, one `Random` per shard, the cohort assignment, and the dims
+    (built once over all users from the separate dim stream)."""
+
+    user_ids: list[str]
+    blocks: list[list[str]]
+    rngs: list[Random]
+    cohort_of: dict[str, str]
+    dims: list[DimUserRow]
+    rows_of: dict[str, list[DimUserRow]]
+
+
+@dataclass
+class ShardOutput:
+    events: list[Event]  # this shard's events, in emit order (not yet arrival-sorted)
+    latent_users: list[LatentUser]
+    prompt_causes: list[PromptCause]
+
+
+def _partition(user_ids: list[str], shards: int) -> list[list[str]]:
+    """`shards` contiguous, near-equal blocks; block s is `[s·N/shards,
+    (s+1)·N/shards)`. At shards == 1 the one block is all users."""
+    n = len(user_ids)
+    return [
+        user_ids[(s * n) // shards : ((s + 1) * n) // shards] for s in range(shards)
+    ]
+
+
+def prepare(profile: Profile) -> Prepared:
     user_ids = [f"u-{i:06d}" for i in range(1, profile.users + 1)]
+    blocks = _partition(user_ids, profile.shards)
     cohorts = sorted(profile.cohorts)
-    cohort_of = {uid: rng.choice(cohorts) for uid in user_ids}
+    rngs = [Random(profile.seed + s * P_SHARD) for s in range(profile.shards)]
+    cohort_of: dict[str, str] = {}
+    for s, block in enumerate(blocks):
+        rng = rngs[s]
+        for uid in block:  # cohort choice is each shard's first draw
+            cohort_of[uid] = rng.choice(cohorts)
     dims = build_dims(profile, user_ids, cohort_of, SIM_START)
     rows_of: dict[str, list[DimUserRow]] = {uid: [] for uid in user_ids}
     for r in dims:
         rows_of[r.user_id].append(r)
+    return Prepared(user_ids, blocks, rngs, cohort_of, dims, rows_of)
+
+
+def _generate_shard(
+    profile: Profile,
+    block: list[str],
+    rng: Random,
+    prep: Prepared,
+    counters: _Counters,
+) -> ShardOutput:
+    """One shard, drawn in the same order a single stream would use over `block`:
+    latent draw → the per-day loop → the three injectors. Mutates `counters`."""
+    ctx = _Ctx(
+        profile=profile,
+        rng=rng,
+        n_insert=counters.n_insert,
+        n_prompt=counters.n_prompt,
+        n_response=counters.n_response,
+    )
     latent: dict[str, LatentUser] = {}
-    for uid in user_ids:
+    for uid in block:
         latent[uid] = LatentUser(
             user_id=uid,
-            cohort_id=cohort_of[uid],
+            cohort_id=prep.cohort_of[uid],
             reachable_center_local_hour=round(
-                (profile.cohorts[cohort_of[uid]] + rng.gauss(0, 4)) % 24, 3
+                (profile.cohorts[prep.cohort_of[uid]] + rng.gauss(0, 4)) % 24, 3
             ),
             reachable_width_hours=profile.reachable_width_hours,
         )
@@ -343,9 +433,11 @@ def generate(profile: Profile) -> Output:
     skewed: set[str] = set()
     for d in range(profile.days):
         day = SIM_START + timedelta(days=d)
-        for uid in user_ids:
+        for uid in block:
             user = latent[uid]
-            send, tz = _send_time(rows_of[uid], day, profile.cohorts[user.cohort_id])
+            send, tz = _send_time(
+                prep.rows_of[uid], day, profile.cohorts[user.cohort_id]
+            )
             local_hour = local_hour_of(send, tz)
             cause = assign_cause(profile, user, local_hour, rng)
             ctx.n_prompt += 1
@@ -364,13 +456,38 @@ def generate(profile: Profile) -> Output:
             if rng.random() < profile.late_arrival_rate:
                 late.add(pid)
             _organic(ctx, uid, user, day, tz)
-    events = ctx.events
-    inject_clock_skew(events, skewed, profile, rng)
-    inject_late_arrival(events, late, profile, rng)
-    inject_duplicates(events, profile, rng)
+    inject_clock_skew(ctx.events, skewed, profile, rng)
+    inject_late_arrival(ctx.events, late, profile, rng)
+    inject_duplicates(ctx.events, profile, rng)
+    counters.n_insert = ctx.n_insert
+    counters.n_prompt = ctx.n_prompt
+    counters.n_response = ctx.n_response
+    return ShardOutput(ctx.events, [latent[u] for u in block], causes)
+
+
+def iter_shards(profile: Profile, prep: Prepared) -> Iterator[ShardOutput]:
+    """Each shard in shard order, threading the id counters. The streaming
+    writer (`generator/cli.py`) consumes this so no run holds every event."""
+    counters = _Counters()
+    for s, block in enumerate(prep.blocks):
+        yield _generate_shard(profile, block, prep.rngs[s], prep, counters)
+
+
+def generate(profile: Profile) -> Output:
+    """In-memory over all shards: events are shard-major, each shard internally
+    in arrival order. At shards == 1 that is the whole stream in arrival order —
+    byte-identical to the old single-`Random` generator."""
+    prep = prepare(profile)
+    events: list[Event] = []
+    latent_users: list[LatentUser] = []
+    causes: list[PromptCause] = []
+    for so in iter_shards(profile, prep):
+        events.extend(arrival_order(so.events))
+        latent_users.extend(so.latent_users)
+        causes.extend(so.prompt_causes)
     return Output(
-        events=arrival_order(events),
-        dims=dims,
-        latent_users=[latent[u] for u in user_ids],
+        events=events,
+        dims=prep.dims,
+        latent_users=latent_users,
         prompt_causes=causes,
     )

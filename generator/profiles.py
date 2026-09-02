@@ -21,6 +21,9 @@ class Profile(BaseModel):
     seed: int
     users: int = Field(gt=0)
     days: int = Field(gt=0)
+    shards: int = Field(
+        gt=0
+    )  # independent (seed+s·P) streams; 1 == the single-Random path
     tz_mix: dict[str, float]  # IANA tz -> weight
     tz_change_rate: float = Field(ge=0, le=1)  # users with a second SCD2 row
     cohorts: dict[str, int]  # cohort_id -> local send hour

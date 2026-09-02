@@ -128,3 +128,93 @@ make-based DAG **cannot execute** on a Composer worker (no repo / `make` / venv 
 provisioned ~03:00→03:41 (~40 min, small env) — the session is well under $1,
 far below the $25 cap. Exact billing lags a few hours in the console; the
 meter-stopped proof is the two empty environment lists above.
+
+## Large profile — real-scale BigQuery cost (`fix/large-profile`, 2026-09-02)
+
+The one real-scale run: the `large` profile (200,000 users × 30 days, `shards`
+200) built on BigQuery to publish query cost, slot time and wall clock — the
+BACKLOG row **"No real-scale cost/performance numbers are published"** (ROADMAP
+item 5). Numbers are BigQuery job facts (`INFORMATION_SCHEMA.JOBS_BY_PROJECT`,
+`--dry_run` estimates); job ids and run timings are non-deterministic and
+unasserted. This section is hand-filled, not a generated block.
+
+**Session: 2026-09-02** (`<project_id>`, operator `<operator>`). The build ran
+on the operator ADC (project Owner), not the impersonated `ontime-pipeline` SA:
+bytes scanned, slot-ms and dollars are a function of the SQL, not the principal,
+so identity does not affect these numbers, and the SA-as-runner path is proven
+separately (Phase 9b `test-int-bigquery`, Phase 10/12 live). The free-tier layer
+(two datasets, staging bucket, SA, budget) was already applied; Terraform state
+was migrated to the GCS backend this session (ROADMAP item 2's deferred step —
+`tf-plan` after migration: `0 to add, 0 to change`).
+
+### Scale landed
+
+| Stage | Value |
+|---|---|
+| Generator (local, single process, `shards` 200) | 41,908,258 records, ~10.5 GB JSONL (raw events ~10 GB + truth 535 MB + dims 15 MB), ≈ 13 min |
+| GCS upload + BigQuery load (2 `LOAD` jobs, free) | 3.044 GB loaded; upload ~63 min on the laptop link |
+| `raw.events` | **35,498,190 rows / 3.03 GB** stored (columnar, from ~10 GB of events JSONL) |
+| `stg_events` (deduped) | 34,465,045 (≈ 1.03 M duplicate `insert_id` dropped) |
+| `stg_prompts` = `attribution` | 6,000,000 each (one per prompt×user) |
+| `features_user_hour` / `scores_send_time` / `ontime_rate_daily` | 2,086,202 / 200,000 / 91 cohort-days |
+
+Every model and all 86 data tests + 32 unit tests pass at scale
+(`PASS=126`, identical to `tiny`) — the pipeline gives the same shape of answer
+on 6 M prompts as on 140.
+
+### Full build (`--full-refresh`), bytes scanned per model
+
+dbt wall **5 min 11 s** (311 s); **165 query jobs, 18.33 GB processed, 18.68 GB
+billed, 1,369,557 slot-ms** (≈ 22.8 slot-minutes) ≈ **$0.11** at the on-demand
+$6.25/TiB rate.
+
+| Model | GB processed | slot-ms |
+|---|---|---|
+| `stg_prompts` | 3.188 | 129,494 |
+| `stg_events` | 3.043 | 710,955 |
+| `attribution` | 2.407 | 183,584 |
+| `features_user_hour` | 1.426 | 37,369 |
+| `ontime_retention` | 1.331 | 69,684 |
+| `scores_send_time` | 0.187 | 45,089 |
+| `ontime_rate_daily` | 0.185 | 2,541 |
+| `dim_user_current` | 0.008 | 2,509 |
+
+(Per-model rows fold each incremental model's temp-table build into the model
+and sum to 11.78 GB across 40 build jobs; the other 6.55 GB is the 126
+data/unit-test jobs — `accepted_values` / `not_null` / `unique` / singular tests
+over the 6 M-row `attribution` and `stg_*` tables are real scans, not free.)
+
+### Incremental re-run is NOT cheaper here — the item-6 case, measured
+
+A second build with no `--full-refresh` (incremental) scanned **19.45 GB** —
+*more* than the full build, not less: `stg_events` 3.672 GB, `stg_prompts`
+3.557 GB, above their full-build scans. The cause is measured, not guessed:
+**`raw.events` has no partitioning** (`timePartitioning: None`), so the
+incremental models' lookback filter on `server_upload_time` cannot prune the
+SOURCE scan — every run re-reads all of raw, and BigQuery's dynamic
+`insert_overwrite` adds a merge on top. The OUTPUT tables are partitioned and do
+prune (below); only the raw scan is unpruned.
+
+This is exactly the workload ROADMAP item 5 was meant to produce for item 6
+(`fix/append-landing`): make raw append-only and partitioned by upload date, so
+`THROUGH` becomes a partition predicate and the lookback filter prunes the raw
+scan from ~3.6 GB (full) to a window. The amendment for item 6 is now backed by
+a measured number, not a guess.
+
+### Partition pruning on the marts (`--dry_run`, free)
+
+The built tables ARE partitioned (`attribution` by `prompt_date`), and the
+partition column prunes cleanly:
+
+| Query on `ontime.attribution` (6 M rows) | Bytes it will process |
+|---|---|
+| `select count(distinct user_id)` (full) | 4,001,460 |
+| `… where prompt_date = date '2026-01-15'` (one partition) | **0** (metadata-pruned) |
+
+### Spend
+
+Query charges this session ≈ **$0.28** total (full build $0.11 + incremental
+$0.11 + an earlier incremental-over-stale-tables run $0.06 + cents of stat
+queries); `LOAD` jobs and `--dry_run` estimates are free; ~6 GB of BigQuery
+storage across raw + models is cents/day. Well under $1 — far below the ≤ $5
+cap. Exact billing lags a few hours in the console.

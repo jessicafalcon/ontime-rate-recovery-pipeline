@@ -1,8 +1,8 @@
 {
-  "seed": 2,
-  "users": 2000,
+  "seed": 3,
+  "users": 200000,
   "days": 30,
-  "shards": 1,
+  "shards": 200,
   "tz_mix": {"America/New_York": 0.4, "America/Los_Angeles": 0.2, "Europe/London": 0.25, "Asia/Tokyo": 0.15},
   "tz_change_rate": 0.05,
   "cohorts": {"c-morning": 8, "c-midday": 13, "c-evening": 20},
