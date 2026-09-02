@@ -24,11 +24,13 @@
 
 with users as (
 
+    -- the open dim_user row per user (its cohort), read from the mart that
+    -- already computes it (dim_user_current) rather than re-deriving the open
+    -- row from the raw source — a layering fix, output unchanged.
     select
         user_id,
         cohort_id
-    from {{ source('raw', 'dim_user') }}
-    where valid_to is null
+    from {{ ref('dim_user_current') }}
 
 ),
 
