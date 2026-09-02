@@ -924,11 +924,13 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **20** — `fix/process-doc` (2026-09-01, ROADMAP item 1b) landed
+Open BACKLOG rows: **21** — `fix/process-doc` (2026-09-01, ROADMAP item 1b) landed
 `docs/PROCESS.md`, the INSIGHT closing pass and `tests/test_insight.py` (the
 essay's typed figures equal their pins; the six-decimal set is exact), struck
-the phase-log row and the INSIGHT value-parity row, and re-confirmed Spanner
-clean. `fix/front-door` (2026-09-01, ROADMAP item 1a) retold
+the phase-log row and the INSIGHT value-parity row, opened one at exit (the
+"why trust it" claim is restated in three docs with no parity test), reframed
+the tfstate row from a confidentiality gate to a durability one (same trigger),
+and re-confirmed Spanner clean. `fix/front-door` (2026-09-01, ROADMAP item 1a) retold
 the README as a story with its one number generated inside the block, struck the
 structural-labels row (the counts now come from the pins), opened one (nothing
 executes the quickstart in CI), re-deferred the front-door row to item 1b
