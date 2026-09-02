@@ -55,7 +55,8 @@ them.
   the expected outputs — is read-only after the branch that froze it. Only
   `make freeze` writes it, it refuses without command-line `CONFIRM=yes`, and
   the review gate fails any change to a fixture unless the spec declares the
-  re-freeze and a DECISIONS entry says why. The generator's own writer refuses
+  re-freeze (a `Freeze:` line); `make freeze` itself also refuses without a
+  DECISIONS entry saying why. The generator's own writer refuses
   the directory outright (`FixtureWriteRefused`); a content manifest
   (`MANIFEST.sha256`) makes drift a red line on every load.
 - **Pins, not prose.** Every number a reader sees lives once, in
