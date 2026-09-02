@@ -359,8 +359,9 @@ with the optional billing-disable function as the real guardrail. Terraform
 state: a local `infra/terraform.tfstate` today — the GCS backend is
 bootstrap-documented and commented out (BACKLOG row; trigger: the first
 apply NOT torn down in the same session — the Phase 12 demo — and, for its
-confidentiality half, BEFORE the repository is made public —
-`fix/tf-remote-state`, ROADMAP item 2); WIF for CI, never JSON keys.
+confidentiality half, the next `tf-apply` session — `fix/tf-remote-state`,
+ROADMAP item 2; the repo went public 2026-09-01 ahead of it, the state never
+in any ref); WIF for CI, never JSON keys.
 
 Implemented in Phase 9a (`infra/`, behind `enable_*` toggles that default false;
 `project_id` the only required var; one least-privilege service account, with

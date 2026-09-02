@@ -48,12 +48,14 @@ landed as two PRs, 1a the README and 1b the process page — the one exception t
 reframed front door plus a real cost table changes the application more than
 anything else. Item 4 is next if a second week appears, then 7, then 6 and 8.
 
-The repository is made public only AFTER item 2 lands. `fix/public-release`
-(2026-09-01) did the redaction half — every record names `<project_id>` /
-`<operator>`, pinned by `make check-docs` — and the BACKLOG row **Terraform state
-is a local, unversioned `infra/terraform.tfstate`** holds the confidentiality half
-to the flip; the flip-day steps are the row **The public-repo GitHub-side settings
-are outside the tree**.
+The repository went public on 2026-09-01, after `fix/public-release` (the
+redaction half — every record names `<project_id>` / `<operator>`, pinned by
+`make check-docs`) and `fix/front-door` (1a), and BEFORE item 2 by the developer's
+decision: the local state file was never in any ref, so the flip exposed nothing.
+Item 2 keeps its place in the cut; the BACKLOG row **Terraform state is a local,
+unversioned `infra/terraform.tfstate`** now dates it to the next `tf-apply`
+session. The flip-day steps are recorded on the row **The public-repo GitHub-side
+settings are outside the tree**.
 
 ## Why this order
 

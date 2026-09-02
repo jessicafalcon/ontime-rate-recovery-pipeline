@@ -55,10 +55,11 @@ When invoked:
 - [ ] Terraform state backend is GCS with versioning; state never in git
       (today: local `infra/terraform.tfstate`, gitignored — the BACKLOG row's
       trigger is "the first apply NOT torn down in the same session" and,
-      for the confidentiality half, BEFORE the repository is made public
-      (`fix/tf-remote-state`, ROADMAP item 2); a prove-and-teardown session
-      is accepted; FLAG a long-lived Spanner apply planned without the
-      migration, or a visibility flip planned before it).
+      for the confidentiality half, the next `tf-apply` session (the repo
+      went public 2026-09-01 ahead of `fix/tf-remote-state`, ROADMAP item 2;
+      the state was never in any ref); a prove-and-teardown session is
+      accepted; FLAG a long-lived Spanner apply planned without the
+      migration).
 - [ ] Credential standard (CLAUDE.md Engineering contracts): every cloud
       command refuses any name in the cloud-env domain (O1/P1/Q: the `GOOGLE_`/`GCLOUD_`/`CLOUDSDK_`/`GCE_METADATA_`/`SPANNER_` prefixes, the `_EMULATOR_HOST` suffix, the prefix-less names the libraries read, and the transport-redirection class `REDIRECTION_NAMES` — an enumerated closed set, the vendor scan a coverage aid) outside
       `infra.cli.CLOUD_ENV_ALLOW`, names only (Amendments N2/O1/P1/Q;
