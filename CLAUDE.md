@@ -207,7 +207,11 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   table is a generated block), DEPLOYMENT.md (Phase 9a: bootstrap, cost
   table, operator permissions, teardown, the optional kill-switch), INSIGHT.md
   (Phase 13: the one-page honest read — tiny's negative simulated lift, the
-  simulation's circularity, the A/B as the real test), img/lift.svg (Phase 13:
+  simulation's circularity, the A/B as the real test; its hand-typed figures are pinned to
+  `tests/pins.py` by `tests/test_insight.py`, `fix/process-doc`), PROCESS.md
+  (`fix/process-doc`, ROADMAP item 1b: the one page on how it was built and
+  what kept it honest — the gate, the sweep, the frozen fixture, the pins,
+  the review loop, the assistant's part), img/lift.svg (Phase 13:
   the generated findings chart, `make readme`), ROADMAP.md (post-13: the ordered
   fix-branch list and the one-week cut, decided 2026-09-01 — a living doc, not
   a `check-docs` plan); all under `docs/`.
@@ -920,7 +924,11 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **22** — `fix/front-door` (2026-09-01, ROADMAP item 1a) retold
+Open BACKLOG rows: **20** — `fix/process-doc` (2026-09-01, ROADMAP item 1b) landed
+`docs/PROCESS.md`, the INSIGHT closing pass and `tests/test_insight.py` (the
+essay's typed figures equal their pins; the six-decimal set is exact), struck
+the phase-log row and the INSIGHT value-parity row, and re-confirmed Spanner
+clean. `fix/front-door` (2026-09-01, ROADMAP item 1a) retold
 the README as a story with its one number generated inside the block, struck the
 structural-labels row (the counts now come from the pins), opened one (nothing
 executes the quickstart in CI), re-deferred the front-door row to item 1b

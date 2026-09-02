@@ -152,8 +152,46 @@ annotated **Superseded by …** in place and never deleted.
   shell, not the repo. Rejected: leaving them as "informational" (a project id
   is the enumeration key for its bucket, SA and budget names, and the operator
   address ties a public repo to a named account). ([fix/public-release](#fixpublic-release-after-phase-13-2026-09-01))
+- **The process has a public one-page telling, `docs/PROCESS.md`** — this
+  section's mechanisms for a reader who has not seen the repo, including the
+  assistant's part and its recorded mistakes. ([fix/process-doc](#fixprocess-doc-after-phase-13-2026-09-01))
 
 ## Appendix — by phase
+
+### fix/process-doc (after Phase 13, 2026-09-01)
+
+*The second half of ROADMAP item 1: the one page on the process, and INSIGHT
+read as a product statement.*
+
+- **`docs/PROCESS.md` is one page, mechanism by mechanism, not a phase log.**
+  It names the loop (spec → gate → agents → one fix per commit → merge), the
+  three offline commands and what each refuses, what holds the data still (the
+  frozen fixture, the pins, the generated blocks, the truth grep, determinism),
+  the four report-only reviewers and the two rules the rounds taught, and what
+  the assistant did versus what the developer decided — with three of the
+  assistant's recorded mistakes named, because a process page that only lists
+  safeguards is the same red flag as a headline that only moves up. Rejected:
+  folding it into the README (the front door stays the story); pointing at
+  CLAUDE.md alone (an operating manual is not a telling — a stranger needs the
+  why in a page, not nine hundred lines of rules).
+- **INSIGHT's figures stay hand-typed, and a test pins them.** The essay is
+  the author's voice (Phase 13), so its numbers are not a generated block; the
+  BACKLOG trigger ("the next `docs/INSIGHT.md` edit") fired on this branch's
+  edit, and `tests/test_insight.py` now asserts every typed figure equals the
+  pin it renders from AND that the page's six-decimal figures are exactly the
+  pinned set — a new hand-typed number is red until it is pinned, the same
+  closed-set shape as every other guard. Rejected: a marker block inside the
+  essay (the writer handles one block per file and the prose interleaves the
+  numbers with their caveats); asserting only the figures present (an added
+  one would pass silently — the round-3 one-sided-pin lesson from
+  `FUTURE_TARGETS`).
+- **The INSIGHT pass was the closing paragraph, not a rewrite.** The page had
+  no phase language; what read as a log was the ending's roadmap shorthand
+  (item numbers, "superseding the `make`-shelling one"). It now says what
+  would change the page in a reader's words; the item numbers live in
+  ROADMAP alone. The README's "How it was built" and docs index point at
+  PROCESS; the closing paragraph no longer promises "the rest of this front
+  door".
 
 ### fix/front-door (after Phase 13, 2026-09-01)
 
