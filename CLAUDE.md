@@ -43,11 +43,17 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   the Phase 13 close a `fix/` branch that re-freezes a fixture also carries one
   (Workflow rules, "Fix amendments") — listed in `docs/ROADMAP.md`, not PHASES.
 - `generator/` — `models.py` (pydantic, schema source of truth), `profiles.py`
-  + `profiles/*.json` (every knob a required field), `generate.py` (cause-first,
-  one `Random`, `SIM_START` fixed), `response.py` (the one response function,
-  reused by Phase 6), `dims.py` (SCD2 seed), `writer.py` (canonical JSON/CSV;
-  refuses `fixtures/`), `manifest.py`, `truth.py` (the ONLY truth writer),
-  `cli.py` (`seed`, `freeze`). Truth goes to `<out>/truth/`, never read by the
+  + `profiles/*.json` (every knob a required field, incl. `shards` —
+  fix/large-profile), `generate.py` (cause-first, `shards` derived
+  `(seed, s·P_SHARD)` streams — one at `shards == 1`, emit order preserved
+  within a shard, byte-identical to the old single `Random` at `shards == 1`;
+  `SIM_START` fixed), `response.py` (the one response function,
+  reused by Phase 6), `dims.py` (SCD2 seed, its own un-sharded stream),
+  `writer.py` (canonical JSON/CSV — `JsonlAppender` the streaming form;
+  refuses `fixtures/`), `manifest.py`, `truth.py` (the ONLY truth writer;
+  `TruthStream` the streaming form), `cli.py` (`seed`, `freeze`;
+  `write_output` in-memory at `shards == 1`, `write_output_streaming`
+  per-shard for `shards > 1`). Truth goes to `<out>/truth/`, never read by the
   pipeline.
 - `dbt/` — the dbt project: `models/staging` (Phase 2), `models/attribution`
   (Phase 3), `models/marts` (Phase 4: `ontime_rate_daily`,
@@ -599,8 +605,11 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
 "Could this step give a different answer on a re-run?" If yes, justify it in
 DECISIONS.md or fix it.
 
-- Same `SEED` + profile → byte-identical generator output. Counter ids, a fixed
-  `sim_start`, no UUID, no wall clock, emit order = arrival order.
+- Same `SEED` + profile → byte-identical generator output. Counter ids
+  (threaded across shards in shard order), a fixed `sim_start`, no UUID, no wall
+  clock, emit order = arrival order within a shard (`profile.shards` derived
+  `(seed, s·P_SHARD)` streams; one stream, whole-run arrival order, at
+  `shards == 1` — DECISIONS fix/large-profile).
 - No clock on the data path. dbt models take `run_date` / `as_of` as vars;
   `current_timestamp()` / `now()` in a model is a bug. `computed_as_of` is
   data-derived (`max(client_event_time)` over the inputs).

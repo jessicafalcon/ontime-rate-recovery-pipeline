@@ -2,6 +2,7 @@
   "seed": 1,
   "users": 20,
   "days": 7,
+  "shards": 1,
   "tz_mix": {"America/New_York": 0.5, "Europe/London": 0.3, "Asia/Tokyo": 0.2},
   "tz_change_rate": 0.1,
   "cohorts": {"c-morning": 8, "c-evening": 20},

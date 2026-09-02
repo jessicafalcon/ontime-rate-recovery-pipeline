@@ -44,6 +44,30 @@ def write_jsonl(path: Path, records: Iterable[BaseModel]) -> int:
     return n
 
 
+class JsonlAppender:
+    """A JSONL file opened once and written across many calls, so a large,
+    sharded run never holds every record in memory. Same canonical bytes as
+    `write_jsonl` (`line`), same fixtures refusal. Caller closes it."""
+
+    def __init__(self, path: Path) -> None:
+        if _under_fixtures(path):
+            raise FixtureWriteRefused(f"refusing to write under fixtures/: {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._f = path.open("w", newline="\n")
+        self.n = 0
+
+    def write_one(self, record: BaseModel) -> None:
+        self._f.write(line(record))
+        self.n += 1
+
+    def write(self, records: Iterable[BaseModel]) -> None:
+        for r in records:
+            self.write_one(r)
+
+    def close(self) -> None:
+        self._f.close()
+
+
 def write_csv(path: Path, records: list[BaseModel]) -> int:
     if _under_fixtures(path):
         raise FixtureWriteRefused(f"refusing to write under fixtures/: {path}")
