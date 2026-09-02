@@ -13,17 +13,25 @@ terraform {
     }
   }
 
-  # The Terraform state backend is bootstrap-documented (docs/DEPLOYMENT.md), not
-  # applied from a fresh clone: a bucket cannot create the backend that stores
-  # its own state, and Terraform must never manage the bucket holding it. The
-  # state bucket (`<project_id>-tfstate`) is created by hand and is NOT one of the
-  # resources below — `module.gcs` manages a separate artifacts/staging bucket.
-  # Default backend is local, so `tf-plan` needs no setup. After the one-time
-  # bootstrap, uncomment and `terraform init -migrate-state`:
-  # backend "gcs" {
-  #   bucket = "<project_id>-tfstate"
-  #   prefix = "terraform/state"
-  # }
+  # Remote, versioned state on GCS (fix/tf-remote-state, ROADMAP item 2): the
+  # teardown path survives a lost laptop, so an `enable_spanner=true` apply that
+  # persists beyond one session is recoverable. The state bucket is
+  # bootstrap-documented (docs/DEPLOYMENT.md § state-backend bootstrap), NOT
+  # managed here: a bucket cannot create the backend that stores its own state,
+  # and Terraform must never manage the bucket holding it. It is created by hand
+  # (`<project_id>-tfstate`) and is NOT one of the resources below — `module.gcs`
+  # manages a separate artifacts/staging bucket.
+  #
+  # PARTIAL config: the `bucket` is NOT written here (no live project id in a
+  # tracked `.tf` — the redaction standard; PROJECT stays the one project
+  # input). It is supplied at init time by `make tf-migrate-state PROJECT=<id>`
+  # as `-backend-config=bucket=<id>-tfstate`, derived from the validated
+  # PROJECT. `tf-validate` inits `-backend=false`, so it ignores this block;
+  # `tf-plan`/`tf-apply` read the remote state once migrated (before the first
+  # migrate/init, they ask for `terraform init` — the documented flow).
+  backend "gcs" {
+    prefix = "terraform/state"
+  }
 }
 
 provider "google" {

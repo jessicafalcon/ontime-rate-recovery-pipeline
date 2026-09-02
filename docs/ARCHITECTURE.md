@@ -356,12 +356,12 @@ creation (no free-trial instance — Phase 10 Amendment M), `enable_spanner`
 toggle, applied and torn down in one session, dates in `docs/DEPLOYMENT.md`. Composer: `enable_composer` toggle, applied once on
 demo day, destroyed the same hour. Budget alerts do not stop spend — stated,
 with the optional billing-disable function as the real guardrail. Terraform
-state: a local `infra/terraform.tfstate` today — the GCS backend is
-bootstrap-documented and commented out (BACKLOG row; trigger: the first
-apply NOT torn down in the same session — the Phase 12 demo — and, for its
-confidentiality half, the next `tf-apply` session — `fix/tf-remote-state`,
-ROADMAP item 2; the repo went public 2026-09-01 ahead of it, the state never
-in any ref); WIF for CI, never JSON keys.
+state: a versioned GCS remote backend (`fix/tf-remote-state`, ROADMAP item 2 —
+the `backend "gcs"` block in `infra/main.tf` is a PARTIAL config, the
+`<project_id>-tfstate` bucket bootstrapped by hand and supplied at init from the
+validated `PROJECT`, migrated via `make tf-migrate-state`), so a lost local
+working copy no longer strands a persisting `enable_spanner=true` stack; WIF for
+CI, never JSON keys.
 
 Implemented in Phase 9a (`infra/`, behind `enable_*` toggles that default false;
 `project_id` the only required var; one least-privilege service account, with

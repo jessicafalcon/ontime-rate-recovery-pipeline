@@ -1,11 +1,21 @@
 """`make tf-<cmd> [PROJECT=<id>] [CONFIRM=yes]`, cmd one of validate | plan | apply |
-destroy | freeze.
+destroy | migrate-state | freeze.
 
 One entry point validates PROJECT (a GCP project-id shape) before deriving the
 `-var`, then runs terraform with `-chdir=infra` (a fixed dir, never user input):
 tf-validate — offline: `init -backend=false -lockfile=readonly` + `validate` +
               `fmt -check`. No auth; the pinned lock is never rewritten.
 tf-plan     — reads GCP APIs (ADC/WIF); shows the diff. Non-destructive.
+tf-migrate-state — `init -migrate-state` onto the GCS backend (fix/tf-remote-state):
+              moves the local state to the versioned `<project>-tfstate` bucket
+              (bootstrapped by hand — a bucket cannot create its own backend —
+              docs/DEPLOYMENT.md § state-backend bootstrap). The bucket is a
+              PARTIAL backend config supplied here as
+              `-backend-config=bucket=<project>-tfstate` (no live id in the
+              `.tf`); `-force-copy` so the CONFIRM gate is the only prompt, and
+              `-lockfile=readonly` so the pinned provider lock is never
+              rewritten. Cloud-touching (writes state to GCS): CONFIRM=yes from
+              the command line only, same env gates as every tf-* below.
 tf-apply    — creates cloud resources. CONFIRM=yes from the command line only.
               Plans FIRST (`plan -out`), reads the plan back (`show -json`) and
               applies it only if every planned action is inside SAFE_ACTIONS —
@@ -55,8 +65,12 @@ PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]\Z")
 # apply/destroy touch the cloud (apply is cost, destroy is destructive); both are
 # gated on CONFIRM=yes from the command line.
 CLOUD_MUTATING = ("apply", "destroy")
+# migrate-state writes state to the GCS backend (cloud-touching): same CONFIRM
+# gate as apply/destroy, checked inside tf().
+CONFIRM_IN_TF = CLOUD_MUTATING + ("migrate-state",)
 # tf-freeze overwrites the committed manifest: same gate, same origin rule.
-CONFIRM_GATED = CLOUD_MUTATING + ("freeze",)
+# CONFIRM_GATED is which subparsers main() wires a --confirm arg onto.
+CONFIRM_GATED = CONFIRM_IN_TF + ("freeze",)
 _TF = ["terraform", f"-chdir={INFRA_DIR}"]
 
 
@@ -539,6 +553,30 @@ def _apply(
             os.unlink(plan_path)
 
 
+def _migrate(runner: Runner, project: str) -> int:
+    """`init -migrate-state` onto the GCS backend (fix/tf-remote-state). The
+    bucket is a PARTIAL backend config derived from the validated PROJECT (never
+    written in the `.tf`); `-force-copy` so the make-level CONFIRM gate is the
+    only prompt; `-lockfile=readonly` so init can never rewrite the pinned
+    provider lock (Amendment R); `-input=false` so no other prompt blocks."""
+    argv = _TF + [
+        "init",
+        "-migrate-state",
+        "-input=false",
+        "-lockfile=readonly",
+        "-force-copy",
+        f"-backend-config=bucket={project}-tfstate",
+    ]
+    rc = _run(runner, argv, "tf-migrate-state")
+    if rc is None:
+        return 1  # missing binary — already reported
+    if rc != 0:
+        print(f"tf-migrate-state FAIL: {project}")
+        return 1
+    print(f"tf-migrate-state OK: {project}")
+    return 0
+
+
 def tf(
     cmd: str,
     project: str = "",
@@ -550,7 +588,7 @@ def tf(
     allow_destroy: str = "",
     allow_destroy_origin: str = "",
 ) -> int:
-    if cmd in CLOUD_MUTATING:
+    if cmd in CONFIRM_IN_TF:
         require_confirm(cmd, confirm, origin)
     refuse_env_tf_vars(cmd)  # every command, validate too (it evaluates validations)
     if cmd == "validate":
@@ -570,6 +608,8 @@ def tf(
     validate_project(project)
     refuse_auto_tfvars(cmd)
     refuse_cloud_env(f"tf-{cmd}")
+    if cmd == "migrate-state":
+        return _migrate(runner, project)  # `init`, not `plan`/`apply` — no -var
     var = ["-var", f"project_id={project}", *parse_vars(vars_, vars_origin)]
     if cmd == "apply":
         return _apply(runner, var, project, allow_destroy, allow_destroy_origin)
@@ -591,10 +631,13 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("validate")
-    for name in ("plan", "apply", "destroy", "freeze"):
+    for name in ("plan", "apply", "destroy", "migrate-state", "freeze"):
         p = sub.add_parser(name)
         if name != "freeze":
             p.add_argument("--project", default="")
+        # migrate-state takes no toggles (`init` rejects -var); only plan/apply/
+        # destroy carry VARS.
+        if name in CLOUD_MUTATING + ("plan",):
             p.add_argument("--vars", default="")
             p.add_argument("--vars-origin", default="")
         if name in CONFIRM_GATED:
@@ -610,6 +653,8 @@ def main(argv: list[str] | None = None) -> int:
         return freeze(a.confirm, a.confirm_origin)
     if a.cmd == "plan":
         return tf("plan", a.project, vars_=a.vars, vars_origin=a.vars_origin)
+    if a.cmd == "migrate-state":
+        return tf("migrate-state", a.project, a.confirm, a.confirm_origin)
     if a.cmd == "apply":
         return tf(
             "apply",

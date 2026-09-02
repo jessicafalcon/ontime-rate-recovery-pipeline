@@ -1331,7 +1331,7 @@ def test_cli_requires_confirm_origin(scratch_infra: Path) -> None:
     """tf-apply/tf-destroy refuse unless CONFIRM=yes has command-line origin — the
     guard runs BEFORE the runner, so the fake is never called on a refusal. (The
     fake is what lets `require_confirm delete-call` be a safe mutation line.)"""
-    for cmd in ("apply", "destroy"):
+    for cmd in ("apply", "destroy", "migrate-state"):
         for confirm, origin in (
             ("yes", "environment"),
             ("yes", "file"),
@@ -1350,7 +1350,7 @@ def test_cli_requires_confirm_origin(scratch_infra: Path) -> None:
 
 def test_cli_validates_before_running(scratch_infra: Path) -> None:
     """Invariant 6's ordering half: a bad PROJECT dies before the runner runs."""
-    for cmd in ("plan", "apply", "destroy"):
+    for cmd in ("plan", "apply", "destroy", "migrate-state"):
         fake = _FakeRunner()
         with pytest.raises(SystemExit) as e:
             cli.tf(cmd, "../x", "yes", "command line", runner=fake)
@@ -1385,6 +1385,67 @@ def test_cli_builds_the_expected_argv(scratch_infra: Path) -> None:
     assert apply_call[2:] == ["apply", "-input=false", out]
     assert "-auto-approve" not in apply_call and "-var" not in apply_call
     assert not Path(out).exists()  # the plan file (holds var values) is removed
+
+
+def test_cli_migrate_state_argv_and_bucket(
+    scratch_infra: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """fix/tf-remote-state: `tf-migrate-state` runs `init -migrate-state` onto
+    the GCS backend with the bucket a PARTIAL config derived from the validated
+    PROJECT (`<project>-tfstate`, never in the tracked `.tf`), `-force-copy` (the
+    CONFIRM gate is the only prompt) and `-lockfile=readonly` (the pinned
+    provider lock is never rewritten); no `-var` (`init` takes none). A nonzero
+    terraform exit is a FAIL line, a missing binary a clean FAIL."""
+    fake = _FakeRunner()
+    assert cli.tf("migrate-state", "my-proj", "yes", "command line", runner=fake) == 0
+    argv = fake.calls[0]
+    assert argv[2:] == [
+        "init",
+        "-migrate-state",
+        "-input=false",
+        "-lockfile=readonly",
+        "-force-copy",
+        "-backend-config=bucket=my-proj-tfstate",
+    ]
+    assert "-var" not in argv
+    assert "tf-migrate-state OK: my-proj" in capsys.readouterr().out
+    # the child gets the ENV_ALLOW allowlist, like every tf-* (the argv is the
+    # whole input by construction)
+    assert set(fake.envs[0]) <= set(cli.ENV_ALLOW)
+    fake = _FakeRunner(rc=1)
+    assert cli.tf("migrate-state", "my-proj", "yes", "command line", runner=fake) == 1
+    assert "tf-migrate-state FAIL: my-proj" in capsys.readouterr().out
+
+
+def test_cli_main_dispatches_migrate_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """main() routes the `migrate-state` subcommand to tf() with the project and
+    the confirm/origin pair — and adds NO --vars arg (it takes no toggles)."""
+    seen: list[tuple[str, str, str, str]] = []
+
+    def spy(
+        cmd: str, project: str = "", confirm: str = "", origin: str = "", **kw: str
+    ) -> int:
+        seen.append((cmd, project, confirm, origin))
+        return 0
+
+    monkeypatch.setattr(cli, "tf", spy)
+    assert (
+        cli.main(
+            [
+                "migrate-state",
+                "--project",
+                "my-proj",
+                "--confirm",
+                "yes",
+                "--confirm-origin",
+                "command line",
+            ]
+        )
+        == 0
+    )
+    assert seen == [("migrate-state", "my-proj", "yes", "command line")]
+    with pytest.raises(SystemExit):  # no --vars on this subparser
+        cli.main(["migrate-state", "--project", "my-proj", "--vars", "x=1"])
 
 
 def test_cli_vars_are_the_only_toggle_path(
@@ -1450,7 +1511,7 @@ def test_cli_vars_are_the_only_toggle_path(
     for name in ("TF_VAR_enable_composer", "TF_CLI_ARGS_apply", "TF_CLI_ARGS"):
         monkeypatch.setenv(name, "x")
         assert cli.env_tf_vars() == [name]
-        for cmd in ("plan", "apply", "destroy", "validate"):
+        for cmd in ("plan", "apply", "destroy", "migrate-state", "validate"):
             fake = _FakeRunner()
             with pytest.raises(SystemExit) as e:
                 cli.tf(cmd, "my-proj", "yes", "command line", runner=fake)
@@ -1551,7 +1612,7 @@ def test_cli_refuses_a_credential_in_the_env_loudly(
     for name in UNLISTED_CLOUD_ENV:
         monkeypatch.setenv(name, "x")
         assert cli.unlisted_cloud_env() == [name]
-        for cmd in ("plan", "apply", "destroy"):
+        for cmd in ("plan", "apply", "destroy", "migrate-state"):
             fake = _FakeRunner()
             with pytest.raises(SystemExit) as e:
                 cli.tf(cmd, "my-proj", "yes", "command line", runner=fake)
@@ -1882,7 +1943,7 @@ def test_cli_refuses_auto_loaded_tfvars(
     for name in ("terraform.tfvars", "toggles.auto.tfvars", "t.auto.tfvars.json"):
         (tree / name).write_text("enable_spanner = true\n")
         assert cli.auto_tfvars() == [name]
-        for cmd in ("plan", "apply", "destroy"):
+        for cmd in ("plan", "apply", "destroy", "migrate-state"):
             fake = _FakeRunner()
             with pytest.raises(SystemExit) as e:
                 cli.tf(cmd, "my-proj", "yes", "command line", runner=fake)
@@ -1910,6 +1971,12 @@ def test_cli_missing_terraform_is_a_clean_fail(
     assert "tf-validate FAIL: terraform not on PATH" in capsys.readouterr().out
     assert cli.tf("plan", "my-proj", runner=missing) == 1
     assert "tf-plan FAIL: terraform not on PATH" in capsys.readouterr().out
+    # migrate-state carries its own `rc is None → return 1` clean-fail guard in
+    # _migrate (fix/tf-remote-state); without this, `return 0` there would report
+    # a silent exit-0 success while terraform never ran and no state migrated.
+    mig = cli.tf("migrate-state", "my-proj", "yes", "command line", runner=missing)
+    assert mig == 1
+    assert "tf-migrate-state FAIL: terraform not on PATH" in capsys.readouterr().out
     # A real exit 127 is reported as the command's own FAIL line (round 3 #10).
     assert cli.tf("plan", "my-proj", runner=_FakeRunner(rc=127)) == 1
     assert "tf-plan FAIL: my-proj" in capsys.readouterr().out
