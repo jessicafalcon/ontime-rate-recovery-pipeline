@@ -110,3 +110,46 @@ def test_readme_refuses_missing_markers(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cli, "README", no_markers)
     with pytest.raises(SystemExit):
         cli.readme_cmd("")
+
+
+def test_structural_labels_derive_from_pins() -> None:
+    """fix/front-door (BACKLOG row "structural labels … not pin-derived" closed):
+    the user counts and the prompt volume in the block and the chart come from
+    tests/pins.py, so a profile change moves them with the numbers."""
+    from tests import pins
+
+    rows = readme.first_screen_rows()
+    block = readme.render_block(rows)
+    svg = readme.render_svg(rows)
+    assert f"**On the {pins.MEDIUM_USERS:,}-user profile" in block
+    assert f"medium ({pins.MEDIUM_USERS:,} users, unfrozen)" in block
+    assert f"(a {pins.SCORES_ROWS}-user cohort bin-tie)" in block
+    assert f"(medium, {pins.PROMPTS_SENT_MEDIUM:,} prompts)" in svg
+    assert "2,000" not in readme.render_block.__code__.co_consts  # no literal left
+    assert "60,000" not in " ".join(map(str, readme.render_svg.__code__.co_consts))
+
+
+def test_headline_points_equal_displayed_percentage_difference() -> None:
+    """The +N is derived from the two DISPLAYED percentages, so the sentence
+    cannot contradict itself on a pin refresh (functionality-tester gap #1)."""
+    rows = readme.first_screen_rows()
+    m = re.search(
+        r"from (\d+)% to (\d+)% \(\+(\d+) points\)", readme.render_block(rows)
+    )
+    assert m, "headline shape"
+    base, reco, points = map(int, m.groups())
+    assert reco - base == points
+    # a pair that rounds inconsistently under independent rounding still agrees
+    rows2 = dict(rows, sim_medium=(0.464, 0.5, 0.626))
+    m2 = re.search(
+        r"from (\d+)% to (\d+)% \(\+(\d+) points\)", readme.render_block(rows2)
+    )
+    assert m2 and int(m2.group(2)) - int(m2.group(1)) == int(m2.group(3))
+
+
+def test_headline_refuses_a_sub_point_lift() -> None:
+    import pytest
+
+    rows = dict(readme.first_screen_rows(), sim_medium=(0.461, 0.5, 0.463))
+    with pytest.raises(AssertionError):
+        readme.render_block(rows)

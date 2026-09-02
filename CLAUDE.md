@@ -98,7 +98,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   band anchor, never `center_hour_local`), `power.py` (the A/B power
   table, `math.erf` + bisection), `blocks.py` (the marker-confined writer
   of generated doc blocks), `readme.py` (Phase 13: `first_screen_rows` +
-  `render_block` / `render_svg` — the README first-screen block and the
+  `render_block` / `render_svg` — the README results block (headline + table +
+  note, structural labels from the pins too) and the
   deterministic `docs/img/lift.svg`, from `tests/pins.py` (which the committed
   RESULTS blocks are pinned to); `cli.py readme`). Writes console, `data/out/<p>/expected/`,
   the marked blocks of `docs/RESULTS.md` / `docs/AB_DESIGN.md`, and (Phase 13)
@@ -210,11 +211,14 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   the generated findings chart, `make readme`), ROADMAP.md (post-13: the ordered
   fix-branch list and the one-week cut, decided 2026-09-01 — a living doc, not
   a `check-docs` plan); all under `docs/`.
-- `README.md` *(Phase 13)* — the front door: a `make readme`-generated
-  first-screen block (never typed), a Mermaid architecture diagram, the
-  cloud-free quickstart (Phases 1–8 on tiny), the docs index and the
-  stack-roles table. A living doc — `scripts/check_docs.py` link-/target-checks
-  it.
+- `README.md` *(Phase 13; retold by `fix/front-door`)* — the front door, told
+  as a story for a reader who has never seen the repo: the problem (three
+  causes of a miss that look the same), what the pipeline does, what it found
+  (the `make readme`-generated block — a headline sentence + the metrics table,
+  never typed — and the chart, with the caveats in prose), why the numbers can
+  be trusted, the cloud-free quickstart, the Mermaid diagram + stack-roles
+  table, how it was built, the docs index. No phase language. A living doc —
+  `scripts/check_docs.py` link-/target-checks it.
 - `DECISIONS.md` — why-not-X log. One entry per non-obvious choice.
 - `BACKLOG.md` — deferred findings with revisit triggers. Reviewed at every
   exit (Workflow rules, "Exit cadence"): do due items or re-defer with a new
@@ -368,7 +372,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   at α 0.05 / power 0.8 off the pinned baseline rates, rendered as the
   `<!-- power:begin -->` block of `docs/AB_DESIGN.md`; same check /
   `WRITE=yes` shape; prints `power OK: 6 rows, block matches`
-- `make readme [WRITE=yes]` *(Phase 13)* — the README first-screen block
+- `make readme [WRITE=yes]` *(Phase 13; `fix/front-door`)* — the README results block
   (`README.md`, marker-confined `<!-- readme:begin -->`) and the findings chart
   (`docs/img/lift.svg`, a wholly generated file), both rendered by `eval/cli.py
   readme` from `tests/pins.py` (which the committed `docs/RESULTS.md` blocks are
@@ -916,15 +920,20 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **22** — `fix/public-release` (2026-09-01, the pre-publication
-security review) struck the live-project-id row and opened one (the GitHub-side
-settings a public repo needs, outside the tree): every record reads `<project_id>`
-/ `<operator>` and `check-docs` check 5 pins every value position (re-implemented
-once in round 2, the review cap preempted), the history copies are
-accepted in DECISIONS, `.gitignore` and `.dockerignore` carry ONE pinned
-secret-glob set; at exit re-confirmed Spanner clean (`Listed 0 items.`) and
-re-deferred the local-tfstate row to `fix/tf-remote-state` BEFORE the visibility
-flip. The post-13 roadmap (`docs/ROADMAP.md`,
+Open BACKLOG rows: **22** — `fix/front-door` (2026-09-01, ROADMAP item 1a) retold
+the README as a story with its one number generated inside the block, struck the
+structural-labels row (the counts now come from the pins), opened one (nothing
+executes the quickstart in CI), re-deferred the front-door row to item 1b
+(`fix/process-doc`: PROCESS.md + the INSIGHT pass) and re-confirmed Spanner clean.
+`fix/public-release` (2026-09-01, the pre-publication security review) struck the
+live-project-id row and opened one (the GitHub-side settings a public repo needs,
+outside the tree): every record reads `<project_id>` / `<operator>` and
+`check-docs` check 5 pins every value position (re-implemented once in round 2,
+the review cap preempted), the history copies are accepted in DECISIONS,
+`.gitignore` and `.dockerignore` carry ONE pinned secret-glob set; at exit
+re-confirmed Spanner clean (`Listed 0 items.`) and re-deferred the local-tfstate
+row to `fix/tf-remote-state` BEFORE the visibility flip. The post-13 roadmap
+(`docs/ROADMAP.md`,
 2026-09-01, branch `fix/roadmap`) opened four (the front-door reframe, the
 scores→`dim_user_current` layering fix, the temporal holdout eval, the
 append-only landing) beside the four rows it cites, and re-anchored the BACKLOG

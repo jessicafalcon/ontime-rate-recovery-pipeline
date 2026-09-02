@@ -155,6 +155,45 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/front-door (after Phase 13, 2026-09-01)
+
+*The README half of ROADMAP item 1: the front door tells the story.*
+
+- **The README leads with the problem and the finding, not the stack.** A
+  reader who has never seen the repo gets, in order: why a missed prompt window
+  matters and the three causes analytics conflate; what the pipeline does about
+  each; what it found, with the caveats in the same breath; why the numbers can
+  be trusted; how to run it; how it fits together; how it was built. The stack
+  table and the diagram moved below the story; every phase label left the
+  quickstart and the closing paragraph. Rejected: a separate "story" doc
+  beside a technical README (the front page is the one thing a stranger reads).
+- **The story's one number is generated, not typed.** The headline sentence
+  ("lifts the simulated on-time rate from 46% to 62%") is rendered inside the
+  `readme:begin` block by `eval/readme.py::render_block` from the pinned
+  medium rates as whole percentages, so `tests/test_readme.py` regenerates it
+  byte-identically like the table. Rejected: typing the percentages in prose —
+  exactly the latent-staleness class BACKLOG names for INSIGHT's hand-typed
+  figures; a second marker pair (the writer handles one, and two blocks would
+  split the one honest note).
+- **The structural labels come from the pins too, and the headline cannot
+  contradict itself.** Round 1 found the headline had added a fourth literal
+  ("2,000-user") to the set BACKLOG's structural-labels row named, on the very
+  edit that row's trigger waited for. `first_screen_rows` now carries
+  `users_tiny` / `users_medium` / `prompts_medium` from `tests/pins.py`; the
+  "+N points" is the difference of the two DISPLAYED percentages (independent
+  rounding could print 46% → 63% (+16)), and a lift under one point refuses to
+  render a headline at all. Pinned by three tests in `tests/test_readme.py`.
+- **The AI-assistance disclosure sits in the README's "How it was built"
+  paragraph now, and `docs/PROCESS.md` (item 1b) will carry the page.** A
+  stranger reads the front door, not a process doc; one honest sentence there
+  costs nothing and the page can expand it.
+- **Item 1's other half stays open.** `docs/PROCESS.md` (the one page on the
+  spec-and-review loop) and the INSIGHT prose pass are not in this branch; the
+  README's "How it was built" paragraph points at CLAUDE.md meanwhile, and the
+  BACKLOG row "README and INSIGHT prose still read as a phase log" stays
+  un-struck until they land — re-deferred there to `fix/process-doc` (ROADMAP
+  item 1b), the one exception to "one PR per item", noted in ROADMAP.
+
 ### fix/public-release (after Phase 13, 2026-09-01)
 
 *The pre-publication security review before the repo goes public.*
