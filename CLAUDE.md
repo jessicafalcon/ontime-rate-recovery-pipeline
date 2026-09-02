@@ -210,11 +210,14 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   the generated findings chart, `make readme`), ROADMAP.md (post-13: the ordered
   fix-branch list and the one-week cut, decided 2026-09-01 — a living doc, not
   a `check-docs` plan); all under `docs/`.
-- `README.md` *(Phase 13)* — the front door: a `make readme`-generated
-  first-screen block (never typed), a Mermaid architecture diagram, the
-  cloud-free quickstart (Phases 1–8 on tiny), the docs index and the
-  stack-roles table. A living doc — `scripts/check_docs.py` link-/target-checks
-  it.
+- `README.md` *(Phase 13; retold by `fix/front-door`)* — the front door, told
+  as a story for a reader who has never seen the repo: the problem (three
+  causes of a miss that look the same), what the pipeline does, what it found
+  (the `make readme`-generated block — a headline sentence + the metrics table,
+  never typed — and the chart, with the caveats in prose), why the numbers can
+  be trusted, the cloud-free quickstart, the Mermaid diagram + stack-roles
+  table, how it was built, the docs index. No phase language. A living doc —
+  `scripts/check_docs.py` link-/target-checks it.
 - `DECISIONS.md` — why-not-X log. One entry per non-obvious choice.
 - `BACKLOG.md` — deferred findings with revisit triggers. Reviewed at every
   exit (Workflow rules, "Exit cadence"): do due items or re-defer with a new
