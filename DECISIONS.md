@@ -158,7 +158,40 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
-### fix/process-doc (after Phase 13, 2026-09-01)
+### fix/tf-remote-state (after Phase 13, 2026-09-01)
+
+*ROADMAP item 2. This entry is the opening amendment, committed alone before
+any code (CLAUDE.md, Fix amendments: moving the Terraform state write path /
+backend is a design change).*
+
+- **Amendment — the invariant restored: Terraform state is durable and
+  recoverable before any apply meant to persist beyond one session.** Today the
+  state lives only in a local, unversioned `infra/terraform.tfstate` on one
+  laptop (the `backend "gcs"` block in `infra/main.tf` is bootstrap-documented
+  but commented out), so losing the working copy after an
+  `enable_spanner=true` apply that outlives its session strands a billing
+  100-PU instance with no `tf-destroy` / toggle-flip path — a cost-and-recovery
+  failure (BACKLOG **"Terraform state is a local, unversioned
+  `infra/terraform.tfstate`"**, reframed this session from confidentiality to
+  durability; the public flip already discharged the leak half). This branch
+  makes remote, versioned state the backend so the teardown path survives a
+  lost laptop. The change: (a) the versioned `<project_id>-tfstate` bucket is
+  bootstrapped ONCE by hand — a bucket cannot create the backend that stores
+  its own state, and Terraform must never manage that bucket — a documented,
+  ask-first operator step run as the SA (`docs/DEPLOYMENT.md`); (b) the drafted
+  `backend "gcs"` block is uncommented as a PARTIAL config (`prefix` only), the
+  `bucket` supplied at init time via `-backend-config=bucket=<project>-tfstate`
+  derived from the validated `PROJECT`, so no live project id ever enters the
+  tracked `.tf` (the redaction standard; `PROJECT` stays the one project
+  input); (c) a NEW gated target `make tf-migrate-state PROJECT=<id>
+  CONFIRM=yes` has `infra/cli.py` run `terraform init -migrate-state` under the
+  SAME gates as every `tf-*` — `CONFIRM=yes` command-line origin
+  (`$(origin CONFIRM)`), `PROJECT` validated before any terraform call, the
+  cloud-env namespace refusal, no `TF_VAR_*` / auto-`tfvars`, the `ENV_ALLOW`
+  child env, and `-lockfile=readonly` so init can never rewrite the pinned
+  provider lock — never a hand-run terraform outside the credential standard;
+  (d) `make tf-freeze CONFIRM=yes` re-pins `infra/MANIFEST.sha256` in the same
+  commit as the `main.tf` change. STOP for approval before implementing.
 
 *The second half of ROADMAP item 1: the one page on the process, and INSIGHT
 read as a product statement.*
