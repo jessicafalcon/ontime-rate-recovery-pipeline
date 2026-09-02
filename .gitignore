@@ -1,17 +1,28 @@
 # Data & secrets — never commit
 data/
+.claude/settings.local.json
+*.duckdb
+*.duckdb.wal
+# secrets:begin — ONE set, equal (bare here, `**/`-anchored in .dockerignore),
+# pinned by tests/test_infra.py::test_gitignore_and_dockerignore_secret_globs_agree
 .env
 .env.*
 .envrc
+*.tfvars
+*.tfvars.json
+*.tfstate
+*.tfstate.*
 *.pem
 *.p12
+*.pfx
+*.key
+*.p8
 *-key.json
 *-credentials.json
 credentials*
 service-account*.json
-.claude/settings.local.json
-*.duckdb
-*.duckdb.wal
+# secrets:end
+!*.tfvars.example
 
 # dbt
 target/
@@ -19,13 +30,8 @@ dbt_packages/
 logs/
 .user.yml
 
-# Terraform
+# Terraform (state and tfvars are in the secrets block above)
 .terraform/
-*.tfstate
-*.tfstate.*
-*.tfvars
-*.tfvars.json
-!*.tfvars.example
 crash.log
 
 # Python
