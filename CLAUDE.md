@@ -238,10 +238,13 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   a not-yet-built target only as a (doc, target) pair in the exact
   `FUTURE_TARGETS` set, red once the target is built or the doc stops citing it); every trace token in `TRACES` exists in source as an exact token;
   this file's "Open BACKLOG rows: **N**" equals BACKLOG.md's un-struck rows;
-  every record (each tracked `*.md`) names placeholders only — no email address,
-  and every `PROJECT=` / `--project=` / `project_id=` / `github_repository=`
-  value is `<…>`-shaped (check 5, `fix/public-release`; the file:line is
-  printed, never the value)
+  in every tracked record (`RECORD_GLOBS` — markdown, Makefile, CI, compose, the
+  dbt profile, the tfvars example — via `git ls-files`) every VALUE POSITION a
+  project, repository or account identifier can occupy (`VALUE_POSITIONS`:
+  `NAME=value`, `--flag value`, `gs://` buckets, `<x>.ontime` qualifiers,
+  addresses) holds a placeholder SHAPE (check 5, `fix/public-release`; every set
+  pinned exactly; the file:line and position are printed, never the value; a
+  bare id in prose is the security-reviewer's check)
 - `make review-gate [SPEC=specs/<f>.md] [BASE=main] [DELETED=a,b]` — the
   offline review gate: `make test` + `ruff check` + `ruff format --check`
   (read-only) + `make check-docs`; with SPEC, every Evidence test id / make
@@ -697,7 +700,8 @@ DECISIONS.md or fix it.
   account JSON. GCP auth is ADC / WIF only. A record — docs, specs, BACKLOG, DECISIONS —
   names a placeholder (`<project_id>`, `<operator>`, `<owner>/<repo>`), never a
   live project id, account address or repository slug; `check-docs` check 5
-  pins the shape (`fix/public-release`).
+  pins every value position (`fix/public-release`); a bare id in prose is the
+  security-reviewer's check.
 
 ## Teaching rule
 
@@ -915,7 +919,8 @@ byte-identically. No pin, fixture, model, or `.tf` moved.
 Open BACKLOG rows: **22** — `fix/public-release` (2026-09-01, the pre-publication
 security review) struck the live-project-id row and opened one (the GitHub-side
 settings a public repo needs, outside the tree): every record reads `<project_id>`
-/ `<operator>` and `check-docs` check 5 pins the shape, the history copies are
+/ `<operator>` and `check-docs` check 5 pins every value position (re-implemented
+once in round 2, the review cap preempted), the history copies are
 accepted in DECISIONS, `.gitignore` and `.dockerignore` carry ONE pinned
 secret-glob set; at exit re-confirmed Spanner clean (`Listed 0 items.`) and
 re-deferred the local-tfstate row to `fix/tf-remote-state` BEFORE the visibility

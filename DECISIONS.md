@@ -168,8 +168,12 @@ annotated **Superseded by …** in place and never deleted.
   "The live project id and the derived SA email sit in tracked records" is
   struck.
 - **Three history-only identifiers are ACCEPTED, not rewritten.** (i) The
-  project id and SA email in every earlier revision of the records — not a
-  credential, unusable without IAM, and nothing billable is up (`docs/DEPLOYMENT.md`);
+  project id, the SA email and the operator's account address in every earlier
+  revision of the records, on every ref the remote holds — the merged phase
+  branches' tips too, deleted before the flip as hygiene (BACKLOG "The
+  public-repo GitHub-side settings are outside the tree"); the squash-merged
+  history on `main` is the accepted copy — not a credential, unusable without
+  IAM, and nothing billable is up (`docs/DEPLOYMENT.md`);
   (ii) one early commit authored under a personal address instead of the
   GitHub noreply one; (iii) an early revision's mention of a private
   predecessor repository's name, scrubbed soon after. A history rewrite
@@ -178,27 +182,43 @@ annotated **Superseded by …** in place and never deleted.
   Rejected: squashing to one initial commit (the trail is the portfolio); a
   path-scoped rewrite of the two early revisions (every later hash moves with
   them, and the specs and BACKLOG pin dozens).
-- **`.gitignore` and `.dockerignore` carry ONE secret-glob set, pinned.**
-  `.gitignore` gains `.envrc`, `*.pem`, `*.p12`, `*-key.json`,
-  `*-credentials.json`, `credentials*`, `service-account*.json`; `.dockerignore`
-  gains `**/.envrc`, `**/*.pem`, `**/*.p12`, `**/*.tfvars.json` (the exit audit
-  found the two lists did NOT agree, and nothing pinned them). The closed set
-  `SECRET_GLOBS` in `tests/test_infra.py::test_gitignore_and_dockerignore_secret_globs_agree`
-  must appear bare in `.gitignore` and `**/`-anchored in `.dockerignore`. The
-  content scan `test_no_tracked_secret_state_or_tfvars` stays the real catch for
-  a key pasted anywhere; `.envrc` is the one glob it cannot see (a path export,
-  not a key body), so its ignore rule is its only guard.
-- **A fifth `check-docs` check pins the placeholder rule.** Over every tracked
-  `*.md`: no email address (word characters on both sides of the `@` — a `<…>`
-  placeholder never matches), and every `PROJECT=` / `--project=` /
-  `OTR_DAG_PROJECT=` / `OTR_GCP_PROJECT=` / `project_id=` / `github_repository=`
-  value must be placeholder-shaped (`<…>`, `…`, quoted, `$`). An ALLOWLIST of
-  placeholder shapes, not a denylist of ids — a guard that named the live id
-  would re-publish it — and a failure prints the file:line, never the value.
-  Negative pin: `tests/test_check_docs.py::test_check_live_identifiers_reports_an_email_and_a_bare_project`.
-  The rule is stated in CLAUDE.md Conventions (Secrets) and the security-reviewer
-  checklist, because ROADMAP items 2, 5, 7 and 8 all paste live-run output into
-  DEPLOYMENT / RESULTS — the next such branch would otherwise undo the redaction.
+- **`.gitignore` and `.dockerignore` carry ONE secret-glob set, equal and
+  pinned.** The exit audit found the two lists did NOT agree while two records
+  said they mirrored each other, and round 2 found the first pin one-sided
+  (containment) and short of `*.pfx` / `*.key` / `*.p8`. Now each file holds
+  the set in a `# secrets:begin` / `# secrets:end` block — bare in `.gitignore`,
+  `**/`-anchored in `.dockerignore` (Docker's matcher, not Go's `filepath.Match`,
+  expands `**/` to any depth including the root) — and
+  `tests/test_infra.py::test_gitignore_and_dockerignore_secret_globs_agree`
+  asserts each block EQUALS `SECRET_GLOBS`, order included: red in both stale
+  directions. The key-file globs derive from `PRIVATE_KEY_SUFFIXES`, so the two
+  lists in that file cannot disagree either. The content scan
+  `test_no_tracked_secret_state_or_tfvars` stays the real catch for a key pasted
+  anywhere; `.envrc` is the one glob it cannot see (a path export, not a key
+  body), so its ignore rule is its only guard.
+- **A fifth `check-docs` check pins the placeholder rule — re-implemented ONCE
+  in round 2.** Invariant: in every tracked record, every VALUE POSITION a
+  project, repository or account identifier can occupy holds a placeholder
+  SHAPE. Round 1's guard was an enumeration of six `NAME=` spellings whose
+  allowlist looked at the first character, so a quoted live id passed, a spaced
+  `--project <x>` passed, a `gs://<x>-ontime` bucket and a `<x>.ontime` qualifier
+  passed, and it walked the working tree while the records said "tracked". All
+  three review agents put every correctness finding on that fix, so the cap was
+  preempted rather than patched toward: the KIND changed to three closed sets,
+  each pinned exactly by `tests/test_check_docs.py` — `RECORD_GLOBS` (the
+  `git ls-files` pathspecs: markdown, Makefile, CI, compose, the dbt profile,
+  the tfvars example — the index, so an untracked note is neither scanned nor
+  publishable), `VALUE_POSITIONS` (`NAME=value` over `ARG_NAMES`, `--flag value`
+  over `FLAG_NAMES`, `gs://` buckets, `<x>.ontime` dataset qualifiers, addresses)
+  and the accepted shapes (`<…>`, `…`, `$`/`{{` expansions, `null`, `your-…`, an
+  RFC 2606 `@example.*` address, each optionally behind `user:`), tested after
+  one leading quote is dropped. An allowlist of shapes, never a denylist of ids
+  — a guard that named the live id would re-publish it — and a failure prints
+  the file:line and the position, never the value. What it does NOT cover, said
+  plainly in CLAUDE.md and the security-reviewer checklist: a bare id in prose
+  has no value position and is the reviewer's check. Rejected: scanning for
+  project-id-SHAPED tokens (`[a-z][a-z0-9-]+`) — every kebab-case word in the
+  docs; and a denylist holding the live id (publishes it).
 - **Out of the repo, on the GitHub side:** Actions → "Require approval for all
   external contributors" once public (CI runs `on: pull_request` with a
   read-only token, no secrets, SHA-pinned actions — a fork PR runs its own
