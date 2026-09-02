@@ -8,8 +8,9 @@ This pipeline separates the three causes of a miss, hands the two the app
 caused back to engineering, and fixes the one it can: it learns when each user
 is actually reachable and recommends a send time inside their cohort's shared
 moment. It runs end to end on a laptop with no cloud account, and the same code
-runs on BigQuery, Spanner and Composer. Every number on this page is generated
-from pinned test data and regenerates byte for byte; none is typed by hand.
+runs on BigQuery and Spanner, ordered by the same Airflow DAG. The results
+block and the chart below are generated from pinned test data and regenerate
+byte for byte; no figure in them is typed by hand.
 
 ## The problem: three kinds of "late" that look the same
 
@@ -69,9 +70,10 @@ Tiny's lift is a regression pin (a 20-user cohort bin-tie), not a result; medium
 The gain is almost entirely the third cause recovered: prompts that were
 delivered and went unanswered because they arrived at the wrong local hour, now
 sent when the user is reachable. Three caveats come with it, and they are the
-point rather than the fine print. The 20-user frozen fixture shows a small
-negative lift, which is expected from a cohort of that size and is kept as a
-regression pin rather than hidden. The simulation re-draws outcomes under the
+point rather than the fine print. The small frozen fixture shows a slightly
+negative lift: one cohort's pooled open histogram has a two-way tie, so its
+anchor lands on the wrong hour. It is kept as a regression pin rather than
+hidden. The simulation re-draws outcomes under the
 same rule that generated the data, so it proves the model learns the pattern it
 was given, not that the pattern matches real users. The real test is the A/B in
 [docs/AB_DESIGN.md](docs/AB_DESIGN.md), specified with a power table but not run.
@@ -159,9 +161,11 @@ score the pipeline against the generator's assigned causes.
 ## How it was built
 
 Every step was written against a spec with named invariants before any
-mechanism, and had to pass an offline review gate: the test suite, a mutation
-sweep that breaks each guard on purpose and expects a red test, a frozen fixture
-no command may rewrite, and the truth-isolation grep. The work was done with an
+mechanism, and had to pass two offline checks: the review gate (the test suite,
+lint, the docs guard) and a mutation sweep that breaks each guard on purpose and
+expects a red test. A frozen fixture only one gated command may rewrite, and
+only with a signed-off spec line, plus the truth-isolation grep, hold the data
+still. The work was done with an
 AI coding assistant inside that loop; the loop, not the assistant, is what kept
 the numbers honest. The operating manual is [CLAUDE.md](CLAUDE.md); the why-not-X
 log is [DECISIONS.md](DECISIONS.md); deferred findings with their triggers are
@@ -188,7 +192,8 @@ in [BACKLOG.md](BACKLOG.md).
 
 The pipeline is complete on correctness at 2,000 users, not yet on scale or on
 a scheduled cloud run. What would change that, in order, is
-[docs/ROADMAP.md](docs/ROADMAP.md): remote Terraform state, one layering fix, a
-real-scale cost run, a holdout evaluation that is not circular, a
-Composer-runnable DAG, an append-only landing and the CI parity leg. Each is a
-[BACKLOG.md](BACKLOG.md) row with a trigger.
+[docs/ROADMAP.md](docs/ROADMAP.md): the rest of this front door (a page on the
+process), remote Terraform state, one layering fix, a real-scale cost run, a
+holdout evaluation that is not circular, a Composer-runnable DAG, an
+append-only landing and the CI parity leg. Each is a [BACKLOG.md](BACKLOG.md)
+row with a trigger.
