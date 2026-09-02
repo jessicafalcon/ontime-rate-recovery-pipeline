@@ -1971,6 +1971,12 @@ def test_cli_missing_terraform_is_a_clean_fail(
     assert "tf-validate FAIL: terraform not on PATH" in capsys.readouterr().out
     assert cli.tf("plan", "my-proj", runner=missing) == 1
     assert "tf-plan FAIL: terraform not on PATH" in capsys.readouterr().out
+    # migrate-state carries its own `rc is None → return 1` clean-fail guard in
+    # _migrate (fix/tf-remote-state); without this, `return 0` there would report
+    # a silent exit-0 success while terraform never ran and no state migrated.
+    mig = cli.tf("migrate-state", "my-proj", "yes", "command line", runner=missing)
+    assert mig == 1
+    assert "tf-migrate-state FAIL: terraform not on PATH" in capsys.readouterr().out
     # A real exit 127 is reported as the command's own FAIL line (round 3 #10).
     assert cli.tf("plan", "my-proj", runner=_FakeRunner(rc=127)) == 1
     assert "tf-plan FAIL: my-proj" in capsys.readouterr().out
