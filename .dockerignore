@@ -26,11 +26,15 @@ logs
 # Secrets must never be baked by `COPY . /opt/otr` (review rounds 1–2, #7/#1).
 # `.dockerignore` matches with filepath.Match — a leading `*` does NOT cross `/`,
 # so every pattern is `**/`-anchored to catch nested files (infra/.env,
-# infra/sa-key.json, orchestration/.env). None are committed; these mirror
-# CLAUDE.md's never-commit list.
+# infra/sa-key.json, orchestration/.env). None are committed; the set is the same one .gitignore
+# carries bare (`tests/test_infra.py::test_gitignore_and_dockerignore_secret_globs_agree`).
 **/.env
 **/.env.*
+**/.envrc
+**/*.pem
+**/*.p12
 **/*.tfvars
+**/*.tfvars.json
 **/*.tfstate
 **/*.tfstate.*
 **/*-key.json

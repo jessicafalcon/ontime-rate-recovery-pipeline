@@ -237,7 +237,11 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   PHASES and PROJECT_BRIEF are plans — link-checked only; a living doc may name
   a not-yet-built target only as a (doc, target) pair in the exact
   `FUTURE_TARGETS` set, red once the target is built or the doc stops citing it); every trace token in `TRACES` exists in source as an exact token;
-  this file's "Open BACKLOG rows: **N**" equals BACKLOG.md's un-struck rows
+  this file's "Open BACKLOG rows: **N**" equals BACKLOG.md's un-struck rows;
+  every record (each tracked `*.md`) names placeholders only — no email address,
+  and every `PROJECT=` / `--project=` / `project_id=` / `github_repository=`
+  value is `<…>`-shaped (check 5, `fix/public-release`; the file:line is
+  printed, never the value)
 - `make review-gate [SPEC=specs/<f>.md] [BASE=main] [DELETED=a,b]` — the
   offline review gate: `make test` + `ruff check` + `ruff format --check`
   (read-only) + `make check-docs`; with SPEC, every Evidence test id / make
@@ -690,7 +694,10 @@ DECISIONS.md or fix it.
 - Fault scenarios are generator profiles under `generator/profiles/`, not
   ad-hoc scripts.
 - Secrets: never commit `.env`, `data/`, `*.tfvars`, credentials, service-
-  account JSON. GCP auth is ADC / WIF only.
+  account JSON. GCP auth is ADC / WIF only. A record — docs, specs, BACKLOG, DECISIONS —
+  names a placeholder (`<project_id>`, `<operator>`, `<owner>/<repo>`), never a
+  live project id, account address or repository slug; `check-docs` check 5
+  pins the shape (`fix/public-release`).
 
 ## Teaching rule
 
@@ -905,10 +912,14 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **21** — `fix/public-release` (2026-09-01, the pre-publication
-security review) struck the live-project-id row: every record reads `<project_id>` /
-`<operator>`, the history copies are accepted in DECISIONS, `.gitignore` gained the
-direnv and key-file globs `.dockerignore` already had. The post-13 roadmap (`docs/ROADMAP.md`,
+Open BACKLOG rows: **22** — `fix/public-release` (2026-09-01, the pre-publication
+security review) struck the live-project-id row and opened one (the GitHub-side
+settings a public repo needs, outside the tree): every record reads `<project_id>`
+/ `<operator>` and `check-docs` check 5 pins the shape, the history copies are
+accepted in DECISIONS, `.gitignore` and `.dockerignore` carry ONE pinned
+secret-glob set; at exit re-confirmed Spanner clean (`Listed 0 items.`) and
+re-deferred the local-tfstate row to `fix/tf-remote-state` BEFORE the visibility
+flip. The post-13 roadmap (`docs/ROADMAP.md`,
 2026-09-01, branch `fix/roadmap`) opened four (the front-door reframe, the
 scores→`dim_user_current` layering fix, the temporal holdout eval, the
 append-only landing) beside the four rows it cites, and re-anchored the BACKLOG

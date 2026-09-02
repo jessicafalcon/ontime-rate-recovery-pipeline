@@ -119,8 +119,8 @@ Phase 10 Amendments N2/O1/P1/Q, `infra.cli.CLOUD_ENV_ALLOW`), so the argv is the
 construction and the `tf-plan` you read is the `tf-apply` you get:
 
 ```
-make tf-plan  PROJECT=<id> VARS='operator_principal=user:<you>'
-make tf-apply PROJECT=<id> VARS='operator_principal=user:<you>' CONFIRM=yes
+make tf-plan  PROJECT=<project_id> VARS='operator_principal=user:<you>'
+make tf-apply PROJECT=<project_id> VARS='operator_principal=user:<you>' CONFIRM=yes
 ```
 
 Read the `tf-plan` output before every `tf-apply`; the plan is the review.
@@ -136,7 +136,7 @@ The default apply creates only the free/near-free layer:
 | Resource | What it costs left up | If it runs twice |
 |---|---|---|
 | BigQuery datasets `raw`, `ontime` | empty datasets free; storage ~$0.02/GB·mo (tiny ≈ $0); queries $5/TB (tiny ≈ $0) | idempotent — Terraform no-ops, no double spend |
-| GCS staging bucket `<project>-ontime` (NOT the tfstate bucket) | ~$0.02/GB·mo; tiny (≈ $0); noncurrent versions reaped by a lifecycle rule | idempotent |
+| GCS staging bucket `<project_id>-ontime` (NOT the tfstate bucket) | ~$0.02/GB·mo; tiny (≈ $0); noncurrent versions reaped by a lifecycle rule | idempotent |
 | Service account + IAM (+ WIF only when `enable_ci_wif=true`) | free | idempotent |
 | Budget (50 / 150 alerts, in the billing account's currency — $ on a USD account) | free (notifies only — see below) | idempotent |
 | **Composer** (`enable_composer=false`) | **not created** — ~$300+/mo if enabled | — |
@@ -185,7 +185,7 @@ zero:
 bq ls --project_id=<project_id>                       # no ontime/raw datasets
 gcloud storage buckets list --project=<project_id>    # only the tfstate bucket remains
 gcloud iam service-accounts list --project=<project_id>   # no ontime-pipeline
-gcloud billing budgets list --billing-account=<acct>  # no ontime-<project> budget
+gcloud billing budgets list --billing-account=<acct>  # no ontime-<project_id> budget
 ```
 
 Nothing else is created outside Terraform, and no resource carries
@@ -201,20 +201,20 @@ datasets — so every BigQuery build runs **as the SA** (below), and
 
 1. Apply with `operator_principal` as a `VARS` item (the only toggle path;
    never a tfvars or a `TF_VAR_*`):
-   `make tf-apply PROJECT=<id> VARS='operator_principal=user:<you>' CONFIRM=yes`
+   `make tf-apply PROJECT=<project_id> VARS='operator_principal=user:<you>' CONFIRM=yes`
    — Terraform grants you `serviceAccountTokenCreator` ON `ontime-pipeline`
    (Amendment Q).
 2. Impersonate it for ADC — the ONE credential the landing's clients, dbt and
    the parity test all use (no `bq`/`gsutil` on the data path, no second
    impersonation setting, no keyfile):
    `gcloud auth application-default login --impersonate-service-account=<pipeline_service_account output>`
-3. Land + build: `make dbt-build TARGET=bigquery PROFILE=tiny PROJECT=<id> CONFIRM=yes`
+3. Land + build: `make dbt-build TARGET=bigquery PROFILE=tiny PROJECT=<project_id> CONFIRM=yes`
    — `pipeline/cli.py` validates `PROJECT`, exports it to dbt as `OTR_GCP_PROJECT`
    (the `bigquery` output has no default; `location: us-central1`), lands
-   `fixtures/tiny` through `gs://<id>-ontime/landing/tiny/` into `raw`
+   `fixtures/tiny` through `gs://<project_id>-ontime/landing/tiny/` into `raw`
    (`make bq-load` runs it alone), then `dbt build --target bigquery` into
    `ontime`; prints `dbt-build OK: tiny/bigquery`.
-4. Parity: `make test-int-bigquery PROJECT=<id> CONFIRM=yes` — the three goldens
+4. Parity: `make test-int-bigquery PROJECT=<project_id> CONFIRM=yes` — the three goldens
    off the BigQuery tables byte-for-byte against `fixtures/tiny/expected/`, the
    pins, and `bq ls` = exactly `raw`, `ontime`.
 5. **Switch ADC back before any `tf-*`:** `gcloud auth application-default
@@ -240,7 +240,7 @@ not double anything. `tf-destroy` still removes it all
 
 **CI leg (deferred — BACKLOG "Cross-warehouse dialect drift…", dated trigger).**
 A CI `test-int-bigquery` needs the opt-in WIF apply, never the default one:
-`make tf-apply PROJECT=<id> VARS='enable_ci_wif=true,github_repository=<owner>/<repo>'
+`make tf-apply PROJECT=<project_id> VARS='enable_ci_wif=true,github_repository=<owner>/<repo>'
 CONFIRM=yes`, then the `workload_identity_provider`
 output and the SA email into a `workflow_dispatch`-only job via
 `google-github-actions/auth`. Not built in 9b: the laptop run above is the
@@ -292,7 +292,7 @@ the apply: never leave it up.
    on create (third apply 2026-08-31, `Creation complete after 2s` inside
    its 7-day window) — its `iam.roles.undelete` is why the operator
    permission row lists it):
-   `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=true'` —
+   `make tf-apply PROJECT=<project_id> CONFIRM=yes VARS='enable_spanner=true'` —
    adds exactly the spanner module's 9 resources (2 kept-on API enablements,
    instance, database with the `dim_user` + `send_schedule` DDL, the BigQuery
    connection + `raw.dim_user_spanner` federation view, the custom
@@ -310,7 +310,7 @@ the apply: never leave it up.
    plan it cannot read back (`the saved plan could not be read back`) and
    refuses any action outside `{no-op, read, create, update, delete}`
    ALWAYS — `forget`, a state drop, included (Amendment N1) — so the
-   mistake stops before the cloud. `make tf-plan PROJECT=<id>
+   mistake stops before the cloud. `make tf-plan PROJECT=<project_id>
    VARS='enable_spanner=true'` first is still the habit. **Live
    2026-08-31:** an apply whose `VARS` carried `enable_spanner=true` but
    omitted the applied `operator_principal` planned `9 to add, 0 to change,
@@ -319,12 +319,12 @@ the apply: never leave it up.
    …`, exit 2, nothing created, state unchanged (Amendment F's live proof;
    carry EVERY applied toggle in `VARS`).
 2. **Land the dims** (as the SA):
-   `make spanner-load PROFILE=tiny PROJECT=<id> CONFIRM=yes`.
-3. **Prove it**: `make test-int-spanner PROJECT=<id> CONFIRM=yes` — the
+   `make spanner-load PROFILE=tiny PROJECT=<project_id> CONFIRM=yes`.
+3. **Prove it**: `make test-int-spanner PROJECT=<project_id> CONFIRM=yes` — the
    federated view returns the seed's rows, the swapped build
    (`dim_user_identifier: dim_user_spanner`) reproduces the three goldens,
    and the Spanner write-back is idempotent with the DuckDB-pinned row hash
-   (its OK line reads `writeback OK: <id>.ontime → spanner, 20 users, 0
+   (its OK line reads `writeback OK: <project_id>.ontime → spanner, 20 users, 0
    written` on the second run — the read is the warehouse's, not a
    PROFILE's build). `PROFILE` is `tiny` only (a CLI refusal otherwise).
    **Live 2026-08-30:** `spanner-load OK: tiny — 22 dim rows`; `4 passed
@@ -336,7 +336,7 @@ the apply: never leave it up.
    `writeback OK: <project_id>.ontime → spanner, 20 users, 0
    written`.
 4. **Tear down the same day** — the SCOPED destroy is the toggle flipped
-   back: `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=false'
+   back: `make tf-apply PROJECT=<project_id> CONFIRM=yes VARS='enable_spanner=false'
    ALLOW_DESTROY=yes` (count → 0 destroys exactly the module's resources —
    the plan-first apply lists them and needs the explicit `ALLOW_DESTROY`;
    the two API enablements stay on — free, like the root set). There is no
@@ -411,9 +411,9 @@ PROJECT_BRIEF demo-day risks).
 **Phase 11 (plan-only, done):** offline suite green + `tf-validate OK`; the live
 proof is an ask-first `tf-plan` (creates nothing):
 
-- `make tf-plan PROJECT=<id>` → **zero** `google_composer_*` in the plan (the
+- `make tf-plan PROJECT=<project_id>` → **zero** `google_composer_*` in the plan (the
   default toggle is false).
-- `make tf-plan PROJECT=<id> VARS='enable_composer=true'` → **exactly** the
+- `make tf-plan PROJECT=<project_id> VARS='enable_composer=true'` → **exactly** the
   module's resources (`Plan: N to add`, `0 to change`, `0 to destroy` on the
   free-tier layer). Record the observed N and date below when the plan is run.
 
@@ -427,8 +427,8 @@ test-int-airflow`). Ask-first, cloud-cost, same session. It needs Spanner up
 (not Composer):
 
 1. **Spanner up** (operator ADC — carry every applied toggle in `VARS`):
-   `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_spanner=true'`, then
-   `make spanner-load PROFILE=tiny PROJECT=<id> CONFIRM=yes` (as the SA).
+   `make tf-apply PROJECT=<project_id> CONFIRM=yes VARS='enable_spanner=true'`, then
+   `make spanner-load PROFILE=tiny PROJECT=<project_id> CONFIRM=yes` (as the SA).
 2. **Impersonate the SA for ADC on the host** (the ONE credential; the container
    mounts just this ADC json read-only, not the whole gcloud dir — never a
    keyfile):
@@ -439,14 +439,14 @@ test-int-airflow`). Ask-first, cloud-cost, same session. It needs Spanner up
    Spanner `send_schedule`):
    ```
    BF="-f orchestration/docker-compose.yml -f orchestration/docker-compose.cloud.yml"
-   OTR_DAG_PROJECT=<id> docker compose $BF build
-   OTR_DAG_PROJECT=<id> docker compose $BF up -d
+   OTR_DAG_PROJECT=<project_id> docker compose $BF build
+   OTR_DAG_PROJECT=<project_id> docker compose $BF up -d
    docker compose $BF exec -T airflow airflow db migrate
    docker compose $BF exec -T airflow airflow dags list-import-errors   # empty — the dual-path import resolved
    docker compose $BF exec -T airflow airflow dags test pipeline <through-date>   # a date that lands all of tiny (test-int-airflow's union interval)
    ```
 4. **Verify + capture:** the `writeback` task logs
-   `writeback OK: <id>.ontime → spanner, 20 users, 20 written` (a re-run of the
+   `writeback OK: <project_id>.ontime → spanner, 20 users, 20 written` (a re-run of the
    DAG writes `0` — idempotent); the Spanner read-back hashes to
    `SEND_SCHEDULE_SHA256_TINY` (`make test-int-spanner` pins it). Record the green
    run + the row count in `docs/RESULTS.md` (Phase 12 block).
@@ -461,14 +461,14 @@ test-int-airflow`). Ask-first, cloud-cost, same session. It needs Spanner up
 
 0. **Bootstrap the Composer API deps by hand once** (§8, found live Phase 12):
    `gcloud services enable compute.googleapis.com composer.googleapis.com
-   --project=<id>`. Composer runs on Compute/GKE, so enabling
+   --project=<project_id>`. Composer runs on Compute/GKE, so enabling
    `composer.googleapis.com` transitively enables `compute` — and that batch
    enable can fail with a transient `Error code 13 … failed services
    [compute.googleapis.com]` on the first `tf-apply` (nothing is created — the
    API is the module's first resource). Enabling both by hand first, then
    re-running the apply, clears it (the enablement is idempotent, so
    Terraform's `google_project_service.composer` finds it on and proceeds).
-1. **Apply** (operator ADC, never the SA — §8): `make tf-apply PROJECT=<id>
+1. **Apply** (operator ADC, never the SA — §8): `make tf-apply PROJECT=<project_id>
    CONFIRM=yes VARS='enable_composer=true'` (carry EVERY applied toggle — while
    Composer OR Spanner is up, an apply that omits its toggle plans the teardown,
    which `tf-apply` refuses without `ALLOW_DESTROY=yes`, Amendment F/N1). Expect
@@ -477,7 +477,7 @@ test-int-airflow`). Ask-first, cloud-cost, same session. It needs Spanner up
 2. **Run one DAG** against BigQuery (+ Spanner if also up); capture the run log
    and the `send_schedule` row count (`docs/RESULTS.md`, Phase 12).
 3. **Tear down the same session** — the scoped destroy is the toggle flipped
-   back: `make tf-apply PROJECT=<id> CONFIRM=yes VARS='enable_composer=false'
+   back: `make tf-apply PROJECT=<project_id> CONFIRM=yes VARS='enable_composer=false'
    ALLOW_DESTROY=yes` (count → 0 destroys exactly the module's resources; the
    `composer.googleapis.com` enablement stays on — free, like the root set). A
    full `make tf-destroy … CONFIRM=yes` also removes it.

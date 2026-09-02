@@ -3,7 +3,10 @@ Runs the trace / target / count checks under `make test` on purpose, so a
 code change that breaks a doc citation fails here, not only in the lint job."""
 
 import importlib.util
+import subprocess
 from pathlib import Path
+
+import pytest
 
 _SPEC = importlib.util.spec_from_file_location(
     "check_docs", Path(__file__).parent.parent / "scripts" / "check_docs.py"
@@ -235,3 +238,188 @@ def test_absolute_link_inside_the_repo_is_still_rejected() -> None:
     root = check_docs.ROOT
     inside = root / "CLAUDE.md"
     assert not check_docs._inside_root(str(inside), inside)
+
+
+# ---- check 5: live identifiers (fix/public-release) — every set pinned exactly
+
+
+def test_no_live_identifier_in_any_record_today() -> None:
+    errors: list[str] = []
+    check_docs.check_live_identifiers(errors)
+    assert errors == []
+
+
+def test_record_scope_is_the_index_over_the_pinned_globs() -> None:
+    """The records are what `git ls-files` returns for RECORD_GLOBS — the
+    runbook surfaces (markdown, Makefile, CI, compose, the dbt profile, the
+    tfvars example) and never a code file or an untracked scratch note."""
+    assert check_docs.RECORD_GLOBS == (
+        "*.md",
+        "Makefile",
+        ".github/workflows/*.yml",
+        "orchestration/*.yml",
+        "dbt/profiles.yml",
+        "infra/*.example",
+    )
+    rels = {p.relative_to(check_docs.ROOT).as_posix() for p in check_docs.records()}
+    for must in (
+        "CLAUDE.md",
+        "README.md",
+        "BACKLOG.md",
+        "DECISIONS.md",
+        "docs/DEPLOYMENT.md",
+        "docs/RESULTS.md",
+        "specs/phase-12-live-run.md",
+        ".claude/agents/security-reviewer.md",
+        "Makefile",
+        ".github/workflows/ci.yml",
+        "orchestration/docker-compose.cloud.yml",
+        "dbt/profiles.yml",
+        "infra/terraform.tfvars.example",
+    ):
+        assert must in rels, must
+    assert not any(r.endswith((".py", ".sql", ".tf")) for r in rels)
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", *check_docs.RECORD_GLOBS],
+        cwd=check_docs.ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert sorted(rels) == sorted(tracked)
+
+
+def test_value_positions_and_names_are_pinned_exactly() -> None:
+    assert check_docs.ARG_NAMES == (
+        "PROJECT",
+        "PROJECT_ID",
+        "OTR_DAG_PROJECT",
+        "OTR_GCP_PROJECT",
+        "GOOGLE_CLOUD_PROJECT",
+        "CLOUDSDK_CORE_PROJECT",
+        "project_id",
+        "github_repository",
+        "operator_principal",
+    )
+    assert check_docs.FLAG_NAMES == (
+        "project",
+        "project_id",
+        "billing-account",
+        "impersonate-service-account",
+    )
+    assert [name for name, _ in check_docs.VALUE_POSITIONS] == [
+        "argument",
+        "flag",
+        "bucket",
+        "dataset qualifier",
+        "address",
+    ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "<id>",
+        "<project_id>",
+        "'<project_id>'",
+        '"<owner>/<repo>"',
+        "…",
+        "'…'",
+        "$(PROJECT)",
+        "${OTR_DAG_PROJECT}",
+        "{{ var('x') }}",
+        "null",
+        "user:<you>",
+        '"user:you@example.com"',
+        '"your-org/your-repo"',
+        "you@example.com",
+    ],
+)
+def test_placeholder_shapes_accepted(value: str) -> None:
+    assert check_docs.placeholder_shaped(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "my-live-project",
+        "'my-live-project'",
+        '"my-live-project"',
+        "owner/repo",
+        "user:someone@gmail.com",
+        "someone@example.co",  # not an RFC 2606 domain
+        "nullable-project",
+        "yours-truly",
+    ],
+)
+def test_live_shapes_refused(value: str) -> None:
+    assert not check_docs.placeholder_shaped(value)
+
+
+def _git_tree(tmp_path: Path, monkeypatch, files: dict[str, str]) -> None:
+    """A scratch REPOSITORY (records() reads the index), with the given files
+    tracked and one untracked scratch note that must not be scanned."""
+    _tree(tmp_path, monkeypatch, files)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+    (tmp_path / "SCRATCH.md").write_text("someone@example.co PROJECT=live-one\n")
+
+
+def test_check_live_identifiers_reports_each_position_never_the_value(
+    tmp_path, monkeypatch
+) -> None:
+    """One red line per live value position — argument (quoted too), spaced
+    flag, bucket, dataset qualifier, address — the file:line and position named,
+    the value never echoed; every placeholder shape green; the untracked
+    scratch note and a code file outside RECORD_GLOBS not scanned."""
+    _git_tree(
+        tmp_path,
+        monkeypatch,
+        {
+            "docs/X.md": (
+                "`make tf-plan PROJECT=my-real-project`\n"
+                "`PROJECT='my-real-project'`\n"
+                "`gcloud storage ls --project my-real-project`\n"
+                "`gs://my-real-project-ontime/landing/`\n"
+                "`writeback OK: my-real-project.ontime → spanner`\n"
+                "operator `someone@gmail.com`\n"
+                "`-var github_repository=owner/repo`\n"
+            ),
+            "docs/OK.md": (
+                "operator `<operator>`; `PROJECT=<id>` `--project=<project_id>` "
+                "`--project $(PROJECT)` `OTR_DAG_PROJECT=<project_id>` `project_id=…` "
+                "`PROJECT='…'` `github_repository=<owner>/<repo>` "
+                '`github_repository = "your-org/your-repo"` '
+                "`operator_principal = null` "
+                "`operator_principal=user:<you>'` `gs://<project_id>-ontime` "
+                "`writeback OK: <project_id>.ontime → spanner` `PROJECT= CONFIRM=` "
+                "`ontime-pipeline@<project_id>.iam.gserviceaccount.com` "
+                "`service-<number>@gcp-sa-bigqueryconnection.iam.gserviceaccount.com` "
+                "`--impersonate-service-account=<sa>` `--billing-account=<acct>`\n"
+            ),
+            "infra/terraform.tfvars.example": (
+                'project_id = "your-gcp-project-id"\n'
+                '# operator_principal = "user:you@example.com"\n'
+            ),
+            "landing/cli.py": "PROJECT = 'my-real-project'  # code, not a record\n",
+        },
+    )
+    errors: list[str] = []
+    n = check_docs.check_live_identifiers(errors)
+    assert n == 3  # X.md, OK.md, the tfvars example — not SCRATCH.md, not cli.py
+    positions = [
+        (e.split(":")[2].split(" ")[0], e.split(" a ")[1].split(" value")[0])
+        for e in errors
+    ]
+    assert positions == [
+        ("1", "argument"),
+        ("2", "argument"),
+        ("3", "flag"),
+        ("4", "bucket"),
+        ("5", "dataset qualifier"),
+        ("6", "address"),
+        ("7", "argument"),
+    ], errors
+    assert all(e.startswith("live identifier: docs/X.md:") for e in errors)
+    for secret in ("my-real-project", "gmail", "owner/repo", "live-one"):
+        assert not any(secret in e for e in errors), secret

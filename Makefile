@@ -29,7 +29,8 @@ lint:
 	uv run pre-commit run --all-files
 
 # The one docs guard (scripts/check_docs.py): links/anchors, named make targets,
-# trace tokens, BACKLOG count. Offline; not a pytest file.
+# trace tokens, BACKLOG count, live identifiers (every value position in a tracked
+# record holds a placeholder). Offline; not a pytest file.
 check-docs:
 	uv run python scripts/check_docs.py
 

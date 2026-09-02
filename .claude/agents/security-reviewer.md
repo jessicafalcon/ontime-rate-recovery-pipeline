@@ -26,8 +26,16 @@ When invoked:
       Federation only — a service-account key file anywhere is CRITICAL.
 - [ ] Nothing echoes a secret into logs, Makefile output, Airflow logs, or CI
       (`env` dumps, `set -x`, `terraform output` of sensitive values).
-- [ ] `.gitignore` still covers `.env*`, `data/`, `*.duckdb`, `*.tfvars`,
-      `*.tfstate*`, `.terraform/`, `.claude/settings.local.json`.
+- [ ] `.gitignore` still covers `.env*`, `.envrc`, `data/`, `*.duckdb`, `*.tfvars`,
+      `*.tfstate*`, `.terraform/`, the key-file globs (`*.pem`, `*.p12`,
+      `*-key.json`, `*-credentials.json`, `credentials*`,
+      `service-account*.json`) and `.claude/settings.local.json`;
+      `.dockerignore` carries the same secret globs `**/`-anchored
+      (`tests/test_infra.py::test_gitignore_and_dockerignore_secret_globs_agree`).
+- [ ] No live account identifier in a record: docs, specs, BACKLOG and
+      DECISIONS name `<project_id>` / `<operator>` / `<owner>/<repo>`, never a
+      project id, an email address or a repository slug (`make check-docs`
+      check 5). Pasted live-run output is redacted BEFORE it lands.
 
 **CI boundary:**
 - [ ] CI runs only offline targets (`lint`, `check-docs`, `test`, DuckDB dbt

@@ -89,8 +89,8 @@ Drift between the plan and what main actually is, and the carry-overs due at
    CONFIRM=yes` (behind `OTR_INT`, like `test-int-airflow`; CI never runs it
    by default) and PROVES it from the laptop as the SA. The CI leg is a
    `docs/DEPLOYMENT.md` runbook step: `make tf-apply PROJECT=<id> CONFIRM=yes
-   -- -var enable_ci_wif=true -var github_repository=jessicafalcon/
-   ontime-rate-recovery-pipeline` (toggles as `-var`, never a tfvars — T),
+   -- -var enable_ci_wif=true -var github_repository=<owner>/<repo>`
+   (toggles as `-var`, never a tfvars — T),
    then the `workload_identity_provider` output into the workflow. **Decision
    for the architect:** (a) 9b adds a `workflow_dispatch`-only job
    `bigquery-parity` (`google-github-actions/auth` with the provider name and

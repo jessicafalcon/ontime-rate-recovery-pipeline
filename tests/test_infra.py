@@ -683,6 +683,24 @@ def ignored(tmp_path_factory: pytest.TempPathFactory) -> Callable[[str], bool]:
 
 
 PRIVATE_KEY_SUFFIXES = (".pem", ".p12", ".pfx", ".key", ".p8")
+# The ONE secret-glob set both never-commit lists carry (fix/public-release):
+# bare in .gitignore, `**/`-anchored in .dockerignore (filepath.Match — a
+# leading `*` does not cross `/`). Widening it is an edit here.
+SECRET_GLOBS = (
+    ".env",
+    ".env.*",
+    ".envrc",
+    "*.tfvars",
+    "*.tfvars.json",
+    "*.tfstate",
+    "*.tfstate.*",
+    "*.pem",
+    "*.p12",
+    "*-key.json",
+    "*-credentials.json",
+    "credentials*",
+    "service-account*.json",
+)
 BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".duckdb", ".pyc", ".ico"}
 
 
@@ -1890,3 +1908,30 @@ def test_cli_module_runs() -> None:
     )
     assert res.returncode != 0
     assert "Traceback" not in res.stderr
+
+
+def test_gitignore_and_dockerignore_secret_globs_agree(
+    ignored: Callable[[str], bool],
+) -> None:
+    """fix/public-release: the exit audit found the two never-commit lists had
+    drifted apart while two records claimed they mirrored each other. Every glob
+    in SECRET_GLOBS is a bare line of .gitignore and a `**/`-anchored line of
+    .dockerignore; the gitignore rules actually ignore a nested instance and
+    still admit the tracked `terraform.tfvars.example`."""
+    gitignore = set((ROOT / ".gitignore").read_text().splitlines())
+    dockerignore = set((ROOT / ".dockerignore").read_text().splitlines())
+    assert [g for g in SECRET_GLOBS if g not in gitignore] == []
+    assert [g for g in SECRET_GLOBS if f"**/{g}" not in dockerignore] == []
+    for rel in (
+        ".envrc",
+        "infra/.envrc",
+        "infra/sa.pem",
+        "orchestration/x.p12",
+        "infra/sa-key.json",
+        "landing/gcp-credentials.json",
+        "credentials.json",
+        "infra/service-account-prod.json",
+        "infra/prod.tfvars.json",
+    ):
+        assert ignored(rel), rel
+    assert not ignored("infra/terraform.tfvars.example")

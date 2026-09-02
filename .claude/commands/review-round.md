@@ -85,7 +85,8 @@ Agents:  <list>
   the other records; report stale, contradictory or unrecorded sentences").
   Do not spawn code-reviewer or functionality-tester — there is no code in
   the range to review or run; the gate already checked links, targets,
-  Evidence ids and the BACKLOG count.
+  Evidence ids, the BACKLOG count and the live-identifier value positions
+  (check 5).
 - **Mixed**: the union.
 
 All agents are report-only — no Write/Edit, do not grant more. Each prompt

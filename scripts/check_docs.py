@@ -3,9 +3,9 @@
 (the CI lint job runs it too). Not a pytest file, so a docs-only edit does not
 re-trigger the full suite.
 
-Four checks (1 over the living docs, records and plans; 2 over the living docs
+Five checks (1 over the living docs, records and plans; 2 over the living docs
 = CLAUDE.md + README + docs/*.md minus the plans; 3 over the source files
-TRACES names; 4 over CLAUDE.md/BACKLOG.md):
+TRACES names; 4 over CLAUDE.md/BACKLOG.md; 5 over the tracked records):
   1. Links/anchors — every relative markdown link points at a real file inside
      the repo, and a `#anchor` resolves to a heading there (GitHub-style slug).
   2. Make targets — every `make <target>` the LIVING docs name exists in the
@@ -21,11 +21,19 @@ TRACES names; 4 over CLAUDE.md/BACKLOG.md):
      Starts with the tooling's own guards; add a row when a doc cites a symbol.
   4. BACKLOG count — CLAUDE.md's "Open BACKLOG rows: **N**" equals the
      un-struck rows in BACKLOG.md (the sentence two branches always rewrite).
+  5. Live identifiers — in every tracked record (RECORD_GLOBS, via
+     `git ls-files`), every VALUE POSITION a project, repository or account
+     identifier can occupy (VALUE_POSITIONS: `NAME=value`, `--flag value`,
+     `gs://` buckets, `<x>.ontime` qualifiers, addresses) holds a placeholder
+     SHAPE (DECISIONS, fix/public-release). Every set is closed and pinned;
+     an allowlist of shapes, never a denylist of ids; a failure prints
+     file:line and the position, never the value.
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -244,6 +252,100 @@ def check_backlog_count(errors: list[str]) -> int:
     return 1
 
 
+# ------------------------------------------------------ 5. live identifiers
+
+# INVARIANT: in every tracked record, every VALUE POSITION a project, repository
+# or account identifier can occupy holds a placeholder. Both halves are closed
+# sets pinned exactly by tests/test_check_docs.py — the records scanned, the
+# positions inspected, the shapes accepted. An ALLOWLIST of shapes, never a
+# denylist of ids (a guard that named the live id would re-publish it); a
+# failure prints file:line and the position's NAME, never the value (CI logs
+# are public). A bare id in prose has no position and is the reviewer's check
+# (.claude/agents/security-reviewer.md).
+
+# The tracked files a runbook line can land in — `git ls-files` pathspecs.
+RECORD_GLOBS: tuple[str, ...] = (
+    "*.md",
+    "Makefile",
+    ".github/workflows/*.yml",
+    "orchestration/*.yml",
+    "dbt/profiles.yml",
+    "infra/*.example",
+)
+# The names whose `NAME=value` / `name = value` carries a project, repo or principal.
+ARG_NAMES: tuple[str, ...] = (
+    "PROJECT",
+    "PROJECT_ID",
+    "OTR_DAG_PROJECT",
+    "OTR_GCP_PROJECT",
+    "GOOGLE_CLOUD_PROJECT",
+    "CLOUDSDK_CORE_PROJECT",
+    "project_id",
+    "github_repository",
+    "operator_principal",
+)
+# The flags whose `--flag=value` / `--flag value` does the same.
+FLAG_NAMES: tuple[str, ...] = (
+    "project",
+    "project_id",
+    "billing-account",
+    "impersonate-service-account",
+)
+_VALUE = r"([^\s`]+)"
+# (position name, pattern with the value as group 1). Closed; pinned exactly.
+VALUE_POSITIONS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("argument", re.compile(r"\b(?:" + "|".join(ARG_NAMES) + r")(?:=|\s=\s)" + _VALUE)),
+    ("flag", re.compile(r"--(?:" + "|".join(FLAG_NAMES) + r")(?:=|\s+)" + _VALUE)),
+    ("bucket", re.compile(r"gs://([^\s`/]+)")),
+    ("dataset qualifier", re.compile(r"([^\s`(]+)\.ontime\b")),
+    # Word characters on BOTH sides of the `@`: `<operator>` and
+    # `ontime-pipeline@<project_id>.iam…` never match; a live address does.
+    ("address", re.compile(r"([\w.+-]+@\w[\w-]*\.[\w.-]+)")),
+)
+# The accepted VALUE shapes, tested after one leading quote is dropped: a
+# `<placeholder>`, an ellipsis, a shell/make/Jinja expansion, Terraform's
+# `null`, a `your-…` example value, an address at an RFC 2606 example domain;
+# `user:` may prefix any of them (an IAM principal).
+_PLACEHOLDER = re.compile(
+    r"^(?:user:)?(?:<|…|\$|\{\{|null\b|your-|[\w.+-]+@example\.(?:com|net|org)\b)"
+)
+
+
+def placeholder_shaped(value: str) -> bool:
+    """A value is a placeholder by SHAPE; one leading quote does not change that
+    (`PROJECT='my-live-project'` is as live as the unquoted form)."""
+    if value[:1] in ("'", '"'):
+        value = value[1:]
+    return bool(_PLACEHOLDER.match(value))
+
+
+def records() -> list[Path]:
+    """The tracked files RECORD_GLOBS select — the index, not the working tree,
+    so an untracked scratch note is neither scanned nor publishable."""
+    out = subprocess.run(
+        ["git", "ls-files", "-z", "--", *RECORD_GLOBS],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout
+    return sorted(ROOT / rel for rel in out.decode().split("\0") if rel)
+
+
+def check_live_identifiers(errors: list[str]) -> int:
+    files = records()
+    for md in files:
+        rel = md.relative_to(ROOT)
+        for i, line in enumerate(md.read_text().splitlines(), 1):
+            for position, pattern in VALUE_POSITIONS:
+                for m in pattern.finditer(line):
+                    if not placeholder_shaped(m.group(1)):
+                        errors.append(
+                            f"live identifier: {rel}:{i} — a {position} value is "
+                            "not placeholder-shaped (`<…>`)"
+                        )
+    return len(files)
+
+
 def main() -> int:
     errors: list[str] = []
     counts = {
@@ -251,6 +353,7 @@ def main() -> int:
         "make targets": check_make_targets(errors),
         "traces": check_traces(errors),
         "backlog count": check_backlog_count(errors),
+        "records": check_live_identifiers(errors),
     }
     for e in errors:
         print(f"FAIL {e}")

@@ -170,22 +170,43 @@ annotated **Superseded by …** in place and never deleted.
 - **Three history-only identifiers are ACCEPTED, not rewritten.** (i) The
   project id and SA email in every earlier revision of the records — not a
   credential, unusable without IAM, and nothing billable is up (`docs/DEPLOYMENT.md`);
-  (ii) one of 261 commits authored under a personal address instead of the
-  GitHub noreply one; (iii) the phase-0 commit's mention of a private
-  predecessor repository's name, scrubbed in a later commit. A history rewrite
+  (ii) one early commit authored under a personal address instead of the
+  GitHub noreply one; (iii) an early revision's mention of a private
+  predecessor repository's name, scrubbed soon after. A history rewrite
   would cost the phase-by-phase trail `docs/PHASES.md` cites and every
   commit hash the specs and BACKLOG pin; none of the three is a secret.
-  Rejected: squashing to one initial commit (the trail is the portfolio).
-- **`.gitignore` gains `.envrc`, `*.pem`, `*.p12`, `*-key.json`,
-  `*-credentials.json`, `service-account*.json`.** Belt and braces: the real
-  guard is `tests/test_infra.py::test_no_tracked_secret_state_or_tfvars`, a
-  content scan; these mirror what `.dockerignore` already excluded so the two
-  never-commit lists agree.
+  Rejected: squashing to one initial commit (the trail is the portfolio); a
+  path-scoped rewrite of the two early revisions (every later hash moves with
+  them, and the specs and BACKLOG pin dozens).
+- **`.gitignore` and `.dockerignore` carry ONE secret-glob set, pinned.**
+  `.gitignore` gains `.envrc`, `*.pem`, `*.p12`, `*-key.json`,
+  `*-credentials.json`, `credentials*`, `service-account*.json`; `.dockerignore`
+  gains `**/.envrc`, `**/*.pem`, `**/*.p12`, `**/*.tfvars.json` (the exit audit
+  found the two lists did NOT agree, and nothing pinned them). The closed set
+  `SECRET_GLOBS` in `tests/test_infra.py::test_gitignore_and_dockerignore_secret_globs_agree`
+  must appear bare in `.gitignore` and `**/`-anchored in `.dockerignore`. The
+  content scan `test_no_tracked_secret_state_or_tfvars` stays the real catch for
+  a key pasted anywhere; `.envrc` is the one glob it cannot see (a path export,
+  not a key body), so its ignore rule is its only guard.
+- **A fifth `check-docs` check pins the placeholder rule.** Over every tracked
+  `*.md`: no email address (word characters on both sides of the `@` — a `<…>`
+  placeholder never matches), and every `PROJECT=` / `--project=` /
+  `OTR_DAG_PROJECT=` / `OTR_GCP_PROJECT=` / `project_id=` / `github_repository=`
+  value must be placeholder-shaped (`<…>`, `…`, quoted, `$`). An ALLOWLIST of
+  placeholder shapes, not a denylist of ids — a guard that named the live id
+  would re-publish it — and a failure prints the file:line, never the value.
+  Negative pin: `tests/test_check_docs.py::test_check_live_identifiers_reports_an_email_and_a_bare_project`.
+  The rule is stated in CLAUDE.md Conventions (Secrets) and the security-reviewer
+  checklist, because ROADMAP items 2, 5, 7 and 8 all paste live-run output into
+  DEPLOYMENT / RESULTS — the next such branch would otherwise undo the redaction.
 - **Out of the repo, on the GitHub side:** Actions → "Require approval for all
   external contributors" once public (CI runs `on: pull_request` with a
   read-only token, no secrets, SHA-pinned actions — a fork PR runs its own
   Makefile on the runner, so gate it); `enable_ci_wif` stays false until the
-  CI-WIF branch re-points `github_repository` at the public `owner/repo`.
+  CI-WIF branch re-points `github_repository` at the public `owner/repo`. Both
+  carry a trigger in BACKLOG ("The public-repo GitHub-side settings are outside
+  the tree"); the Actions API refuses the setting on a private repo, so it is a
+  same-day step after the flip, not a pre-flip one.
 
 ### fix/roadmap (after Phase 13, 2026-09-01)
 
@@ -1997,6 +2018,8 @@ allowlist (M); the root `workload_identity_provider` output (J); two datasets,
   make-target, trace (three tooling rows) and BACKLOG-count checks all run;
   TRACES grows as phases name guards. Why not drop it: the BACKLOG-count sentence is
   the one two branches always rewrite.
+  *Extended by fix/public-release (2026-09-01): a fifth check, live identifiers —
+  every record names placeholders only.*
 - **`unexport` is hygiene, not a guard (review round 1).** All three review
   agents falsified the threat-model cell "env value never reaches the recipe":
   make imports environment variables into its table regardless. The real
