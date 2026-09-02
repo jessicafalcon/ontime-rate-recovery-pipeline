@@ -7,6 +7,7 @@ into a tmp DuckDB — for the MAE / coverage proof. No service, no network."""
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -87,6 +88,21 @@ def test_scores_golden_matches_fixture(built: Path) -> None:  # noqa: F811
     assert len(rows) == pins.SCORES_ROWS
     assert golden.render(rows, SPEC) == EXPECTED.read_text()
     assert golden.diff_rows(rows, golden.parse(EXPECTED.read_text(), SPEC), 1) == []
+
+
+def test_scores_depends_on_dim_user_current_not_raw(built: Path) -> None:  # noqa: F811
+    """The layering fix (fix/scores-dim-current): scores_send_time reads the
+    open dim row through the dim_user_current mart, not the raw dim_user source.
+    dbt's own manifest (the artifact of the build just run under `built`) is the
+    proof the DAG edge moved — dim_user_current is now upstream, the raw source
+    no longer directly."""
+    manifest = json.loads((built.parent / "t" / "manifest.json").read_text())
+    (node,) = [
+        n for k, n in manifest["nodes"].items() if k.endswith(".scores_send_time")
+    ]
+    deps = node["depends_on"]["nodes"]
+    assert any(d.endswith(".dim_user_current") for d in deps), deps
+    assert not any(d.endswith(".raw.dim_user") for d in deps), deps
 
 
 def test_cohort_moments_and_as_of_match_pins(built: Path) -> None:  # noqa: F811

@@ -50,12 +50,12 @@ unit_tests:
       from it. The cohort moment is bin 8 (mass 3 vs 2, 1).
     model: scores_send_time
     given:
-      - input: source('raw', 'dim_user')
+      - input: ref('dim_user_current')
         format: sql
         rows: |
-          select 'u-a' as user_id, 'UTC' as tz, 'c' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
-          union all select 'u-b', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
-          union all select 'u-z', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
+          select 'u-a' as user_id, 'c' as cohort_id, 'UTC' as tz
+          union all select 'u-b', 'c', 'UTC'
+          union all select 'u-z', 'c', 'UTC'
       - input: ref('features_user_hour')
         format: sql
         rows: |
@@ -79,13 +79,13 @@ unit_tests:
       with n. Centres: 19.308 < 19.546 < 20.362.
     model: scores_send_time
     given:
-      - input: source('raw', 'dim_user')
+      - input: ref('dim_user_current')
         format: sql
         rows: |
-          select 'u-0' as user_id, 'UTC' as tz, 'c' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
-          union all select 'u-1', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
-          union all select 'u-30', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
-          union all select 'u-bg', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
+          select 'u-0' as user_id, 'c' as cohort_id, 'UTC' as tz
+          union all select 'u-1', 'c', 'UTC'
+          union all select 'u-30', 'c', 'UTC'
+          union all select 'u-bg', 'c', 'UTC'
       - input: ref('features_user_hour')
         format: sql
         rows: |
@@ -110,12 +110,12 @@ unit_tests:
       band and served at its own centre.
     model: scores_send_time
     given:
-      - input: source('raw', 'dim_user')
+      - input: ref('dim_user_current')
         format: sql
         rows: |
-          select 'u-ahead' as user_id, 'UTC' as tz, 'c' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
-          union all select 'u-behind', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
-          union all select 'u-bg', 'UTC', 'c', date '2025-12-01', timestamp '2025-12-01 00:00:00', cast(null as timestamp)
+          select 'u-ahead' as user_id, 'c' as cohort_id, 'UTC' as tz
+          union all select 'u-behind', 'c', 'UTC'
+          union all select 'u-bg', 'c', 'UTC'
       - input: ref('features_user_hour')
         format: sql
         rows: |
@@ -138,10 +138,10 @@ unit_tests:
       hour (1), the served time 00:30.
     model: scores_send_time
     given:
-      - input: source('raw', 'dim_user')
+      - input: ref('dim_user_current')
         format: sql
         rows: |
-          select 'u-c' as user_id, 'UTC' as tz, 'c' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
+          select 'u-c' as user_id, 'c' as cohort_id, 'UTC' as tz
       - input: ref('features_user_hour')
         format: sql
         rows: |
@@ -161,10 +161,10 @@ unit_tests:
       insertion order (bin 9 is listed first).
     model: scores_send_time
     given:
-      - input: source('raw', 'dim_user')
+      - input: ref('dim_user_current')
         format: sql
         rows: |
-          select 'u-t' as user_id, 'UTC' as tz, 'c' as cohort_id, date '2025-12-01' as signup_date, timestamp '2025-12-01 00:00:00' as valid_from, cast(null as timestamp) as valid_to
+          select 'u-t' as user_id, 'c' as cohort_id, 'UTC' as tz
       - input: ref('features_user_hour')
         format: sql
         rows: |

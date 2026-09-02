@@ -943,7 +943,21 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **20** — `fix/tf-remote-state` (2026-09-01, ROADMAP item 2)
+Open BACKLOG rows: **19** — `fix/scores-dim-current` (2026-09-02, ROADMAP item
+3) closed the last layering wart: `scores_send_time`'s `users` CTE now reads
+`ref('dim_user_current')` for the open dim row instead of re-deriving it from
+`source('raw', 'dim_user')` — the mart already computes that open row (and the
+write-back already reads it). A zero-behaviour refactor (no spec amendment; the
+fix/landing-package reasoning, recorded in DECISIONS): the three goldens are
+byte-identical (`make scores-golden` / `report` / `attribution-golden`, 0 differ
+each), tiny and medium MAE/coverage pins hold, the five scores dbt unit tests
+now mock `ref('dim_user_current')` with unchanged expected rows, and the moved
+DAG edge is pinned (`test_scores.py::test_scores_depends_on_dim_user_current_not_raw`,
+off dbt's manifest). The federation seam is untouched — `raw.dim_user` is still
+consumed, now through `dim_user_current`, so `test-int-spanner`'s
+source-resolution assertion still holds. Struck the scores/dim_user_current row,
+marked ROADMAP item 3 landed, and re-confirmed Spanner clean at exit. Prior:
+`fix/tf-remote-state` (2026-09-01, ROADMAP item 2)
 moved Terraform state to a versioned GCS remote backend: the drafted `backend
 "gcs"` in `infra/main.tf` is uncommented as a PARTIAL config (no project id in
 the `.tf` — the bucket is a `-backend-config` from the validated `PROJECT`), a

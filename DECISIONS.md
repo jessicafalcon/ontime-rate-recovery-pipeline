@@ -158,6 +158,40 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/scores-dim-current (after Phase 13, 2026-09-02)
+
+- **`scores_send_time` reads `ref('dim_user_current')` for the open dim row,
+  not `source('raw', 'dim_user')`.** ROADMAP item 3, closing the BACKLOG row of
+  the same title: the `dim_user_current` mart already computes the open SCD2 row
+  per user (`valid_to is null`), and the write-back already reads it for tz; the
+  scores model was the one place still re-deriving that open row straight from
+  the raw source. The `users` CTE now refs the mart and drops its own
+  `where valid_to is null` (the mart applies it). Nothing else moves.
+- **A zero-behaviour refactor, not a Fix-amendment design change — no spec
+  amendment.** It changes only *which relation a served model reads*, touching
+  no data structure, no write path, and no who-writes-what (the same models
+  write the same tables); the same fix/landing-package reasoning. The contract
+  is "the goldens are byte-identical," proven, not asserted: `make dbt-build
+  PROFILE=tiny` then `make scores-golden` / `make report` /
+  `make attribution-golden` each show 0 differ, and `make eval` for tiny and
+  medium holds every MAE/coverage pin. The five `scores_send_time` dbt unit
+  tests now mock `ref('dim_user_current')` (its `user_id, cohort_id, tz` shape)
+  in place of the raw source; their expected rows are unchanged — the unit-level
+  proof the output is identical.
+- **The federation seam is unaffected.** `test-int-spanner` asserts dbt resolved
+  the `raw.dim_user` SOURCE to the `dim_user_spanner` view. That source is still
+  consumed — now *through* `dim_user_current` — so the manifest still carries the
+  resolved source and the assertion still holds. `raw.dim_user` gained a
+  consumer path, lost none.
+- **The DAG edge is pinned.** `tests/test_scores.py::
+  test_scores_depends_on_dim_user_current_not_raw` reads dbt's own manifest from
+  the tiny build and asserts `scores_send_time.depends_on` now includes
+  `dim_user_current` and no longer the `raw.dim_user` source directly.
+- Rejected: leaving the raw read and pointing `dim_user_current` at scores
+  instead (backwards — the mart is the shared open-row definition, scores is a
+  consumer); adding a spec amendment (reserved for changes to a data structure /
+  write path / who-writes-what — this is none).
+
 ### fix/tf-remote-state (after Phase 13, 2026-09-01)
 
 *ROADMAP item 2. This entry is the opening amendment, committed alone before
