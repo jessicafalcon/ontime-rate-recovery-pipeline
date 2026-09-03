@@ -666,3 +666,15 @@ simulation and the power table.
   by hand, then re-run `tf-apply` (the API enablement is idempotent — the second
   apply found it on and proceeded to the environment). `docs/DEPLOYMENT.md`
   carries it as a Composer bootstrap step.
+- **Two in-process `dbtRunner().invoke` builds against DIFFERENT DuckDB paths in
+  one process are nondeterministic** (fix/holdout-eval, review). Every earlier
+  in-process build (`test_scores`, `test_simulate`, `test_backfill`) targets ONE
+  path per process (or rebuilds the same one), setting `OTR_DUCKDB_PATH` once.
+  The holdout is the first to build two paths back-to-back (served ≤ cut, then
+  full); on ~1 in 6 runs the second build cross-resolved and the evaluation
+  scored 0 users — dbt-duckdb's adapter can hold its connection to the FIRST
+  `OTR_DUCKDB_PATH` across invokes in the same process. Remedy: run each build in
+  its own subprocess (`eval/holdout.py::build` → `python -m eval.holdout`), so
+  each resolves its own path cleanly — exactly how the real `make dbt-build`
+  runs one build per process. Any future multi-warehouse builder (ROADMAP items
+  6, 7) must isolate its builds the same way, not swap the env in-process.
