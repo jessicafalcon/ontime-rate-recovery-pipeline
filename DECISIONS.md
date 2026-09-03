@@ -158,6 +158,66 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/append-landing (after Phase 13, 2026-09-02)
+
+*ROADMAP item 6. The opening commit is the spec (`specs/fix-append-landing.md`)
+and this entry, alone, before any code — it changes the landing write path and
+who-writes-what, and re-freezes `fixtures/tiny/raw`, so it is a spec + DECISIONS
+entry, not a bare amendment (CLAUDE.md → Fix amendments; ROADMAP item 6).
+STOP for approval before implementing.*
+
+- **The warehouse content does not move — only raw's packaging and the bytes
+  scanned to read it.** The generator emits the same events; the writer
+  repackages them and the landing appends them per partition. Every DuckDB
+  golden, every warehouse-derived pin (label accuracy, MAE, coverage, the
+  simulation, the holdout, `HOLDOUT_CUTS`) and every `send_schedule` hash is
+  byte-identical; only the raw file-structure pins (`RAW_FILES`, `_file_date`
+  assertions) and the frozen `MANIFEST.sha256` move. This is the central
+  constraint the branch is built to keep.
+- **The writer emits gzipped hourly files (`events_<date>_<HH>.jsonl.gz`),
+  written with `gzip.GzipFile(mtime=0)` and a fixed compresslevel.** The §2.10
+  export shape is a real Amplitude export's shape (hourly `.json.gz`), not a
+  plain daily file. Why the explicit `mtime=0`: `gzip.open` at defaults embeds a
+  wall-clock mtime and OS byte in the header, so the same SEED would produce
+  different bytes every run — breaking the frozen manifest and the determinism
+  policy. The hour is packaging only; the partition key is the date (`_file_date`
+  = the first 10 chars), so `THROUGH` still selects by upload date and rolls a
+  date's hourly files up together. Rejected: daily plain files (not the export
+  shape item 6 names); a manifest of loaded objects (a second source of truth off
+  the file name).
+- **The events landing is partition-overwrite per upload-date partition, one
+  layer up from the incremental models.** DuckDB deletes then inserts each
+  `cast(server_upload_time as date)` partition; BigQuery loads through the
+  `raw.events$YYYYMMDD` partition decorator with `WRITE_TRUNCATE` on a
+  DAY-partitioned table; the table persists across loads (append-only, not
+  table-recreate). A re-land of an already-landed partition leaves the content
+  identical and adds 0 net rows. This mirrors the `partition_overwrite` strategy
+  the dbt models already use — the same upload-date key at the layer below.
+  Rejected: insert-only skip-if-present (cannot absorb a date that later gains an
+  hour; a changed re-land would be silently dropped); the status-quo whole-table
+  recreate / `WRITE_TRUNCATE` (exactly what the measured 19.45 GB cost row
+  indicts). `raw.dim_user` is the one SCD2 seed, has no upload-date partition, and
+  stays a full replace each load. DuckDB `THROUGH` is monotonic-forward within a
+  warehouse (a `drop-db` resets; every test lands forward), documented in the
+  `make load` contract.
+- **`stg_events` prunes its raw source read to a superset upload-time window on
+  BigQuery only.** Inside `is_incremental()` and `target.type == 'bigquery'`, the
+  source read is bounded to `server_upload_time >= horizon_ts − (lookback_days +
+  margin) days` — the fix for the measured item-6 cost, where an unpartitioned
+  raw forced every incremental re-run to re-scan all of raw (19.45 GB). The window
+  is a *superset*: wide enough to include every row whose `event_date`
+  (client-local) is in the reprocess window despite the cross-clock offset to
+  `server_upload_time` (server), and wide enough to co-locate both copies of any
+  duplicate `insert_id`, so the earliest-copy dedupe (`stg_events` invariant 1) is
+  unchanged. DuckDB has no partitions and no benefit, so its SQL is left
+  unchanged — which is why every DuckDB golden is byte-identical for free, and the
+  prune's correctness is proven live by `make test-int-bigquery` byte parity (the
+  built tables match the full-scan build) plus the offline dedupe-span property.
+  Rejected: a tight `− lookback_days` window (the cross-clock offset can put an
+  in-window row just below it); pruning on DuckDB too (risks the goldens for no
+  gain). The measured pruned re-run bytes are a hand-filled `docs/RESULTS.md` line
+  (job facts are non-deterministic and unasserted, the standing carve-out).
+
 ### fix/holdout-eval (after Phase 13, 2026-09-02)
 
 *ROADMAP item 4. The opening amendment (ARCHITECTURE §7 report (d)) was committed
