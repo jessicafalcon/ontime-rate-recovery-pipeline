@@ -19,6 +19,12 @@ simulate — Phase 6: the counterfactual simulation (eval/simulate.py) rendered
          as the <profile> block of docs/RESULTS.md; check mode diffs the
          block byte-for-byte (exit 1 on drift); --write yes replaces only
          the bytes between the profile's markers (a missing pair refuses).
+holdout — fix/holdout-eval: the temporal holdout (eval/holdout.py). Serve on
+         data landed ≤ the profile's cut (tests/pins.py::HOLDOUT_CUTS), score the
+         served schedule against the RAW organic opens uploaded after the cut,
+         rendered as the <profile> block of docs/RESULTS.md; same check / --write
+         yes shape. Self-contained: builds two throwaway DuckDB warehouses in a
+         temp dir (served ≤ cut, full for the held-out opens) — no truth, no clock.
 power  — Phase 6: the A/B power table (eval/power.py) as the block of
          docs/AB_DESIGN.md, same check / --write yes shape.
 readme — Phase 13: the README first-screen block (README.md) and the findings
@@ -32,7 +38,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from eval import blocks, golden, power, readme, report, score, simulate
+from eval import blocks, golden, holdout, power, readme, report, score, simulate
 from landing import load as landing
 from landing.cli import die, validate_name
 
@@ -260,6 +266,38 @@ def readme_cmd(write: str = "") -> int:
     return 0 if ok else 1
 
 
+def holdout_cmd(profile: str, write: str = "") -> int:
+    """The temporal-holdout block (eval/holdout.py): serve on data landed ≤ the
+    profile's cut, score against the RAW organic opens uploaded after it, render
+    the `<!-- holdout:begin <p> -->` block of docs/RESULTS.md. Builds two throwaway
+    DuckDB warehouses in a temp dir (served ≤ cut, full for the held-out opens);
+    check mode diffs the block byte-for-byte, --write yes rewrites it."""
+    import tempfile
+
+    validate_name("PROFILE", profile)
+    if write not in ("", "yes"):
+        die("holdout: refused — WRITE takes only the literal `yes`")
+    from tests.pins import HOLDOUT_CUTS, HOLDOUT_WINDOW_HOURS  # cut/window are pins
+
+    cut = HOLDOUT_CUTS.get(profile)
+    if cut is None:
+        die(f"holdout: refused — no cut for {profile!r} in tests/pins.py::HOLDOUT_CUTS")
+    with tempfile.TemporaryDirectory(prefix=f"holdout_{profile}_") as tmp:
+        results = holdout.run(profile, cut, HOLDOUT_WINDOW_HOURS, Path(tmp))
+    rendered = holdout.render_block(profile, cut, HOLDOUT_WINDOW_HOURS, results)
+    rec = next(r for r in results if r.arm == "recommended")
+    what = f"{profile}, {rec.n_users} users, {rec.n_opens} held-out opens"
+    return _block_cmd(
+        "holdout",
+        write,
+        RESULTS,
+        holdout.BEGIN.format(profile=profile),
+        holdout.END.format(profile=profile),
+        rendered,
+        what,
+    )
+
+
 def power_cmd(write: str = "") -> int:
     rows = power.table_rows()
     return _block_cmd(
@@ -291,9 +329,14 @@ def main(argv: list[str] | None = None) -> int:
     sm.add_argument("--write", default="")
     sub.add_parser("power").add_argument("--write", default="")
     sub.add_parser("readme").add_argument("--write", default="")
+    ho = sub.add_parser("holdout")
+    ho.add_argument("profile")
+    ho.add_argument("--write", default="")
     a = ap.parse_args(argv)
     if a.cmd == "simulate":
         return simulate_cmd(a.profile, a.write)
+    if a.cmd == "holdout":
+        return holdout_cmd(a.profile, a.write)
     if a.cmd == "power":
         return power_cmd(a.write)
     if a.cmd == "readme":

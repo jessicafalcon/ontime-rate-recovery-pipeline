@@ -98,10 +98,18 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   off the mart), `cli.py` (`golden`, `score`, `report`, `scores-golden`;
   `truth_dir` = `fixtures/<p>/truth` when frozen, else
   `data/out/<p>/truth`, printed `(unfrozen)`; Phase 6: `simulate`,
-  `power`), `simulate.py` (Phase 6: the counterfactual simulation — three
+  `power`; fix/holdout-eval: `holdout`), `simulate.py` (Phase 6: the
+  counterfactual simulation — three
   arms under common random numbers through
   `generator.response.open_probability`, reading the SERVED pair and the
-  band anchor, never `center_hour_local`), `power.py` (the A/B power
+  band anchor, never `center_hour_local`), `holdout.py` (fix/holdout-eval,
+  ARCHITECTURE §7 report (d): the temporal holdout — the ONE `eval/` module
+  that reads NO truth. Builds two DuckDB warehouses (served ≤ an upload-date
+  cut, full for the held-out opens), then scores the served schedule against
+  the RAW organic `app_opened` opens uploaded after the cut — `in_window_share`
+  + `mean_nearest_hours` per arm (`recommended` served hour, `cohort` anchor);
+  no reachable-window or centre quantity, no clock — the non-circular
+  counterpart to the simulation), `power.py` (the A/B power
   table, `math.erf` + bisection), `blocks.py` (the marker-confined writer
   of generated doc blocks), `readme.py` (Phase 13: `first_screen_rows` +
   `render_block` / `render_svg` — the README results block (headline + table +
@@ -382,6 +390,22 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   nothing else (a missing pair is a refusal — the writer never creates or
   appends). `truth/` resolves as `eval` does (`(unfrozen)` for medium).
   Needs `dbt-build` first
+- `make holdout PROFILE=<p> [WRITE=yes]` *(fix/holdout-eval)* — the temporal
+  holdout (`eval/cli.py holdout`, ARCHITECTURE §7 report (d)): serve on data
+  landed ≤ the profile's cut (`tests/pins.py::HOLDOUT_CUTS`), then score the
+  served schedule against the RAW organic `app_opened` opens uploaded AFTER the
+  cut — the non-circular counterpart to the simulation (raw only, never `truth/`,
+  never a reachable-window or centre quantity, no clock). Two arms (`recommended`
+  the served per-user hour, `cohort` the band anchor), two measures:
+  `in_window_share` (opens within ±`HOLDOUT_WINDOW_HOURS` of the served hour) and
+  `mean_nearest_hours` (mean circular distance to a user's nearest held-out open);
+  rendered as the `<!-- holdout:begin <p> -->` block of `docs/RESULTS.md`, beside
+  the simulation. Self-contained: builds two throwaway DuckDB warehouses in a temp
+  dir (served ≤ cut, full for the held-out opens) — NO `dbt-build` first (`medium`
+  is unfrozen, so `make seed PROFILE=medium` first). Check mode diffs the block
+  byte-for-byte, prints `holdout OK: <p>, N users, M held-out opens, block
+  matches`, exit 1 on drift; `WRITE=yes` (the literal only) replaces the marked
+  bytes and nothing else (a missing pair refuses)
 - `make power [WRITE=yes]` — the A/B power table (`eval/cli.py power`):
   users per arm and days to power for `(tiny, medium) × MDE {1, 2, 5} pp`
   at α 0.05 / power 0.8 off the pinned baseline rates, rendered as the
@@ -952,7 +976,25 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **18** — `fix/large-profile` (2026-09-02, ROADMAP item 5, the
+Open BACKLOG rows: **17** — `fix/holdout-eval` (2026-09-02, ROADMAP item 4) added
+the temporal holdout, the non-circular counterpart to the counterfactual
+simulation (ARCHITECTURE §7 report (d), the opening amendment committed alone).
+`eval/cli.py holdout` serves a schedule on data landed ≤ an upload-date cut
+(`THROUGH`), then scores it against the RAW organic `app_opened` opens uploaded
+after the cut — read off the warehouse, never `truth/`, never a reachable-window
+or centre quantity, no clock. Two arms (`recommended` served hour, `cohort` band
+anchor), two measures per arm: `in_window_share` (opens within ±1 h of the served
+hour) and `mean_nearest_hours` (mean circular distance to a user's nearest
+held-out open). It builds two throwaway DuckDB warehouses (served ≤ cut, full for
+the held-out opens — one build's scores would have seen the held-out opens,
+circular). On medium's 21,840 unseen opens the per-user schedule beats the cohort
+band on both (share +0.065, nearest 1.096 → 0.613 h) — the proof; tiny (94 opens)
+is the frozen regression pin. Both blocks live in `docs/RESULTS.md` beside the
+simulation, pinned in `tests/pins.py` (`HOLDOUT_CUTS`, `HOLDOUT_WINDOW_HOURS`,
+`HOLDOUT_TINY`, `HOLDOUT_MEDIUM`), byte-identical under `make test`
+(`tests/test_holdout.py`). Struck the item-4 BACKLOG row, marked ROADMAP item 4
+landed; no pin, fixture, model, or `.tf` moved. Prior: `fix/large-profile`
+(2026-09-02, ROADMAP item 5, the
 last branch in the one-week cut) published the real-scale cost numbers: a `large`
 profile (200,000 users × 30 days, `shards` 200; 35,498,190 events, ~10 GB events
 JSONL, 41.9 M records incl. truth/dims) and the

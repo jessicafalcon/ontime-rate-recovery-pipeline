@@ -158,6 +158,62 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/holdout-eval (after Phase 13, 2026-09-02)
+
+*ROADMAP item 4. The opening amendment (ARCHITECTURE §7 report (d)) was committed
+alone before any code — it adds a metric outside the current scope; ROADMAP
+"Approvals recorded" required the STOP.*
+
+- **The temporal holdout is the non-circular counterpart to the simulation.** The
+  simulation (Phase 6) re-draws every outcome from the same latent that generated
+  the data — it reads `truth/`, so it proves the schedule scores well *under the
+  rule the data came from*, nothing more. The holdout reads only observed
+  behaviour: the RAW organic `app_opened` opens off the warehouse, never `truth/`,
+  never a reachable-window or centre quantity (those are truth concepts). New
+  invariant, named in the amendment.
+- **Serve on data landed ≤ an upload-date cut, score against opens uploaded after
+  it.** The cut uses the existing `THROUGH` mechanism (files selected by upload
+  date, `cast(server_upload_time as date)`). Because organic opens upload
+  promptly, "uploaded after the cut" is essentially "opens that happened after
+  the cut" — a genuine train-past / score-future split. The 72 h late-arrival
+  tail is *why* the cut is on upload date, not simulation day (an event uploaded
+  after the cut may have occurred before it).
+- **Two DuckDB builds, not one.** The served schedule must be trained on ≤ cut,
+  and the held-out opens are those uploaded > cut — a single full build's
+  `scores_send_time` would have seen the held-out opens (circular). So the command
+  builds a `through=cut` warehouse (served schedule off `scores_send_time`) and a
+  full warehouse (held-out opens off `stg_events`, filtered `> cut`), both in a
+  temp dir. *Rejected:* one build with an in-sample test set (not a holdout — the
+  point is that the model never saw the scored opens); reading held-out opens from
+  the raw files in Python (would re-implement staging's tz/SCD2 local-hour in
+  Python, off the warehouse — the metric reads SQL-computed columns only).
+- **Two measures, both circular, both off the served columns.** `in_window_share`
+  — the share of held-out opens within a *fixed* ±1 h of the served hour
+  (`HOLDOUT_WINDOW_HOURS`, a constant independent of the profile's reachability
+  window, so the two profiles are comparable); `mean_nearest_hours` — the mean
+  over users of the circular distance from the served hour to that user's nearest
+  held-out open. Two arms: `recommended` (the served per-user hour) and `cohort`
+  (the band anchor `cohort_hour_local`) — the served columns, never the model's
+  unclamped centre. *Rejected:* the profile's `window_minutes` for the window (ties
+  the eval to the model's target; "fixed" keeps it a neutral yardstick).
+- **The holdout command builds; eval elsewhere only reads.** `eval/holdout.py`
+  runs `dbt build` twice (the same `landing.load` + `dbtRunner` primitive the
+  tests use), which no other `eval/` command does. Justified: it needs a
+  controlled train/test split it cannot get from a pre-existing single build, and
+  `make pipeline` already chains build+eval in one process. Truth isolation is
+  unaffected — the builds land raw + dims, never truth, and the metric reads no
+  truth file. *Rejected:* a two-step `make` recipe that builds two named DuckDB
+  files then calls a reader (would need an `--out-db` seam on `pipeline.cli
+  dbt-build`, a broader change than a self-contained analysis command).
+- **tiny is the frozen regression pin, medium the proof.** Mirrors the
+  simulation's structure. tiny (cut `2026-01-08`, 94 held-out opens) pins the code
+  path cheaply and always green in CI; medium (cut `2026-01-25`, 21,840 held-out
+  opens) is the result: on opens the model never saw, the per-user schedule beats
+  the cohort band on both measures (share +0.065, nearest 1.096 → 0.613 h). The
+  cut and window are parameters (`tests/pins.py`, like `SIMULATE_SEED`); the
+  committed `docs/RESULTS.md` blocks are the byte-level pins, byte-identical under
+  `make test` (`tests/test_holdout.py`).
+
 ### fix/large-profile (after Phase 13, 2026-09-02)
 
 *ROADMAP item 5, the last branch in the one-week cut. This entry is the opening
