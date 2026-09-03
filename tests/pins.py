@@ -148,3 +148,30 @@ SEND_SCHEDULE_SHA256_TINY = (
 # (the Phase 7 `<=` reprocess-window boundary makes gap = lookback work); the
 # final send_schedule == SEND_SCHEDULE_SHA256_TINY.
 BACKFILL_THROUGHS_TINY = ("2026-01-07", LANDING_SPLIT_TINY, LATE_FILE_TINY)
+
+# fix/holdout-eval (ROADMAP item 4) — the temporal holdout (ARCHITECTURE §7
+# report (d)). The served schedule is trained on data landed with the upload-date
+# cut (THROUGH); the RAW organic app_opened opens uploaded AFTER the cut are the
+# held-out set the model never saw. Two measures per arm (recommended served hour,
+# cohort band anchor): the share of held-out opens inside ±HOLDOUT_WINDOW_HOURS of
+# the served hour, and the mean circular distance from the served hour to a user's
+# nearest held-out open. The cut and window are parameters (like SIMULATE_SEED);
+# the numbers below are read off the first green run, the committed docs/RESULTS.md
+# blocks are the byte-level pins.
+HOLDOUT_WINDOW_HOURS = 1.0  # a fixed ±1 h window, independent of the profile
+HOLDOUT_CUTS = {
+    "tiny": "2026-01-08",  # 04..08 train, opens uploaded 09..13 held out
+    "medium": "2026-01-25",  # ~22 days train, opens uploaded after the cut held out
+}
+# (in_window_share, mean_nearest_hours) per arm, rounded to the block's 6 decimals
+# — read off the first green run. recommended (per-user shift) beats cohort (the
+# band anchor) on BOTH measures, on opens the model never saw: the non-circular
+# signal (a higher share, a shorter nearest distance).
+HOLDOUT_TINY = {
+    "recommended": (0.180851, 1.127500),
+    "cohort": (0.148936, 1.448333),
+}
+HOLDOUT_MEDIUM = {
+    "recommended": (0.229350, 0.612883),
+    "cohort": (0.164057, 1.096425),
+}

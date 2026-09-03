@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate power readme writeback pipeline test-int-airflow bq-load test-int-bigquery spanner-load test-int-spanner tf-validate tf-plan tf-apply tf-destroy tf-migrate-state tf-freeze
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate holdout power readme writeback pipeline test-int-airflow bq-load test-int-bigquery spanner-load test-int-spanner tf-validate tf-plan tf-apply tf-destroy tf-migrate-state tf-freeze
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -149,6 +149,16 @@ report:
 # as `eval` does (`(unfrozen)` for medium). Needs `make dbt-build` first.
 simulate:
 	uv run python -m eval.cli simulate $(call _Q,$(value PROFILE)) --write $(call _Q,$(value WRITE))
+
+# The temporal holdout (eval/cli.py holdout): serve on data landed <= the
+# profile's cut (tests/pins.py::HOLDOUT_CUTS), score the served schedule against
+# the RAW organic opens uploaded after the cut, rendered as the <PROFILE> block
+# of docs/RESULTS.md. Self-contained: it builds two throwaway DuckDB warehouses
+# in a temp dir (served <= cut, full for the held-out opens) — no `dbt-build`
+# first, no truth, no clock. Same check / WRITE=yes shape as simulate. medium is
+# seeded and unfrozen, so `make seed PROFILE=medium` first for it.
+holdout:
+	uv run python -m eval.cli holdout $(call _Q,$(value PROFILE)) --write $(call _Q,$(value WRITE))
 
 # The A/B power table (eval/cli.py power): users per arm and days to power
 # from the pinned baseline rates, rendered as the block of docs/AB_DESIGN.md;
