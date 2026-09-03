@@ -96,10 +96,12 @@ make holdout PROFILE=tiny
    DuckDB's SQL is unchanged). The incremental re-run scans a window, not all of
    raw, and every built table is byte-identical to the full-scan build.
    *Evidence: rows 4, 6.*
-5. **The dedupe is never split by the prune.** For every duplicate `insert_id`,
-   the two copies' `server_upload_time` span is within the prune window, so the
-   pruned source read always sees both copies together and the earliest-copy
-   dedupe (invariant 1 of `stg_events`) is unchanged. *Evidence: row 7.*
+5. **The dedupe is never split by the prune.** A duplicate's two copies span
+   ≤ 1 h in `server_upload_time` by generator construction (`inject_duplicates`
+   offsets a copy by `_secs(rng, 0, 3600)`), and the derived prune `margin`
+   exceeds that, so the pruned source read always sees both copies together and
+   the earliest-copy dedupe (invariant 1 of `stg_events`) is unchanged — a
+   property of the generator, not of tiny's fixture. *Evidence: row 7.*
 6. **Records re-frozen and updated.** `fixtures/tiny/MANIFEST.sha256`,
    `tests/pins.py` (raw-structure pins only), and the record files in §Record
    updates. *Evidence: row 8.*
@@ -117,8 +119,8 @@ branch; `docs/ROADMAP.md` item 6 carries the "as landed" note at exit.)
 | 4, 6 | `make test-int-bigquery PROJECT=<id> CONFIRM=yes` — the three `Golden` specs diff byte-for-byte off BigQuery + pins re-asserted (`tests/integration/test_int_bigquery.py`) |
 | 5 | `tests/test_landing.py::test_double_land_partition_writes_zero_new_rows` — a second `load(profile, db, through)` over the same db leaves `count(*)` and content unchanged |
 | 6 | `make holdout PROFILE=tiny` → `block matches`; `make attribution-golden`/`scores-golden`/`report` → `0 differ`; `make eval PROFILE=tiny` → the LABEL_ACCURACY / MAE / coverage pins |
-| 7 | `tests/test_landing.py::test_duplicate_upload_span_within_lookback` — the injected duplicate copies (`STRADDLING_DUPLICATE_TINY`) span ≤ the prune window; a data property of every profile's raw |
-| 8 | `git diff main...HEAD` over the §Record-updates list; `tests/test_pins.py` (structure pins re-read) |
+| 5 | `tests/test_generator.py::test_duplicate_upload_span_bounded` — `inject_duplicates` offsets a copy by `_secs(rng, 0, 3600)`, so both copies of any duplicate span ≤ 1 h in `server_upload_time` for ALL seeds/profiles (a generator invariant, not a fixture property); `tests/test_staging.py::test_prune_predicate_only_under_bigquery_incremental` — the source predicate renders iff `is_incremental()` and `target.type == 'bigquery'` |
+| 6 | `git diff main...HEAD` over the §Record-updates list; `tests/test_pins.py` (structure pins re-read) |
 
 ## Invariants (REQUIRED)
 
@@ -129,7 +131,7 @@ branch; `docs/ROADMAP.md` item 6 carries the "as landed" note at exit.)
 | For all cuts, `load(profile, db, through)` yields the same raw row multiset as the pre-change daily landing did for that cut — hourly packaging never moves a row across the `through` boundary. | `tests/test_landing.py::test_through_rolls_hourly_files_to_upload_date` |
 | For all partitions, re-landing an already-landed upload-date partition leaves `raw.events` content-identical and adds 0 net rows (idempotent, not table-recreate). | `tests/test_landing.py::test_double_land_partition_writes_zero_new_rows` |
 | For all incremental BigQuery re-runs, the built tables are byte-identical to the full-scan build (the pruned source window is a superset of every row the full scan keeps). | `tests/integration/test_int_bigquery.py` (byte parity) + `make test-int-bigquery` |
-| For all duplicate `insert_id`s, the two copies' `server_upload_time` span is within the prune window, so the dedupe sees both copies together (the earliest-copy rule is unchanged). | `tests/test_landing.py::test_duplicate_upload_span_within_lookback` |
+| For all seeds and profiles, a duplicate's two copies span ≤ 1 h in `server_upload_time` (`inject_duplicates`: `+_secs(rng, 0, 3600)`), so a prune `margin` ≥ that bound always sees both copies together and the earliest-copy rule is unchanged. | `tests/test_generator.py::test_duplicate_upload_span_bounded` — assert every injected copy's offset is `< 3600` s over a sweep of seeds |
 
 Rules — the source-scan prune is upheld only in dbt SQL, which has no mutation
 operator (BACKLOG); it names its dbt/integration test in the table instead. The
@@ -178,15 +180,24 @@ wrong.)
   each load — it has no upload-date partition.
 - **`stg_events` bounds its `source('raw','events')` read to a superset
   upload-time window inside `is_incremental()` and `target.type == 'bigquery'`
-  only** — `server_upload_time >= horizon_ts − (lookback_days + margin) days`,
-  a window proven wide enough to include every row whose `event_date` is in the
-  reprocess window AND to co-locate every duplicate — satisfies the
-  prune-is-byte-identical and dedupe-not-split invariants. Rejected: pruning on
-  DuckDB too (no partitions, no benefit, and it would risk the DuckDB goldens for
-  nothing — DuckDB SQL stays unchanged, so its goldens are unchanged for free);
-  a tight `− lookback_days` window (the cross-clock offset between `event_date`
-  (client-local) and `server_upload_time` (server) can put an in-window row just
-  below it — the margin is the safety, the parity run is the proof).
+  only** — `server_upload_time >= horizon_ts − (lookback_days + margin) days`.
+  The `margin` is DERIVED from bounded generator knobs, not tuned to a fixture:
+  every way an in-reprocess-window row can carry a low `server_upload_time` is a
+  closed knob — `ceil(late_arrival_max_hours / 24)` (the dominant term:
+  `horizon = max(server_upload_time)` is inflated forward by a late export batch,
+  up to 72 h on medium/large) `+` the max `dim_user.tz` offset in days between
+  the local `event_date` and UTC `server_upload_time` (≤ 1 day) `+` the ≤ 1 h
+  duplicate span (`inject_duplicates`). So `margin = ceil(late_arrival_max_hours
+  / 24) + tz_days + 1`, computed from the profile — the window is a superset of
+  every row the full scan keeps, and co-locates every duplicate, for the whole
+  CLASS, not just tiny. The live byte-parity run CONFIRMS the derivation; it is
+  not the proof. Rejected: pruning on DuckDB too (no partitions, no benefit, and
+  it would risk the DuckDB goldens for nothing — DuckDB SQL stays unchanged, so
+  its goldens are unchanged for free); a tight `− lookback_days` window with no
+  margin (a late-arrival-inflated horizon or a cross-clock offset drops an
+  in-window row below it); a margin fit to tiny's measured span (proves the case,
+  not the class — the Boundary contract wants the bound derived from the closed
+  knob and pinned by a test, not measured off a frozen file).
 - **DuckDB THROUGH is monotonic-forward within a warehouse.** The append-only
   landing accumulates partitions; landing `≤ through` into a FRESH db yields
   exactly those files (a `drop-db` resets), and a backfill lands forward
@@ -215,8 +226,11 @@ wrong.)
 - `dbt/models/staging/stg_events.sql` — the superset source-scan predicate under
   `is_incremental()` + `target.type == 'bigquery'`.
 - `tests/pins.py` — raw-structure pins only (`RAW_FILES`, file-count assertions).
-- `tests/test_generator.py`, `tests/test_landing.py`, `tests/integration/
-  test_int_bigquery.py` — the new invariant tests + parity.
+- `tests/test_generator.py` (gzip reseed identity; the ≤ 1 h duplicate-span
+  bound), `tests/test_landing.py` (double-land 0 rows; THROUGH roll-up),
+  `tests/test_staging.py` (the prune predicate renders only under
+  bigquery+incremental), `tests/integration/test_int_bigquery.py` (byte parity)
+  — the new invariant tests + parity.
 - `fixtures/tiny/raw/*.jsonl.gz`, `fixtures/tiny/MANIFEST.sha256` — the re-freeze
   (via `make freeze`).
 
@@ -285,8 +299,10 @@ user string — pinned in `tests/test_landing.py`.
   through the injectable `Clients` factory — the offline fake must exercise the
   same per-partition call shape (adapter contract — a fake stands under the
   thinnest adapter, tested on the call shape it wraps); (d) the cross-clock
-  margin width — proven only by the live byte-parity run, so the margin is
-  generous by design.
+  margin width — DERIVED from the profile's `late_arrival_max_hours`, the max tz
+  offset, and the ≤ 1 h duplicate span (`margin = ceil(late_arrival_max_hours /
+  24) + tz_days + 1`) and pinned offline by `test_duplicate_upload_span_bounded`;
+  the live byte-parity run confirms the derivation, it is not the proof.
 
 ## Out of scope (deferred, recorded)
 
