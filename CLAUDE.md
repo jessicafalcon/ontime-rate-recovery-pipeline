@@ -104,7 +104,8 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `generator.response.open_probability`, reading the SERVED pair and the
   band anchor, never `center_hour_local`), `holdout.py` (fix/holdout-eval,
   ARCHITECTURE §7 report (d): the temporal holdout — the ONE `eval/` module
-  that reads NO truth. Builds two DuckDB warehouses (served ≤ an upload-date
+  that RUNS `dbt build` (each in an isolated subprocess), and it reads NO truth.
+  Builds two DuckDB warehouses (served ≤ an upload-date
   cut, full for the held-out opens), then scores the served schedule against
   the RAW organic `app_opened` opens uploaded after the cut — `in_window_share`
   + `mean_nearest_hours` per arm (`recommended` served hour, `cohort` anchor);
@@ -649,11 +650,15 @@ DECISIONS.md or fix it.
   logic never does.
 - Model scoring and simulation are seeded; the generated blocks of
   `docs/RESULTS.md` and `docs/AB_DESIGN.md` regenerate byte-identically
-  (`tests/test_simulate.py` / `tests/test_power.py` under `make test` are the
-  CI proof; `make simulate` / `make power` check mode is the local one). The
+  (`tests/test_simulate.py` / `tests/test_power.py` / `tests/test_holdout.py`
+  under `make test` are the CI proof; `make simulate` / `make power` /
+  `make holdout` check mode is the local one). The
   simulation uses common random numbers (four uniforms per prompt, one
   seeded stream, `prompt_id` order), so the lift is a function of the
-  schedules alone.
+  schedules alone. The holdout reads only warehouse columns (served hour,
+  raw organic opens), and each of its two `dbt build`s runs in its own
+  subprocess so no in-process adapter state leaks between the two target DBs
+  (fix/holdout-eval).
 - Non-deterministic by nature and carved out: dbt run ids and timings,
   Airflow run ids, Terraform apply output, BigQuery job ids. Nothing asserted
   reads them. The BigQuery build reproduces every DuckDB golden and pin

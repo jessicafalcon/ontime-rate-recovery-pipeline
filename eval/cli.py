@@ -282,6 +282,13 @@ def holdout_cmd(profile: str, write: str = "") -> int:
     cut = HOLDOUT_CUTS.get(profile)
     if cut is None:
         die(f"holdout: refused — no cut for {profile!r} in tests/pins.py::HOLDOUT_CUTS")
+    try:  # a clean refusal for an unseeded profile (medium is unfrozen), not a
+        landing.fixture_dir(profile)  # subprocess build-failure traceback
+    except FileNotFoundError:
+        die(
+            f"holdout: refused — no raw/ for {profile}; "
+            f"run `make seed PROFILE={profile}` first"
+        )
     with tempfile.TemporaryDirectory(prefix=f"holdout_{profile}_") as tmp:
         results = holdout.run(profile, cut, HOLDOUT_WINDOW_HOURS, Path(tmp))
     rendered = holdout.render_block(profile, cut, HOLDOUT_WINDOW_HOURS, results)
