@@ -14,6 +14,8 @@ Both measures are circular and read off the model's own served columns."""
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,14 +33,15 @@ DBT = landing.ROOT / "dbt"
 # ------------------------------------------------------------------ the builds
 
 
-def build(profile: str, db: Path, through: str | None) -> bool:
-    """Land `profile` into `db` (the files uploaded ≤ `through`, or all when
-    None) and run `dbt build` against it. The same primitive the tests use
-    (tests/test_scores.py::build_profile); it lands raw + dims, never truth."""
+def _build_in_process(profile: str, db: Path, through: str | None) -> bool:
+    """Land `profile` into `db` (files uploaded ≤ `through`, or all when None)
+    and run one `dbt build` against it in THIS process. Runs ONLY inside the
+    isolated subprocess `build` spawns — it lands raw + dims, never truth."""
     os.environ.setdefault("DO_NOT_TRACK", "1")
     from dbt.cli.main import dbtRunner
 
     landing.load(profile, db, through)
+    os.environ["OTR_DUCKDB_PATH"] = str(db)
     args = [
         "build",
         "--project-dir",
@@ -51,15 +54,36 @@ def build(profile: str, db: Path, through: str | None) -> bool:
         "--target-path",
         str(db.parent / f"t_{db.stem}"),
     ]
-    prev = os.environ.get("OTR_DUCKDB_PATH")
-    os.environ["OTR_DUCKDB_PATH"] = str(db)
-    try:
-        return bool(dbtRunner().invoke(args).success)
-    finally:
-        if prev is None:
-            os.environ.pop("OTR_DUCKDB_PATH", None)
-        else:
-            os.environ["OTR_DUCKDB_PATH"] = prev
+    return bool(dbtRunner().invoke(args).success)
+
+
+def build(profile: str, db: Path, through: str | None) -> bool:
+    """Land + build `profile` into `db` in an ISOLATED SUBPROCESS. The holdout
+    builds two different DuckDB paths back-to-back (served ≤ cut, full); dbt's
+    in-process adapter can hold its connection to the FIRST path, so two builds
+    swapping `OTR_DUCKDB_PATH` in one process are nondeterministic (a rare
+    served/full cross-resolve scored 0 users — fix/holdout-eval review). A fresh
+    process per build resolves its own `OTR_DUCKDB_PATH` cleanly — exactly how
+    the real `make dbt-build` runs one build per process. Returns True on
+    success; `through` is passed as the empty string for None."""
+    proc = subprocess.run(
+        [sys.executable, "-m", "eval.holdout", profile, str(db), through or ""],
+        cwd=str(landing.ROOT),
+        env={**os.environ, "PYTHONPATH": str(landing.ROOT), "DO_NOT_TRACK": "1"},
+    )
+    return proc.returncode == 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`python -m eval.holdout <profile> <db> [<through>]` — one isolated build,
+    the entry point `build` spawns (never used directly)."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not 2 <= len(args) <= 3:
+        print("usage: python -m eval.holdout <profile> <db> [<through>]")
+        return 2
+    profile, db = args[0], Path(args[1])
+    through = args[2] if len(args) == 3 and args[2] else None
+    return 0 if _build_in_process(profile, db, through) else 1
 
 
 # ---------------------------------------------------------- reads off warehouse
@@ -151,14 +175,23 @@ def evaluate(
 
 def run(profile: str, cut: str, window: float, workdir: Path) -> list[ArmResult]:
     """Build the served (≤ cut) and full (held-out) warehouses under `workdir`,
-    then evaluate. Raises on a failed build."""
+    then evaluate. Raises on a failed build or an empty scored set — a run that
+    scored no user means the served or held-out warehouse came out empty (never
+    a real result for a seeded profile), so it fails LOUDLY instead of rendering
+    a zero block."""
     served_db = workdir / f"{profile}_served.duckdb"
     full_db = workdir / f"{profile}_full.duckdb"
     if not build(profile, served_db, cut):
         raise RuntimeError(f"holdout: served build failed ({profile}, ≤ {cut})")
     if not build(profile, full_db, None):
         raise RuntimeError(f"holdout: full build failed ({profile})")
-    return evaluate(served_schedule(served_db), heldout_opens(full_db, cut), window)
+    results = evaluate(served_schedule(served_db), heldout_opens(full_db, cut), window)
+    if not results or results[0].n_users == 0:
+        raise RuntimeError(
+            f"holdout: no scored users ({profile}, cut {cut}) — the served or "
+            "held-out warehouse is empty"
+        )
+    return results
 
 
 # ------------------------------------------------------------------- the block
@@ -189,3 +222,7 @@ def render_block(
         f"open, {rec.n_opens} opens."
     )
     return "\n".join(lines) + "\n"
+
+
+if __name__ == "__main__":
+    sys.exit(main())

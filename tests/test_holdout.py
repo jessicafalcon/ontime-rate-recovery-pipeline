@@ -4,8 +4,9 @@ report (d)). The served schedule, trained on data landed with an upload-date cut
 
 tiny (frozen fixture) is the cheap regression pin; medium (seeded into
 data/out/medium/, byte-identical on every run) is the proof. Each profile's two
-warehouses — served (≤ cut) and full (held-out opens) — are built once per module
-in-process; every assertion reads off them. No service, no network, no truth."""
+warehouses — served (≤ cut) and full (held-out opens) — are built once per module,
+each in its own isolated subprocess (holdout.build); every assertion reads off
+them. No service, no network, no truth."""
 
 from __future__ import annotations
 
@@ -132,6 +133,22 @@ def test_held_out_opens_are_strictly_after_the_cut(tiny_dbs: tuple[Path, Path]) 
     opens = holdout.heldout_opens(full_db, cut)
     assert sum(len(v) for v in opens.values()) == after
     assert after > 0 and at_or_before > 0  # a real train-past / score-future split
+
+
+def test_a_different_cut_changes_the_held_out_set(tiny_dbs: tuple[Path, Path]) -> None:
+    """The cut is a real parameter, not a constant baked to match the pin: an
+    earlier cut holds out more opens, a later one fewer. Kills a mutation that
+    hardcodes HOLDOUT_CUTS to a fixed date."""
+    _, full_db = tiny_dbs
+
+    def n_opens(cut: str) -> int:
+        return sum(len(v) for v in holdout.heldout_opens(full_db, cut).values())
+
+    earlier = n_opens("2026-01-06")
+    pinned = n_opens(pins.HOLDOUT_CUTS["tiny"])  # 2026-01-08
+    later = n_opens("2026-01-10")
+    assert earlier > pinned > later > 0  # monotone in the cut
+    assert pinned == 94  # the pinned cut's held-out open count (the block's denom)
 
 
 # ------------------------------------------------- non-circular by construction
