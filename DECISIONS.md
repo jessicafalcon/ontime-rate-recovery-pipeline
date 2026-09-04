@@ -217,6 +217,28 @@ STOP for approval before implementing.*
   in-window row just below it); pruning on DuckDB too (risks the goldens for no
   gain). The measured pruned re-run bytes are a hand-filled `docs/RESULTS.md` line
   (job facts are non-deterministic and unasserted, the standing carve-out).
+- **The prune `margin` is DERIVED from bounded generator knobs, not tuned to a
+  fixture** (the review refinement, spec commit 4e0c1b5). Every way an
+  in-reprocess-window row can carry a low `server_upload_time` is a closed knob:
+  the ≤ 1 h duplicate span (`inject_duplicates` offsets a copy by
+  `_secs(rng, 0, 3600)` — a generator invariant over ALL seeds, pinned by
+  `test_duplicate_upload_span_bounded`, not measured off tiny), the ≤
+  `late_arrival_max_hours` horizon inflation, and the ≤ 1-day tz offset. So
+  `margin = ceil(late_arrival_max_hours/24) + tz_days + 1` (5 covers every
+  profile), a model-local `{% set %}` constant — the live parity run CONFIRMS the
+  derivation, it is not the proof (Boundary contract: prove the class, not the
+  case). Rejected: a margin fit to tiny's measured span.
+- **Implementation choices the spec left open.** (a) Gzip is written
+  `gzip.GzipFile(filename="", mtime=0, compresslevel=<fixed>)` — `filename=""`
+  suppresses the source name `GzipFile` would otherwise copy from `fileobj.name`
+  (path-dependent bytes), beside the `mtime=0` the spec already named (§8). (b)
+  The streaming writer lifts the open-file soft limit first (`_raise_fd_limit`,
+  best effort) — a wide-horizon sharded run holds up to `days×24` per-hour gzip
+  members open at once (720 on `large`, up from ~30 per-day), so single-member
+  byte-identity to the in-memory path is kept without hitting the FD ceiling. (c)
+  A payload conflict rolls the whole load back in one transaction (nothing
+  committed) instead of dropping the tables — append-only means the tables
+  persist, so a fresh warehouse is left empty and an existing one unchanged.
 
 ### fix/holdout-eval (after Phase 13, 2026-09-02)
 

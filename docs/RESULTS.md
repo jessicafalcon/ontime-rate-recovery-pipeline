@@ -260,6 +260,19 @@ This is exactly the workload ROADMAP item 5 was meant to produce for item 6
 scan from ~3.6 GB (full) to a window. The amendment for item 6 is now backed by
 a measured number, not a guess.
 
+**Fixed in `fix/append-landing` (landed 2026-09-03).** `raw.events` is now
+DAY-partitioned on `server_upload_time` (a `WRITE_TRUNCATE` load per
+`raw.events$YYYYMMDD`), and `stg_events` bounds its source read to a superset
+upload-time window (`server_upload_time ≥ max(server_upload_time) −
+(lookback_days + margin) days`) inside `is_incremental()` and `target.type ==
+'bigquery'` — so the incremental re-run scans a window of partitions instead of
+all of raw. DuckDB is untouched (no partitions, no benefit) and every DuckDB
+golden is byte-identical. The pruned incremental re-run's bytes-scanned number
+lands here from the next ask-first `make test-int-bigquery` / `large` run on
+BigQuery (job facts are non-deterministic and hand-recorded, the standing
+carve-out); the offline half — the guard renders only on BigQuery, the duplicate
+span is bounded, the goldens hold — is pinned under `make test`.
+
 ### Partition pruning on the marts (`--dry_run`, free)
 
 The built tables ARE partitioned (`attribution` by `prompt_date`), and the
