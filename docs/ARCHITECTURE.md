@@ -184,12 +184,15 @@ row whose local `event_date` is in the reprocess window despite the client↔ser
 clock offset, and to co-locate both copies of any duplicate `insert_id` (≤ 1 h
 apart by generator construction), so the earliest-copy dedupe is unchanged. DuckDB
 has no partitions and no benefit, so its SQL is untouched and every DuckDB golden
-is byte-identical; the prune is offline-verified (the guard renders only
+is byte-identical; the prune is proven both offline (the guard renders only
 incrementally on BigQuery, the duplicate span is bounded, the margin is a
-per-profile-pinned floor). Its live INCREMENTAL byte-parity is a follow-up:
-`make test-int-bigquery` does one FULL build, so it proves the landing +
-DAY-partitioning parity (run live 2026-09-03, byte-identical), not the prune
-predicate (which fires only when `is_incremental()`). The margin is derived from bounded generator
+per-profile-pinned floor) and LIVE: `make test-int-bigquery`'s incremental parity
+phase lands a late tail and runs a PLAIN build, so the predicate renders and
+executes on BigQuery and the built tables are byte-identical to the full-scan
+goldens (run live 2026-09-03, `6 passed`). tiny's 9-day span sits inside the
+10-day window, so the prune excludes no partition here — its live *byte-parity*
+is proven, the byte *reduction* is a >10-day-span / large-profile effect (the
+19.45 GB un-pruned baseline, §RESULTS). The margin is derived from bounded generator
 knobs (`ceil(late_arrival_max_hours/24) + tz_days + 1`), not tuned to a fixture.
 
 ### 2.8 Features and scores *(Phase 5)*
@@ -727,9 +730,12 @@ simulation and the power table.
   copy and drop the other, changing the earliest-copy winner. Remedy: prune to a
   SUPERSET window whose margin is derived from the bounded generator knobs (the
   ≤ 1 h duplicate span, `late_arrival_max_hours`, the max tz offset), never a
-  tight `− lookback_days` cut. Offline-verified (guard + bounds); its live
-  incremental byte-parity is a BACKLOG follow-up (`make test-int-bigquery` runs
-  one full build, which does not fire the prune).
+  tight `− lookback_days` cut. Proven offline (guard + bounds) and live: since
+  fix/prune-live-proof, `make test-int-bigquery`'s incremental parity phase runs a
+  PLAIN build over a landed late tail, so the predicate renders and executes on
+  BigQuery and the built tables are byte-identical to the full-scan goldens (tiny's
+  9-day span is inside the 10-day window, so the reduction itself is a large-profile
+  effect).
   The predicate is native BigQuery SQL (`timestamp_sub` on a bare
   `server_upload_time`), a documented carve-out from the five-macro dialect
   contract (DECISIONS): a dispatch macro is the wrong shape — it must be a bare
