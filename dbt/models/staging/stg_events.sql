@@ -45,15 +45,16 @@ with raw_events as (
     -- (a) include every row whose event_date (client-local) is in the lookback
     -- reprocess window despite the client<->server clock offset and (b) co-locate
     -- both copies of any duplicate insert_id (<= 1 h apart, generator invariant),
-    -- so the earliest-copy dedupe below is unchanged. margin (days) =
-    -- ceil(late_arrival_max_hours/24) + tz_days + 1; 5 covers every profile
-    -- (medium/large 72 h). Correctness is proven live by test-int-bigquery byte
-    -- parity plus the offline duplicate-span bound.
-    {% set prune_margin_days = 5 %}
+    -- so the earliest-copy dedupe below is unchanged. The margin is
+    -- var('source_prune_margin_days'), a declared floor pinned by
+    -- test_source_prune_margin_covers_every_profile to be >=
+    -- ceil(late_arrival_max_hours/24) + tz_days + dup_days for every profile.
+    -- Correctness is proven live by test-int-bigquery byte parity plus the
+    -- offline duplicate-span bound.
     where server_upload_time >= (
         select timestamp_sub(
             cast(max(server_upload_time) as timestamp),
-            interval {{ var('lookback_days') + prune_margin_days }} day
+            interval {{ var('lookback_days') + var('source_prune_margin_days') }} day
         )
         from {{ source('raw', 'events') }}
     )

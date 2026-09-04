@@ -435,3 +435,29 @@ def test_staging_lookback_boundary_reprocesses_a_late_row(
         ][0]
         == 1
     )
+
+
+def test_source_prune_margin_covers_every_profile() -> None:
+    """fix/append-landing invariant 5: the BigQuery source-scan prune margin
+    (`var source_prune_margin_days`) is a DECLARED FLOOR that must cover, for
+    EVERY profile, the worst-case gap a reprocessed row's `server_upload_time`
+    can sit below the lookback window — `ceil(late_arrival_max_hours/24)` days of
+    horizon inflation (a late export batch pushes `max(server_upload_time)`
+    forward) + 1 day for the client<->server tz offset (< 24 h) + 1 day for the
+    <= 1 h duplicate span. If a profile's `late_arrival_max_hours` ever grew past
+    the floor, this fails LOUDLY here instead of silently under-covering the
+    window on the BigQuery incremental build. This is what makes the margin
+    derived-and-pinned, not a tuned constant."""
+    import math
+
+    import yaml
+
+    from generator import profiles
+
+    proj = yaml.safe_load((ROOT / "dbt" / "dbt_project.yml").read_text())
+    margin = proj["vars"]["source_prune_margin_days"]
+    tz_days, dup_days = 1, 1  # any Earth tz offset < 24 h; duplicate copies <= 1 h
+    for name in ("tiny", "medium", "large"):
+        p = profiles.load(name)
+        required = math.ceil(p.late_arrival_max_hours / 24) + tz_days + dup_days
+        assert margin >= required, (name, p.late_arrival_max_hours, required, margin)

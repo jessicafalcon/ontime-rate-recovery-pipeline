@@ -39,6 +39,13 @@ vars:
   shrinkage_pseudo_count: 5
   model_version: v1
   lookback_days: 5
+  # fix/append-landing: the extra days the BigQuery source-scan prune reaches
+  # BELOW the lookback window, so the window is a SUPERSET — wide enough for the
+  # client<->server clock offset AND to co-locate a duplicate's copies. A declared
+  # floor, pinned by tests/test_incremental.py::test_source_prune_margin_covers_
+  # every_profile to be >= ceil(late_arrival_max_hours/24) + tz_days + dup_days for
+  # every profile (5 covers medium/large's 72 h).
+  source_prune_margin_days: 5
   dim_user_identifier: dim_user
 
 models:
