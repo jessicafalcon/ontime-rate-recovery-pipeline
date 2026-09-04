@@ -38,6 +38,74 @@ from landing.cli import (
 DBT_DIR = landing.ROOT / "dbt"
 INT_PROFILE = "tiny"  # the integration runs' pins are tiny's by definition
 
+# The serving+landing image (fix/composer-cosmos) — the Artifact Registry path the
+# Cloud-Composer KubernetesPodOperator pods pull. `:latest` is a demo convenience
+# (Terraform sets OTR_SERVING_IMAGE to the same); a production pin is a digest.
+SERVING_IMAGE_REGION = "us-central1"
+SERVING_IMAGE_REPO = "ontime"
+SERVING_IMAGE_NAME = "serving"
+SERVING_IMAGE_TAG = "latest"
+
+
+def serving_image_uri(project: str) -> str:
+    """The AR image path for a validated project — the ONE place the registry
+    path is spelled (the DAG reads it from OTR_SERVING_IMAGE, Terraform sets it)."""
+    return (
+        f"{SERVING_IMAGE_REGION}-docker.pkg.dev/{project}/"
+        f"{SERVING_IMAGE_REPO}/{SERVING_IMAGE_NAME}:{SERVING_IMAGE_TAG}"
+    )
+
+
+def composer_manifest() -> int:
+    """`make composer-dbt-manifest` (offline): `dbt parse` on the duckdb target
+    renders `dbt/target/manifest.json` — the precompiled manifest Cosmos loads on
+    Composer (LoadMode.DBT_MANIFEST), so the scheduler runs no dbt at parse. No
+    cloud, no delete, no variable; the manifest is a gitignored build artifact the
+    deploy uploads into the DAG bucket."""
+    os.environ.setdefault("DO_NOT_TRACK", "1")
+    os.environ["OTR_DUCKDB_PATH"] = ":memory:"  # parse never opens the db
+    from dbt.cli.main import dbtRunner
+
+    res = dbtRunner().invoke(
+        [
+            "parse",
+            "--project-dir",
+            str(DBT_DIR),
+            "--profiles-dir",
+            str(DBT_DIR),
+            "--target",
+            "duckdb",
+        ]  # fmt: skip
+    )
+    if not res.success:
+        print("composer-dbt-manifest FAIL")
+        return 1
+    manifest = DBT_DIR / "target" / "manifest.json"
+    print(f"composer-dbt-manifest OK: {manifest.relative_to(landing.ROOT)}")
+    return 0
+
+
+def build_serving_image(project: str, confirm: str = "", origin: str = "") -> int:
+    """`make build-serving-image PROJECT=<id> CONFIRM=yes` (cloud-cost — pushes to
+    Artifact Registry): validate PROJECT and gate CONFIRM (command-line origin)
+    BEFORE any docker/registry call, then build the serving+landing image and push
+    it. Ask-first; the push runs in 7b."""
+    validate_project(project)
+    require_confirm("build-serving-image", confirm, origin)
+    image = serving_image_uri(project)
+    dockerfile = landing.ROOT / "orchestration" / "images" / "serving" / "Dockerfile"
+    build = subprocess.run(
+        ["docker", "build", "-f", str(dockerfile), "-t", image, "."],
+        cwd=str(landing.ROOT),
+    )
+    if build.returncode:
+        return build.returncode
+    push = subprocess.run(["docker", "push", image], cwd=str(landing.ROOT))
+    if push.returncode:
+        return push.returncode
+    print(f"build-serving-image OK: {image}")
+    return 0
+
 
 def full_refresh_args(full: str, origin: str) -> list[str]:
     """['--full-refresh'] only when FULL=yes comes from the command line — a
@@ -195,11 +263,20 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--full-origin", default="")
     b.add_argument("--through", default="")
     b.add_argument("--project", default="")
+    sub.add_parser("composer-manifest")
+    bi = sub.add_parser("build-serving-image")
+    bi.add_argument("project", nargs="?", default="")
+    bi.add_argument("--confirm", default="")
+    bi.add_argument("--confirm-origin", default="")
     a = ap.parse_args(argv)
     if a.cmd == "test-int-bigquery":
         return int_bigquery(a.profile, a.project, a.confirm, a.confirm_origin)
     if a.cmd == "test-int-spanner":
         return int_spanner(a.profile, a.project, a.confirm, a.confirm_origin)
+    if a.cmd == "composer-manifest":
+        return composer_manifest()
+    if a.cmd == "build-serving-image":
+        return build_serving_image(a.project, a.confirm, a.confirm_origin)
     return dbt_build(
         a.profile,
         a.target,

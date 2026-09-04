@@ -516,6 +516,39 @@ def test_bq_targets_confirm_from_command_line_only() -> None:
 
 
 @pytest.mark.parametrize(
+    "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", ""]
+)
+def test_build_serving_image_gates(value: str) -> None:
+    """fix/composer-cosmos: build-serving-image (cloud-cost AR push) passes PROJECT
+    as one single-quoted token from either origin and carries $(origin CONFIRM) —
+    an env CONFIRM=yes reaches Python as 'environment' and is refused; a
+    metacharacter value never breaks out of the single quote."""
+    quoted = "'" + value.replace("'", "'\\''") + "'"
+    for origin in ("cmdline", "env"):
+        kv = {"PROJECT": value}
+        out = _make_n(
+            "build-serving-image",
+            kv if origin == "cmdline" else {},
+            kv if origin == "env" else {},
+        )
+        assert f"build-serving-image {quoted}" in out, (origin, out)
+        assert "pwned" not in out.replace(value, "")
+    # CONFIRM origin: only the command line counts
+    out = _make_n("build-serving-image", {"PROJECT": "p"}, {"CONFIRM": "yes"})
+    assert "--confirm 'yes' --confirm-origin 'environment'" in out
+    out = _make_n("build-serving-image", {"PROJECT": "p", "CONFIRM": "yes"}, {})
+    assert "--confirm 'yes' --confirm-origin 'command line'" in out
+
+
+def test_composer_manifest_is_offline() -> None:
+    """fix/composer-cosmos: the manifest target is offline — no PROJECT, no
+    CONFIRM, no delete (a `dbt parse` on the duckdb target)."""
+    out = _make_n("composer-dbt-manifest", {}, {})
+    assert "pipeline.cli composer-manifest" in out
+    assert "--project" not in out and "--confirm" not in out
+
+
+@pytest.mark.parametrize(
     "value", ['"; echo pwned; "', "$(shell echo pwned)", "../x", "a'b", "", "k=v,k2=v2"]
 )
 def test_tf_targets_pass_vars_as_one_literal(value: str) -> None:
