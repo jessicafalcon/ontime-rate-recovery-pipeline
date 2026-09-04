@@ -3,11 +3,18 @@
 Column types come from `landing/ddl.sql` (generated from the contract), never
 from file inference: `event_properties` stays `json` so a JSON `null` value
 survives, and an empty `valid_to` becomes SQL NULL (the open SCD2 row).
-Idempotent: every load recreates both tables from the files."""
+
+Append-only (fix/append-landing): `raw.events` persists across loads; each load
+overwrites the selected upload-date partitions (delete-then-insert per
+`cast(server_upload_time as date)`) and never recreates the whole table, so
+re-landing an already-landed date adds 0 net rows. THROUGH accumulates forward
+within a warehouse (`drop-db` resets); a smaller THROUGH after a larger one does
+not trim. `raw.dim_user` is the one seed and is a full replace each load."""
 
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from pathlib import Path
 
 import duckdb
@@ -78,15 +85,19 @@ def conflicting_duplicates(con: duckdb.DuckDBPyConnection) -> list[str]:
 
 
 def _file_date(name: str) -> str:
-    """The upload date in `events_YYYY-MM-DD.jsonl` (the landing key)."""
-    return name[len("events_") : -len(".jsonl")]
+    """The upload date in `events_YYYY-MM-DD[_HH].jsonl.gz` (the partition key):
+    the first 10 chars of the stem. The hour, when present, is packaging only —
+    every event in the file has `cast(server_upload_time as date)` == this date."""
+    stem = name[len("events_") : -len(".jsonl.gz")]
+    return stem[:10]
 
 
 def event_files(fixture: Path, through: str | None = None) -> list[Path]:
-    """Every landing file, sorted by name (= by upload date); never `days`.
-    `through` keeps only files uploaded on or before that date — a landing is
-    the raw-table state after loading a subset (Phase 7); None loads them all."""
-    files = sorted((fixture / "raw").glob("events_*.jsonl"))
+    """Every landing file, sorted by name (= by upload date then hour); never
+    `days`. `through` keeps only files uploaded on or before that date — a
+    landing is the raw-table state after loading a subset (Phase 7); None loads
+    them all."""
+    files = sorted((fixture / "raw").glob("events_*.jsonl.gz"))
     if through is None:
         return files
     return [f for f in files if _file_date(f.name) <= through]
@@ -122,20 +133,39 @@ def column_spec(con: duckdb.DuckDBPyConnection, table: str) -> str:
     return "{" + ", ".join(f"{c}: '{t}'" for c, t in rows) + "}"
 
 
-def load_events(con: duckdb.DuckDBPyConnection, files: list[Path]) -> int:
+def partition_overwrite_events(
+    con: duckdb.DuckDBPyConnection, files: list[Path]
+) -> int:
+    """Append-only load: for each upload-date partition in the selection, delete
+    that date's rows then insert the date's gzipped hourly files — so re-landing
+    a date is idempotent (0 net rows) and an unselected date is untouched. The
+    partition key is the file name's date (`_file_date`), which equals every
+    row's `cast(server_upload_time as date)` by contract. Returns the table's
+    total row count. Mirrors the `partition_overwrite` dbt strategy one layer up."""
     spec = column_spec(con, "events")
+    by_date: dict[str, list[Path]] = defaultdict(list)
     for f in files:
+        by_date[_file_date(f.name)].append(f)
+    for date in sorted(by_date):
         con.execute(
-            "insert into raw.events select * from read_json(?, "
-            f"format='newline_delimited', columns={spec}, "
-            f"timestampformat='{TS_FORMAT}')",
-            [str(f)],
+            "delete from raw.events "
+            "where cast(server_upload_time as date) = cast(? as date)",
+            [date],
         )
+        for f in by_date[date]:
+            con.execute(
+                "insert into raw.events select * from read_json(?, "
+                f"format='newline_delimited', columns={spec}, "
+                f"timestampformat='{TS_FORMAT}', compression='gzip')",
+                [str(f)],
+            )
     return con.execute("select count(*) from raw.events").fetchone()[0]
 
 
 def load_dims(con: duckdb.DuckDBPyConnection, csv: Path) -> int:
+    """Full replace: the one dim seed has no upload-date partition."""
     spec = column_spec(con, "dim_user")
+    con.execute("delete from raw.dim_user")
     con.execute(
         "insert into raw.dim_user select * from read_csv(?, header=true, "
         f"columns={spec}, nullstr='', timestampformat='{TS_FORMAT}')",
@@ -151,22 +181,26 @@ class ConflictingDuplicates(ValueError):
 def load(
     profile: str, db: Path | None = None, through: str | None = None
 ) -> tuple[int, int, int]:
-    """(files, event rows, dim rows). Recreates `raw.*` from the fixture (the
-    files uploaded on or before `through`, all of them when None — a landing is
-    the raw-table state, Phase 7); raises ConflictingDuplicates (tables dropped
-    again) on a payload conflict."""
+    """(files, event rows, dim rows). Append-only: keeps `raw.events` across
+    loads and overwrites the selected upload-date partitions (the files uploaded
+    on or before `through`, all of them when None — a landing is the raw-table
+    state, Phase 7); `raw.dim_user` is a full replace. The whole load is one
+    transaction: a payload conflict rolls it back (nothing committed) and raises
+    ConflictingDuplicates, so a fresh warehouse is left empty and an existing one
+    unchanged."""
     fixture = fixture_dir(profile)
     files = event_files(fixture, through)
     con = connect(db or db_path(profile))
     try:
-        create_raw_tables(con)
-        n_events = load_events(con, files)
+        create_raw_tables(con)  # if not exists — the tables persist across loads
+        con.execute("begin transaction")
+        n_events = partition_overwrite_events(con, files)
         n_dims = load_dims(con, fixture / "dims" / "dim_user.csv")
         conflicts = conflicting_duplicates(con)
         if conflicts:
-            con.execute("drop table raw.events")
-            con.execute("drop table raw.dim_user")
+            con.execute("rollback")
             raise ConflictingDuplicates(", ".join(conflicts))
+        con.execute("commit")
     finally:
         con.close()
     return len(files), n_events, n_dims

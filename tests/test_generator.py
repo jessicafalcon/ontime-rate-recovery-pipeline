@@ -22,12 +22,53 @@ ROOT = Path(__file__).parent.parent
 
 
 def test_two_runs_are_byte_identical(tmp_path: Path) -> None:
+    """Reseed byte-identity (invariant 1), now over the gzipped raw: gzip is
+    written mtime=0 + fixed level + no embedded name, so the bytes reproduce."""
     a, b = tmp_path / "a", tmp_path / "b"
     cli.write_output(a, gen())
     cli.write_output(b, gen())
     assert manifest.compute(a) == manifest.compute(b)
     for rel in manifest.compute(a):
         assert (a / rel).read_bytes() == (b / rel).read_bytes()
+
+
+def test_raw_files_are_hourly_gzip(tmp_path: Path) -> None:
+    """Done-when 1: raw lands as events_<date>_<HH>.jsonl.gz and nothing else;
+    every event in a file falls on the file's named upload date and hour."""
+    import gzip
+    import json
+    import re
+
+    cli.write_output(tmp_path, gen())
+    raw = sorted((tmp_path / "raw").glob("*"))
+    pat = re.compile(r"^events_\d{4}-\d{2}-\d{2}_\d{2}\.jsonl\.gz$")
+    assert raw and all(pat.match(f.name) for f in raw), [f.name for f in raw]
+    for f in raw:
+        date, hour = f.name[len("events_") : -len(".jsonl.gz")].split("_")
+        for ln in gzip.open(f, "rt"):
+            ut = json.loads(ln)["server_upload_time"]
+            assert ut[:10] == date and ut[11:13] == hour, (f.name, ut)
+
+
+def test_duplicate_upload_span_bounded() -> None:
+    """fix/append-landing invariant 5: `inject_duplicates` offsets a copy by
+    `_secs(rng, 0, 3600)`, so a duplicate's two copies span < 1 h in
+    `server_upload_time` for EVERY seed (not just tiny's fixture). The
+    source-scan prune margin exceeds this, so a duplicate is never split across
+    the pruned window and the earliest-copy dedupe is unchanged."""
+    from collections import defaultdict
+
+    base = profiles.load("tiny")
+    for s in range(base.seed, base.seed + 8):
+        out = generate(base.model_copy(update={"seed": s}))
+        by_id: dict[str, list] = defaultdict(list)
+        for ev in out.events:
+            by_id[ev.insert_id].append(ev.server_upload_time)
+        dups = {k: v for k, v in by_id.items() if len(v) > 1}
+        assert dups, f"seed {s}: no duplicate to check"
+        for k, times in dups.items():
+            span = (max(times) - min(times)).total_seconds()
+            assert span < 3600, (s, k, span)
 
 
 def test_two_processes_under_different_tz_are_byte_identical(tmp_path: Path) -> None:

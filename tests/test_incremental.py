@@ -7,6 +7,7 @@ partition surviving a landing."""
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import subprocess
@@ -364,9 +365,10 @@ def _boundary_fixture(root: Path) -> None:
         ],
     }
     for name, rows in files.items():
-        (fx / "raw" / name).write_text(
-            "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows)
-        )
+        body = "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows).encode()
+        with (fx / "raw" / (name + ".gz")).open("wb") as raw:
+            with gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as gz:
+                gz.write(body)
     (fx / "dims" / "dim_user.csv").write_text(
         "user_id,tz,cohort_id,signup_date,valid_from,valid_to\n"
         "u-000001,UTC,c-morning,2025-12-01,2025-12-01 00:00:00.000000,\n"

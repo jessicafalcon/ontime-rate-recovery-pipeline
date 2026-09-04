@@ -16,6 +16,7 @@ import pytest
 from landing import bq, cli
 from landing import load as landing
 from pipeline import cli as pipeline_cli
+from tests import pins
 
 TINY = landing.fixture_dir("tiny")
 ROOT = Path(__file__).parent.parent
@@ -57,7 +58,8 @@ def test_selects_the_same_files_as_the_duckdb_landing() -> None:
         files = bq.selected_files(TINY, through)
         assert files["events"] == landing.event_files(TINY, through)
         assert files["dim_user"] == [TINY / "dims" / "dim_user.csv"]
-    assert len(bq.selected_files(TINY, "2026-01-07")["events"]) == 4
+    # hourly gzip: 65 files uploaded on or before 2026-01-07 (01-04 … 01-07)
+    assert len(bq.selected_files(TINY, "2026-01-07")["events"]) == 65
     assert bq.selected_files(TINY, "2025-01-01")["events"] == []
 
 
@@ -67,7 +69,7 @@ def test_uploads_then_loads_with_the_generated_schema() -> None:
     schema (landing/bq_schema.json — generated) and WRITE_TRUNCATE."""
     made, make = _factory()
     files, events, dims = bq.bq_load("tiny", "my-project", "2026-01-07", make)
-    assert (files, events, dims) == (4, 970, 22)
+    assert (files, events, dims) == (65, 970, 22)  # 65 hourly files ≤ 01-07
     assert [r.project for r in made] == ["my-project"]
     r = made[0]
     assert all(b == "my-project-ontime" for b, _, _ in r.uploads)
@@ -201,7 +203,9 @@ def test_no_client_is_built_before_validation(
     assert len(made) == 1
     out = capsys.readouterr().out
     assert "bq-load: source=fixtures/tiny → my-project.raw" in out
-    assert "bq-load OK: tiny — 10 files, 970 event rows, 22 dim rows" in out
+    assert (
+        f"bq-load OK: tiny — {pins.RAW_FILES} files, 970 event rows, 22 dim rows" in out
+    )
 
 
 def test_int_bigquery_entry_validates_and_gates_before_pytest(

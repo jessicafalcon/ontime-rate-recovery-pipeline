@@ -101,9 +101,12 @@ def column_tests(nullable: bool, values: list[str] | None) -> list[str]:
 
 
 def render_ddl() -> str:
+    # `if not exists`, not `or replace`: the append-only landing keeps `raw.events`
+    # across loads and overwrites one upload-date partition at a time
+    # (`landing.load`); `raw.dim_user` is a full replace the loader does itself.
     lines = [f"-- {HEADER}", f"create schema if not exists {SCHEMA};"]
     for table, model in TABLES:
-        lines.append(f"create or replace table {SCHEMA}.{table} (")
+        lines.append(f"create table if not exists {SCHEMA}.{table} (")
         cols = columns(model)
         for i, (name, typ, nullable, _) in enumerate(cols):
             null = "" if nullable else " not null"
