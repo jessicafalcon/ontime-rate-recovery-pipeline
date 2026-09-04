@@ -604,7 +604,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   the send-time model's `feature_window_days` (30), `max_user_shift_min`
   (120), `shrinkage_pseudo_count` (5), `model_version` (`v1`), the
   incremental `lookback_days` (5 — Phase 7; `lookback_days·24 >
-  late_arrival_max_hours` on every profile), and `dim_user_identifier`
+  late_arrival_max_hours` on every profile), `source_prune_margin_days`
+  (5 — fix/append-landing: the BigQuery source-scan prune reaches
+  `lookback_days + this` days below the horizon; a declared floor pinned per
+  profile by `test_source_prune_margin_covers_every_profile`), and `dim_user_identifier`
   (`dim_user` — Phase 10: which relation the `raw.dim_user` SOURCE resolves
   to; the Spanner run overrides it to the federation view
   `dim_user_spanner`) in `dbt_project.yml`.
@@ -737,7 +740,11 @@ DECISIONS.md or fix it.
   `target.type` — dbt-bigquery admits no custom strategy, so that dispatch
   body raises by design, Amendment U) — never a `default__`.
   A sixth needs a DECISIONS entry. `generate_schema_name` is a hook override
-  keyed on `target.type`, not a dispatch macro.
+  keyed on `target.type`, not a dispatch macro. The `fix/append-landing`
+  source-scan prune in `stg_events` is a documented carve-out from the five-macro
+  rule (DECISIONS): native BigQuery `timestamp_sub` on a bare partition-column
+  predicate, guarded to `target.type == 'bigquery'` — a macro would defeat
+  partition pruning and there is no DuckDB body (it never runs there).
 - Airflow contains no logic: a task is a `make` target or a dbt command.
 - Minimal but scalable: simplest standard solution now; the scaling path is a
   DECISIONS note, not speculative code. Do not claim scale we don't run.
@@ -995,7 +1002,7 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **16** — `fix/append-landing` (2026-09-03, ROADMAP item 6)
+Open BACKLOG rows: **17** — `fix/append-landing` (2026-09-03, ROADMAP item 6)
 made raw landing append-only. The writer emits the §2.10 export shape — gzipped
 hourly files `events_<date>_<HH>.jsonl.gz` (`filename=""` + `mtime=0` + fixed
 level, byte-reproducible; `fixtures/tiny` re-frozen 10 → 169 files). The DuckDB
@@ -1016,9 +1023,14 @@ MAE/coverage/accuracy/holdout pins hold; only the raw-structure pins moved
 + DuckDB append-only + re-freeze; then the BigQuery prune + DAY-partitioned
 landing) plus the records. **Remaining live proof: `make test-int-bigquery`
 (ask-first, cents) — the BigQuery byte parity + pruned-bytes RESULTS line.**
-Struck the item-6 BACKLOG row; the append-landing on Spanner dims, finer-than-day
-partitioning, and Composer-on-a-schedule (item 7) stay out of scope (BACKLOG if a
-case appears). Prior: `fix/holdout-eval` (2026-09-02, ROADMAP item 4) added
+Struck the item-6 BACKLOG row and opened one (gzip fixture reproducibility is
+proven same-machine only — the frozen manifest assumes CI's zlib, no in-suite
+canary); the append-landing on Spanner dims, finer-than-day partitioning, and
+Composer-on-a-schedule (item 7) stay out of scope (BACKLOG if a case appears).
+The review round found no survivors and no blockers; its should-fixes (the prune
+margin is now a test-pinned var, the dialect carve-out is recorded, `_file_date`
+asserts its shape) landed before merge. **Live proof still owed: `make
+test-int-bigquery` (ask-first).** Prior: `fix/holdout-eval` (2026-09-02, ROADMAP item 4) added
 the temporal holdout, the non-circular counterpart to the counterfactual
 simulation (ARCHITECTURE §7 report (d), the opening amendment committed alone).
 `eval/cli.py holdout` serves a schedule on data landed ≤ an upload-date cut

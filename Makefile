@@ -71,9 +71,11 @@ freeze:
 
 # ------------------------------------------------------------------ Phase 2
 # Raw landing (landing/cli.py): validates PROFILE, loads fixtures/<PROFILE>/{raw,dims}
-# into data/<PROFILE>.duckdb schema `raw`. Idempotent (tables recreated). THROUGH
-# (an upload date YYYY-MM-DD) lands only the files uploaded on or before it — a
-# landing is the raw-table state (Phase 7); empty loads them all.
+# into data/<PROFILE>.duckdb schema `raw`. Append-only (fix/append-landing):
+# raw.events persists and each load overwrites the selected upload-date partitions
+# (re-land = 0 net rows), raw.dim_user is a full replace. THROUGH (an upload date
+# YYYY-MM-DD) lands only the files uploaded on or before it — a landing is the
+# raw-table state (Phase 7), accumulating forward; empty loads them all.
 load:
 	uv run python -m landing.cli load $(call _Q,$(value PROFILE)) --through $(call _Q,$(value THROUGH))
 
@@ -92,8 +94,10 @@ dbt-build:
 
 # The BigQuery landing alone (landing/cli.py bq-load, Phase 9b): the same files
 # `load` selects → gs://<PROJECT>-ontime/landing/<PROFILE>/ → raw.events /
-# raw.dim_user with the schema generated from generator/models.py, recreated
-# (WRITE_TRUNCATE — idempotent). Cloud-cost (cents): CONFIRM=yes must have
+# raw.dim_user with the schema generated from generator/models.py; append-only
+# (fix/append-landing) — a WRITE_TRUNCATE load per upload-date partition into the
+# DAY-partitioned raw.events$YYYYMMDD, raw.dim_user a full replace; idempotent.
+# Cloud-cost (cents): CONFIRM=yes must have
 # COMMAND-LINE origin; PROJECT validated before any client; ADC, never a key.
 bq-load:
 	uv run python -m landing.cli bq-load $(call _Q,$(value PROFILE)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)' --through $(call _Q,$(value THROUGH))

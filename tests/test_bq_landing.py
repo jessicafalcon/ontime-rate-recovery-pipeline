@@ -1,9 +1,11 @@
-"""The BigQuery landing (specs/phase-9b-bigquery-dialect.md invariants 3, 7):
-the same files the DuckDB landing selects, the generated schema, ONE
-WRITE_TRUNCATE load job per table (a zero-byte object for an empty selection —
-Amendment X) — against FAKE clients. No google client is ever built here: the
-default factory is replaced by a sentinel that raises, so a code path
-constructing one goes red offline instead of reaching the network."""
+"""The BigQuery landing (specs/phase-9b-bigquery-dialect.md invariants 3, 7;
+append-only in fix/append-landing): the same files the DuckDB landing selects,
+the generated schema, a WRITE_TRUNCATE load per upload-date partition into the
+DAY-partitioned raw.events$YYYYMMDD plus one for the dim seed (a zero-byte object
+for an empty events selection — Amendment X) — against FAKE clients. No google
+client is ever built here: the default factory is replaced by a sentinel that
+raises, so a code path constructing one goes red offline instead of reaching the
+network."""
 
 from __future__ import annotations
 

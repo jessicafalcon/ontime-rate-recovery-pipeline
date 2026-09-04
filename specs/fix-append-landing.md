@@ -114,7 +114,7 @@ branch; `docs/ROADMAP.md` item 6 carries the "as landed" note at exit.)
 | Done-when | Proof (test file / `make` target / command output) |
 |---|---|
 | 1 | `tests/test_generator.py::test_raw_files_are_hourly_gzip` — the seeded `raw/` matches `events_<date>_<HH>.jsonl.gz`, no plain `.jsonl` remains |
-| 1, 6 | `tests/test_generator.py::test_reseed_is_byte_identical` / `make seed PROFILE=tiny` → `manifest match` — gzip `mtime=0` reproducibility |
+| 1, 6 | `tests/test_generator.py::test_two_runs_are_byte_identical` / `make seed PROFILE=tiny` → `manifest match` — gzip `mtime=0` reproducibility |
 | 2 | `tests/test_landing.py::test_through_rolls_hourly_files_to_upload_date` — landing `≤ cut` yields the same raw row multiset as the equivalent day-boundary selection |
 | 4, 6 | `make test-int-bigquery PROJECT=<id> CONFIRM=yes` — the three `Golden` specs diff byte-for-byte off BigQuery + pins re-asserted (`tests/integration/test_int_bigquery.py`) |
 | 5 | `tests/test_landing.py::test_double_land_partition_writes_zero_new_rows` — a second `load(profile, db, through)` over the same db leaves `count(*)` and content unchanged |
@@ -126,7 +126,7 @@ branch; `docs/ROADMAP.md` item 6 carries the "as landed" note at exit.)
 
 | Invariant ("for all …, … holds") | Falsified by (scenario test) |
 |---|---|
-| For all SEED+profile, the seeded `raw/` bytes are identical on a re-seed — gzip carries no mtime/OS entropy. | `tests/test_generator.py::test_reseed_is_byte_identical` — seed twice, diff `raw/*.jsonl.gz` byte-for-byte |
+| For all SEED+profile, the seeded `raw/` bytes are identical on a re-seed — gzip carries no mtime/OS entropy. | `tests/test_generator.py::test_two_runs_are_byte_identical` — seed twice, diff `raw/*.jsonl.gz` byte-for-byte |
 | For all upload dates D and hours H, every event in `events_D_H.jsonl.gz` has `cast(server_upload_time as date) = D` — the file name is the partition key. | `tests/test_landing.py::test_file_date_equals_partition` — each hourly file's rows all fall on its named date |
 | For all cuts, `load(profile, db, through)` yields the same raw row multiset as the pre-change daily landing did for that cut — hourly packaging never moves a row across the `through` boundary. | `tests/test_landing.py::test_through_rolls_hourly_files_to_upload_date` |
 | For all partitions, re-landing an already-landed upload-date partition leaves `raw.events` content-identical and adds 0 net rows (idempotent, not table-recreate). | `tests/test_landing.py::test_double_land_partition_writes_zero_new_rows` |
@@ -138,21 +138,25 @@ operator (BACKLOG); it names its dbt/integration test in the table instead. The
 Python invariants get mutation lines:
 
 ```mutations
-generator/writer.py::write_gzip_jsonl              delete-call
-generator/cli.py::write_output                     swap-sort-key
-landing/load.py::partition_overwrite_events        delete-call
+generator/writer.py::write_gzip_jsonl              constant-return:0
+generator/cli.py::raw_file_name                    constant-return:'x.jsonl.gz'
+landing/load.py::partition_overwrite_events        constant-return:0
 landing/load.py::event_files                       invert-guard
 landing/load.py::_file_date                        constant-return:'2026-01-04'
 ```
 
-(Function names are the planned shape; the mutation block is reconciled to the
-landed functions during implementation — `make mutate` runs at review, after the
-code exists. Each line, applied to HEAD, must turn the offline suite red:
-dropping the gzip write empties the seed → manifest mismatch; swapping the
-write_output group key mis-orders / mis-buckets events → golden drift; dropping
-the partition delete → double-land duplicates rows; inverting the THROUGH guard
-→ wrong file set; pinning `_file_date` to one date → THROUGH and partition
-wrong.)
+(Reconciled to the landed functions — `make mutate` runs at review, after the
+code exists. `delete-call`/`swap-sort-key` do not reach the write paths here
+(`write_gzip_jsonl`/`partition_overwrite_events` are called with their return
+used, not as bare statements; `write_output` groups by `raw_file_name` with a
+single-key `sorted`, so a swapped sort key would drift no bytes), so each line is
+`constant-return`/`invert-guard` on a reachable function. Applied to HEAD each
+turns the offline suite red: `write_gzip_jsonl` returning 0 skips the gzip write
+→ empty seed → manifest mismatch; `raw_file_name` pinned to one name buckets
+every event into one file → manifest mismatch; `partition_overwrite_events`
+returning 0 skips the delete+insert → `raw.events` empty → staging pins fail;
+inverting the THROUGH guard → wrong file set; pinning `_file_date` to one date →
+THROUGH and partition wrong.)
 
 ## Pinned decisions (do not re-litigate)
 
@@ -187,11 +191,15 @@ wrong.)
   `horizon = max(server_upload_time)` is inflated forward by a late export batch,
   up to 72 h on medium/large) `+` the max `dim_user.tz` offset in days between
   the local `event_date` and UTC `server_upload_time` (≤ 1 day) `+` the ≤ 1 h
-  duplicate span (`inject_duplicates`). So `margin = ceil(late_arrival_max_hours
-  / 24) + tz_days + 1`, computed from the profile — the window is a superset of
-  every row the full scan keeps, and co-locates every duplicate, for the whole
-  CLASS, not just tiny. The live byte-parity run CONFIRMS the derivation; it is
-  not the proof. Rejected: pruning on DuckDB too (no partitions, no benefit, and
+  duplicate span (`inject_duplicates`). The margin is the dbt var
+  `source_prune_margin_days` (default in `dbt_project.yml`), a DECLARED FLOOR
+  pinned by `tests/test_incremental.py::test_source_prune_margin_covers_every_profile`
+  to be `>= ceil(late_arrival_max_hours / 24) + tz_days + dup_days` for every
+  profile (5 covers medium/large's 72 h) — so a profile whose late arrival grew
+  past the floor fails LOUDLY offline, not silently under-covering the BigQuery
+  window. The window is thus a superset of every row the full scan keeps, and
+  co-locates every duplicate, for the whole CLASS, not just tiny. The live
+  byte-parity run CONFIRMS the derivation; it is not the proof. Rejected: pruning on DuckDB too (no partitions, no benefit, and
   it would risk the DuckDB goldens for nothing — DuckDB SQL stays unchanged, so
   its goldens are unchanged for free); a tight `− lookback_days` window with no
   margin (a late-arrival-inflated horizon or a cross-clock offset drops an
@@ -224,13 +232,17 @@ wrong.)
 - `landing/bq.py` — DAY-partition config on `raw.events`; per-partition load
   through the partition decorator; gz source format.
 - `dbt/models/staging/stg_events.sql` — the superset source-scan predicate under
-  `is_incremental()` + `target.type == 'bigquery'`.
+  `is_incremental()` + `target.type == 'bigquery'` (native BigQuery `timestamp_sub`,
+  not a dispatch macro — the dialect carve-out recorded in DECISIONS).
+- `dbt/dbt_project.yml` — the `source_prune_margin_days` var (the prune margin floor).
 - `tests/pins.py` — raw-structure pins only (`RAW_FILES`, file-count assertions).
 - `tests/test_generator.py` (gzip reseed identity; the ≤ 1 h duplicate-span
-  bound), `tests/test_landing.py` (double-land 0 rows; THROUGH roll-up),
-  `tests/test_staging.py` (the prune predicate renders only under
-  bigquery+incremental), `tests/integration/test_int_bigquery.py` (byte parity)
-  — the new invariant tests + parity.
+  bound), `tests/test_landing.py` (double-land 0 rows; THROUGH roll-up; the
+  `_file_date` shape refusal), `tests/test_staging.py` (the prune predicate
+  renders only under bigquery+incremental), `tests/test_incremental.py` (the
+  margin floor covers every profile), `tests/test_bq_landing.py` (the
+  per-partition load call shape), `tests/integration/test_int_bigquery.py` (byte
+  parity) — the new invariant tests + parity.
 - `fixtures/tiny/raw/*.jsonl.gz`, `fixtures/tiny/MANIFEST.sha256` — the re-freeze
   (via `make freeze`).
 
@@ -254,9 +266,13 @@ wrong.)
 - [ ] `docs/ROADMAP.md` — item 6 marked landed with the "as landed" note
 - [ ] `BACKLOG.md` — strike **"the incremental re-run re-scans all of raw"**
       (item 6) with "DONE fix/append-landing"; open any deferred finding
-- [ ] `PHASES.md` — none (a `fix/` branch does not touch the phase plan)
-- [ ] `README.md` — none (no demo or first-screen number changes)
-- [ ] `METRICS.md` / `DEPLOYMENT.md` / `AB_DESIGN.md` — none
+- [ ] `Makefile` — the `make load` and `make bq-load` recipe comments
+      (append-only per-partition, not "tables recreated" / "WRITE_TRUNCATE the
+      whole table")
+
+No change (a `fix/` branch touches none): the phase plan (docs/PHASES.md), the
+front door (README.md), and METRICS / DEPLOYMENT / AB_DESIGN — no metric, demo, or
+first-screen number moves.
 
 ## Threat model (REQUIRED)
 
@@ -268,8 +284,10 @@ cloud targets); this branch changes what they DO with an already-validated
 THROUGH (a partition predicate, not a new input), not how they validate it. The
 existing `tests/test_makefile.py` cells for these targets are unchanged. The
 partition decorator `raw.events$YYYYMMDD` is derived from the validated file
-name inside Python (the date is `_file_date`, `\d{4}-\d{2}-\d{2}`), never a
-user string — pinned in `tests/test_landing.py`.
+name inside Python: `_file_date` asserts the `\d{4}-\d{2}-\d{2}` shape and
+refuses otherwise (`tests/test_landing.py::test_file_date_refuses_a_malformed_name`),
+so the decorator is never a raw slice or a user string; the per-partition call
+shape is pinned in `tests/test_bq_landing.py`.
 
 ## Review & stack risk
 

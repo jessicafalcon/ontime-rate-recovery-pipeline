@@ -94,7 +94,7 @@ def bucket_name(project: str) -> str:
 
 
 def selected_files(fixture: Path, through: str | None = None) -> dict[str, list[Path]]:
-    """Per table, the files to land: the THROUGH-filtered `events_*.jsonl` (the
+    """Per table, the files to land: the THROUGH-filtered `events_*.jsonl.gz` (the
     DuckDB landing's own predicate) and the one dim seed."""
     return {
         "events": landing.event_files(fixture, through),

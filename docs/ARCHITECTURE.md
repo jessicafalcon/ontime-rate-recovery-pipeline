@@ -724,3 +724,7 @@ simulation and the power table.
   SUPERSET window whose margin is derived from the bounded generator knobs (the
   ≤ 1 h duplicate span, `late_arrival_max_hours`, the max tz offset), never a
   tight `− lookback_days` cut; proven by `make test-int-bigquery` byte parity.
+  The predicate is native BigQuery SQL (`timestamp_sub` on a bare
+  `server_upload_time`), a documented carve-out from the five-macro dialect
+  contract (DECISIONS): a dispatch macro is the wrong shape — it must be a bare
+  partition-column predicate to prune, and it never runs on DuckDB.

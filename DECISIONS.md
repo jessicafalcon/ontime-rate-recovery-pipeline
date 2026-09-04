@@ -239,6 +239,19 @@ STOP for approval before implementing.*
   A payload conflict rolls the whole load back in one transaction (nothing
   committed) instead of dropping the tables — append-only means the tables
   persist, so a fresh warehouse is left empty and an existing one unchanged.
+- **Dialect-contract carve-out: the source-scan prune is native BigQuery SQL,
+  not a sixth dispatch macro.** The five-macro dialect contract admits new
+  dialect SQL only as a sixth macro (each with a DuckDB + a BigQuery body) or an
+  explicit carve-out here. The prune uses BigQuery `timestamp_sub(max(...),
+  interval N day)` on a bare `server_upload_time >=` predicate, guarded to
+  `is_incremental() and target.type == 'bigquery'`. A dispatch macro is the WRONG
+  shape: it must be a bare partition-column predicate for BigQuery to prune, and
+  it never runs on DuckDB (which has no partitions and is left byte-identical) —
+  so there is no DuckDB body to write and wrapping the column in the existing
+  `timestamp_diff` macro would defeat pruning. Recorded as a native, BigQuery-only,
+  pruning-motivated carve-out (not a `default__`, not a new macro); ARCHITECTURE §8
+  and CLAUDE.md's Dialect contract name it. Rejected: a sixth macro (wrong shape,
+  a raising DuckDB body for nothing); leaving it as undocumented inline SQL.
 
 ### fix/holdout-eval (after Phase 13, 2026-09-02)
 
@@ -2376,7 +2389,10 @@ allowlist (M); the root `workload_identity_provider` output (J); two datasets,
   `truth/{users,prompts}.jsonl`; canonical JSON (`sort_keys`, no spaces),
   Amplitude timestamp strings, whole seconds, counter ids, `SIM_START` =
   2026-01-05 (January: no DST transition in any profile tz). Rejected: one
-  `events.jsonl` (Phase 7 would split it).
+  `events.jsonl` (Phase 7 would split it). **Superseded by fix/append-landing:**
+  raw is now gzipped hourly `raw/events_<date>_<HH>.jsonl.gz`; the upload date
+  (the first 10 chars of the name) stays the landing partition key, the hour is
+  packaging.
 - **`cli.py` joins `truth.py`/`models.py` as a file that may name truth.** The
   rule's property is "generation logic never names the side-file"; something
   has to call the writer, and the entry point is the least-logic place. The
