@@ -232,6 +232,9 @@ def test_cosmos_group_renders_the_unchanged_project(monkeypatch: Any) -> None:
     assert record["profile"]["profile_name"] == ct.DBT_PROFILE_NAME
     assert record["profile"]["target_name"] == ct.DBT_TARGET_NAME
     assert record["execution"]["execution_mode"].name == ct.EXECUTION_MODE
+    # the venv is persisted + reused across tasks (fix/composer-cosmos-liverun):
+    # install dbt-bigquery once per worker, not a fresh ~10-min venv per task.
+    assert str(record["execution"]["virtualenv_dir"]) == ct.DBT_VENV_DIR
     assert record["render"]["load_method"].name == ct.LOAD_MODE
 
 

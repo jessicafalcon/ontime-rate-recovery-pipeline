@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
+from pathlib import Path
 
 from airflow import DAG
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
@@ -111,7 +112,12 @@ with DAG(
             target_name=ct.DBT_TARGET_NAME,
             profiles_yml_filepath=ct.DBT_PROFILES_YML,
         ),
-        execution_config=ExecutionConfig(execution_mode=ExecutionMode.VIRTUALENV),
+        execution_config=ExecutionConfig(
+            execution_mode=ExecutionMode.VIRTUALENV,
+            # Persist + reuse the venv across tasks — install dbt-bigquery once
+            # per worker, not per task (fix/composer-cosmos-liverun, §8).
+            virtualenv_dir=Path(ct.DBT_VENV_DIR),
+        ),
         render_config=RenderConfig(
             load_method=LoadMode.DBT_MANIFEST,
             source_rendering_behavior=SourceRenderingBehavior.ALL,
