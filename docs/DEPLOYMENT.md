@@ -281,13 +281,37 @@ warehouse** also needs care: `dbt build` is incremental, so building `tiny` on a
 — run `make dbt-build … TARGET=bigquery FULL=yes CONFIRM=yes` (a `--full-refresh`)
 to reset, or drop the `ontime` tables first.
 
-**CI leg (deferred — BACKLOG "Cross-warehouse dialect drift…", dated trigger).**
-A CI `test-int-bigquery` needs the opt-in WIF apply, never the default one:
-`make tf-apply PROJECT=<project_id> VARS='enable_ci_wif=true,github_repository=<owner>/<repo>'
-CONFIRM=yes`, then the `workload_identity_provider`
-output and the SA email into a `workflow_dispatch`-only job via
-`google-github-actions/auth`. Not built in 9b: the laptop run above is the
-Done-when, and an unrun job would be a claim.
+**CI leg (built and run — `fix/ci-bigquery-parity`, 2026-09-04).** The parity
+suite runs in CI as `.github/workflows/bigquery-parity.yml`, a
+`workflow_dispatch`-only job. Bring-up, once:
+
+1. **Apply the WIF layer** (opt-in, never the default apply; free, and it
+   PERSISTS — unlike Spanner/Composer, WIF must stay up for CI to authenticate,
+   and remote GCS state makes a persisting apply safe):
+   `make tf-apply PROJECT=<project_id>
+   VARS='enable_ci_wif=true,github_repository=<owner>/<repo>[,operator_principal=user:<operator>]'
+   CONFIRM=yes`. Verify `Plan:` is WIF adds only (`3 to add, 0 to destroy`).
+   **Include `operator_principal` in `VARS` if it is currently applied** — it has
+   no tracked default, so omitting it makes the plan propose destroying the
+   operator's SA-impersonation grant (the plan-first apply refuses that destroy
+   without `ALLOW_DESTROY=yes`, so it fails safe; see BACKLOG). No `.tf` moves →
+   no `tf-freeze`.
+2. **Set three GitHub repo variables** (Settings → Secrets and variables →
+   Actions → *Variables*; the workflow reads them as `${{ vars.* }}`, so no
+   identifier is committed): `WIF_PROVIDER` = the `workload_identity_provider`
+   output, `WIF_SERVICE_ACCOUNT` = `ontime-pipeline@<project_id>.iam.gserviceaccount.com`,
+   `GCP_PROJECT` = `<project_id>`.
+3. **Dispatch** (`gh workflow run bigquery-parity.yml --ref main`, or the Actions
+   UI). It must run on `main`: the WIF binding trusts `refs/heads/main` only, and
+   `workflow_dispatch` is dispatchable only from the default branch.
+
+The job authenticates via `google-github-actions/auth` with
+`export_environment_variables: false`, relocates the minted ADC into
+`$CLOUDSDK_CONFIG/application_default_credentials.json`, and runs
+`make test-int-bigquery` — so the pipeline's cloud-env allowlist stays unwidened
+(the `GOOGLE_*` credential vars are never exported). It mutates the shared demo
+`raw`/`ontime` datasets (idempotent, cents per run). First green run: 2026-09-04,
+`6 passed` in 16m53s.
 
 **Gotcha — 30-day soft-delete on re-apply (ARCHITECTURE §8).** GCP soft-deletes
 a service account and a Workload Identity pool/provider and **reserves their ids

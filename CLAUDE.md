@@ -1002,7 +1002,33 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **19** — `fix/prune-live-proof` (2026-09-03) proved the
+Open BACKLOG rows: **18** — `fix/ci-bigquery-parity` (2026-09-04, ROADMAP item
+8) runs the DuckDB≡BigQuery parity suite (`make test-int-bigquery`) in CI. A
+`workflow_dispatch`-only job (`.github/workflows/bigquery-parity.yml`)
+authenticates via the existing `enable_ci_wif` WIF layer (`google-github-actions/auth`,
+SHA-pinned, `{id-token: write, contents: read}`, identity via `${{ vars.* }}`) and
+runs the suite against the demo project. The central design: `auth` runs with
+`export_environment_variables: false` and the job relocates the minted ADC into
+`$CLOUDSDK_CONFIG/application_default_credentials.json`, so the pipeline's
+cloud-env allowlist (`infra.cli.CLOUD_ENV_ALLOW`) passes UNWIDENED — the default
+`GOOGLE_APPLICATION_CREDENTIALS` export the gate refuses is never present.
+`tests/test_ci_parity_workflow.py` pins the closed set offline (dispatch-only,
+minimal permissions, SHA-pinned actions, WIF auth, no literal identity, no refused
+cloud-env in the make step, `persist-credentials: false`). The `enable_ci_wif=true`
+apply added 3 WIF resources (0 destroyed, no `.tf` moved) and PERSISTS — the first
+stays-up-between-sessions apply, now safe on the GCS remote backend; the standing
+Spanner/Composer `Listed 0 items.` exit check still runs. **Live 2026-09-04:**
+applied on `<project_id>` (`operator_principal` re-passed to preserve the operator
+grant a bare apply would have destroyed — a new BACKLOG row), then the workflow
+dispatched on `main` went green (`6 passed` in 16m53s: WIF auth on the
+`refs/heads/main` ref, ADC via `CLOUDSDK_CONFIG`, the three goldens byte-identical
+off BigQuery + the pins). The live run was necessarily post-merge —
+`workflow_dispatch` is dispatchable only from the default branch and the WIF
+binding trusts `refs/heads/main` only. Struck two rows (the DuckDB-only CI
+dialect-drift row and the remaining WIF-slug item of the public-repo-settings row)
+and opened one (`operator_principal` lives in state, not tracked config — a future
+apply that omits it re-proposes the destroy). No pin, fixture, model, or `.tf`
+moved. Prior: `fix/prune-live-proof` (2026-09-03) proved the
 BigQuery incremental source-scan prune LIVE — the one live proof `fix/append-landing`
 left open. Test-only: `tests/integration/test_int_bigquery.py` gained an
 incremental parity phase — the `built` reference is now a self-contained FULL
