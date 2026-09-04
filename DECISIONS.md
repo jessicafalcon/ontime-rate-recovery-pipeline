@@ -205,6 +205,12 @@ data-structure amendment. STOP for approval was taken before implementing.*
   tracked record. Rejected: hardcoding (check 5 red); GitHub *secrets* for
   non-secret identifiers (variables are the right store; secrets would only mask
   them from the diagnostic log). Pinned by `test_auth_uses_wif_and_no_literal_identity`.
+  Conscious accept (review round 1): repo `vars` render UNMASKED in the public
+  Actions log, so the project id, provider name and SA email appear there — none
+  is a secret under this project's own classification (a project id is "a project
+  default, not an identity", `infra/cli.py`; the provider/SA names are not
+  secrets — trust rests on the OIDC repo+ref condition, pinned by
+  `tests/test_infra.py`), and a project id is unavoidably in any BigQuery job log.
 - **The `enable_ci_wif=true` apply PERSISTS — the first "stays up between
   sessions" apply.** WIF is free and must stay up for CI to authenticate, so there
   is no same-session teardown (unlike Spanner/Composer). This is now safe because

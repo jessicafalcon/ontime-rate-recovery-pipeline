@@ -117,15 +117,21 @@ def test_auth_uses_wif_and_no_literal_identity() -> None:
 
 
 def test_make_step_carries_no_refused_cloud_env() -> None:
-    """The make step's environment carries no cloud-env name the gate refuses,
-    and does set CLOUDSDK_CONFIG (where ADC is placed). The allowlist is unwidened
-    — refuse_cloud_env runs first inside test-int-bigquery and must pass."""
-    step = _make_step(_doc())
-    env = step.get("env", {}) or {}
-    # keys only — values are `${{ runner.temp }}/...` expressions, not names.
-    refused = unlisted_cloud_env({k: "" for k in env})
-    assert refused == [], f"refused cloud-env names in the make step: {refused}"
-    assert "CLOUDSDK_CONFIG" in env
+    """No cloud-env name the gate refuses is set at ANY env layer the make step
+    sees (workflow-, job-, or step-level), and CLOUDSDK_CONFIG (where ADC is
+    placed) is set. The allowlist is unwidened — refuse_cloud_env runs first
+    inside test-int-bigquery and must pass."""
+    doc = _doc()
+    step = _make_step(doc)
+    job = next(j for j in doc["jobs"].values() if step in j.get("steps", []))
+    # Every env layer that reaches the step, keys only — values are
+    # `${{ runner.temp }}/...` expressions, not names.
+    env_keys: set[str] = set()
+    for layer in (doc.get("env"), job.get("env"), step.get("env")):
+        env_keys |= set(layer or {})
+    refused = unlisted_cloud_env({k: "" for k in env_keys})
+    assert refused == [], f"refused cloud-env names the make step sees: {refused}"
+    assert "CLOUDSDK_CONFIG" in (step.get("env") or {})
     assert in_cloud_namespace("CLOUDSDK_CONFIG")  # it IS in the domain …
     assert "CLOUDSDK_CONFIG" in CLOUD_ENV_ALLOW  # … and admitted (the one seam)
 
@@ -135,3 +141,16 @@ def test_make_step_carries_no_refused_cloud_env() -> None:
     assert "GOOGLE_APPLICATION_CREDENTIALS" not in run
     assert "application_default_credentials.json" in run
     assert "CONFIRM=yes" in run
+    # PROJECT is a repo-variable ref, not a literal id (no bare project-id in a
+    # tracked file — the local counterpart to check-docs check 5).
+    assert re.search(r"PROJECT=\$\{\{\s*vars\.\w+\s*\}\}", run)
+
+
+def test_checkout_does_not_persist_credentials() -> None:
+    """The checkout leaves no git token in .git/config for the third-party
+    steps that follow (setup-uv, auth) — a supply-chain mitigation."""
+    for s in _steps(_doc()):
+        if str(s.get("uses", "")).startswith("actions/checkout@"):
+            assert (s.get("with") or {}).get("persist-credentials") is False
+            return
+    raise AssertionError("no actions/checkout step found")
