@@ -112,3 +112,18 @@ def test_dockerignore_excludes_truth_data_and_secrets() -> None:
         "**/*-key.json",
     ):
         assert required in lines, required
+
+
+def test_serving_image_build_targets_amd64() -> None:
+    """fix/composer-cosmos-liverun: the `docker build` argv is pinned to
+    linux/amd64 (the Composer/GKE node arch), never the build host — an
+    Apple-Silicon operator laptop otherwise ships an arm64 image the amd64
+    workers cannot pull (ImagePullBackOff, ARCHITECTURE §8). The platform is a
+    fixed declared target (Boundary contract), asserted on the pure helper."""
+    from pipeline.cli import SERVING_PLATFORM, serving_build_command
+
+    assert SERVING_PLATFORM == "linux/amd64"
+    cmd = serving_build_command("some/image:tag", "path/Dockerfile")
+    assert cmd[:4] == ["docker", "build", "--platform", "linux/amd64"]
+    # the platform flag precedes -t so it applies to the built image
+    assert cmd.index("--platform") < cmd.index("-t")
