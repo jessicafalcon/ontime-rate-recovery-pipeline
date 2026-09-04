@@ -61,7 +61,20 @@ def test_bq_schema_is_generated_from_the_contract() -> None:
 def test_no_unique_test_on_raw_insert_id() -> None:
     text = gen.SOURCES_PATH.read_text()
     assert "unique" not in text  # duplicates are the export's contract
-    assert "freshness:" not in text  # reads the clock
+
+
+def test_freshness_is_a_carve_out_on_events_only() -> None:
+    """fix/composer-cosmos: source freshness is a determinism CARVE-OUT (ROADMAP
+    item 7) — it reads the load clock, so it is present ONLY on `events` (the
+    table with `server_upload_time`), keyed to that field, and the source
+    description names the carve-out. The dim seed (a full replace) has none."""
+    text = gen.SOURCES_PATH.read_text()
+    assert "freshness:" in text
+    assert f"loaded_at_field: {gen.FRESHNESS_LOADED_AT}" in text
+    assert "carve-out" in text.lower()  # the description states it
+    # exactly one freshness block (events), never on dim_user
+    assert text.count("freshness:") == 1
+    assert text.count("loaded_at_field:") == len(gen.FRESHNESS_TABLES) == 1
 
 
 def test_source_tests_cover_every_required_column() -> None:

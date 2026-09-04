@@ -4,10 +4,14 @@ version: 2
 sources:
   - name: raw
     schema: raw
-    description: Raw landing — the Amplitude export shape and the dim seed file, loaded by `make load` (DuckDB) / `make bq-load` (BigQuery). No freshness config (it reads the clock).
+    description: Raw landing — the Amplitude export shape and the dim seed file, loaded by `make load` (DuckDB) / `make bq-load` (BigQuery). Source freshness is a determinism carve-out (ARCHITECTURE §4) — it reads the load clock, never a model input nor a pin.
     tables:
       - name: events
         description: One row of the Amplitude raw export.
+        loaded_at_field: server_upload_time
+        freshness:
+          warn_after: {count: 3600, period: day}
+          error_after: {count: 3650, period: day}
         columns:
           - name: insert_id
             description: varchar

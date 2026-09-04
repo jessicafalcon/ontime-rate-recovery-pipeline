@@ -1,42 +1,41 @@
-# Phase 11: the Cloud Composer orchestration layer, count-gated from the root
+# Cloud Composer orchestration layer, count-gated from the root
 # (`module "composer" { count = var.enable_composer ? 1 : 0 }`), so a default
-# plan/apply creates NOTHING here. Cloud Composer is GCP's managed Apache
-# Airflow: it runs the same DAG the local Docker Airflow runs (Phase 8b),
-# scheduling `dbt build → write-back` on a data-interval-aware daily cadence with
-# retries and on-demand backfill. It is used here instead of a cron job because
-# the batch path is a real DAG (a quality gate that must block downstream models,
-# explicit backfill, no auto-catch-up). It has a hard cost floor (~$300+/mo,
-# billed continuously) that no config removes — so it is written now, proven
-# plan-clean, and applied for ONE demo-day run (Phase 12), then destroyed the
-# same session. The scoped teardown is the toggle flipped back
-# (`VARS='enable_composer=false'` re-apply): count → 0 destroys exactly these
-# resources — no MODULE variable, no -target. `tf-apply` plans first and refuses
-# a destroying plan without ALLOW_DESTROY=yes (Amendment N1), so an apply that
-# omits the toggle while Composer is up stops with the addresses printed.
+# plan/apply creates NOTHING here. Cloud Composer is GCP's managed Apache Airflow.
 #
-# Contents: the Composer API enablement, the smallest environment (running as the
-# existing least-privilege pipeline SA, not a broad default Compute SA), one
-# scoped `roles/composer.worker` grant (the documented minimum an environment's
-# service account needs), and the DAG-bucket upload of the committed Phase 8b DAG.
+# fix/composer-cosmos (ROADMAP item 7) turned this from Phase 11's plan-only
+# "the DAG parses" into the runtime that EXECUTES on a worker:
+#   - the environment installs astronomer-cosmos + the k8s provider via
+#     software_config.pypi_packages (NEVER uv.lock) and carries the DAG's env
+#     (project, serving image, dbt project);
+#   - it uploads the Cosmos + KubernetesPodOperator DAG, the dbt project and its
+#     precompiled manifest into the DAG bucket (the make-based Phase 8b DAG is no
+#     longer uploaded — one `pipeline`-shaped DAG per bucket);
+#   - an Artifact Registry repo holds the serving+landing image the KPO pods run,
+#     with a repo-scoped `artifactregistry.reader` grant to the pipeline SA.
+#
+# Cost floor ~$300+/mo, billed continuously — so it is applied for ONE demo-day
+# run (7b) and destroyed the same session (the toggle-flip `enable_composer=false`
+# re-apply). `tf-apply` plans first and refuses a destroying plan without
+# ALLOW_DESTROY=yes (Amendment N1). Nothing here is applied in 7a (plan-clean).
 
-# The Composer API, enabled with the module and kept on at destroy
-# (disable_on_destroy = false, like the root and Spanner sets: a project-wide API
-# another workload may use is never disabled by our teardown; enablement is free).
+# The Composer API, kept on at destroy (a project-wide API another workload may
+# use is never disabled by our teardown; enablement is free).
 resource "google_project_service" "composer" {
   project            = var.project_id
   service            = "composer.googleapis.com"
   disable_on_destroy = false
 }
 
+# Artifact Registry API — the serving image's registry (kept on at destroy, free).
+resource "google_project_service" "artifactregistry" {
+  project            = var.project_id
+  service            = "artifactregistry.googleapis.com"
+  disable_on_destroy = false
+}
+
 # The environment's service account needs roles/composer.worker (the documented
-# minimum). We grant it to the EXISTING pipeline SA (module.iam) rather than let
-# Composer fall back to the default Compute Engine SA, which carries broad
-# project-wide access we never want the orchestrator to have. Project-scoped
-# because composer.worker is a project role; the member is the one SA.
-# There is intentionally NO grant to the Composer Service Agent here (the Spanner
-# §8 lesson — a service agent is not ours to grant; the API enablement provisions
-# it, and Phase 12's live apply is where any missing service-agent edge would
-# surface, cost-free at plan time).
+# minimum). Granted to the EXISTING pipeline SA (module.iam), never the default
+# Compute SA. Project-scoped because composer.worker is a project role.
 resource "google_project_iam_member" "worker" {
   project = var.project_id
   role    = "roles/composer.worker"
@@ -45,11 +44,36 @@ resource "google_project_iam_member" "worker" {
   depends_on = [google_project_service.composer]
 }
 
-# The smallest environment (ENVIRONMENT_SIZE_SMALL) on the current Composer
-# image, running as the pipeline SA. The exact image build is resolved at apply
-# (Phase 12) — the alias here pins the major line; tf-validate checks the schema,
-# not the image value (an apply-time API lookup). node_config sets the runtime
-# identity; the worker grant above must exist first (depends_on).
+# The serving+landing image the KubernetesPodOperator pods run (bq_load,
+# spanner_load, writeback). One Docker repo; the image is built + pushed by
+# `make build-serving-image` (7b). repository_id "ontime" — pinned equal to
+# pipeline.cli.SERVING_IMAGE_REPO by tests/test_infra.py.
+resource "google_artifact_registry_repository" "serving" {
+  project       = var.project_id
+  location      = var.region
+  repository_id = "ontime"
+  format        = "DOCKER"
+  description   = "serving+landing image for the Composer KubernetesPodOperator steps"
+
+  depends_on = [google_project_service.artifactregistry]
+}
+
+# The pipeline SA pulls the image at pod start — a REPO-scoped reader grant (least
+# privilege, not project-level), so test_composer_runtime_grant_scope still sees
+# exactly one project-level grant (composer.worker).
+resource "google_artifact_registry_repository_iam_member" "puller" {
+  project    = var.project_id
+  location   = google_artifact_registry_repository.serving.location
+  repository = google_artifact_registry_repository.serving.name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${var.sa_email}"
+}
+
+# The smallest environment (ENVIRONMENT_SIZE_SMALL) on the Composer-3/Airflow-2
+# image, running as the pipeline SA. software_config installs cosmos + the k8s
+# provider (Composer-only, never uv.lock — the offline suite stubs them) and sets
+# the DAG's env: the target project, the serving image URI, and OTR_GCP_PROJECT
+# for the dbt profile Cosmos runs in a per-run virtualenv.
 resource "google_composer_environment" "this" {
   name    = "ontime"
   project = var.project_id
@@ -60,6 +84,18 @@ resource "google_composer_environment" "this" {
 
     software_config {
       image_version = "composer-3-airflow-2"
+
+      pypi_packages = {
+        "astronomer-cosmos"                        = ">=1.8,<2"
+        "apache-airflow-providers-cncf-kubernetes" = ">=8,<9"
+      }
+
+      env_variables = {
+        OTR_DAG_PROJECT   = var.project_id
+        OTR_GCP_PROJECT   = var.project_id
+        OTR_SERVING_IMAGE = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.serving.repository_id}/serving:latest"
+        DO_NOT_TRACK      = "1"
+      }
     }
 
     node_config {
@@ -71,26 +107,54 @@ resource "google_composer_environment" "this" {
 }
 
 locals {
-  # The environment creates its own DAG bucket; `dag_gcs_prefix` is
-  # `gs://<bucket>/dags`. Split to the bucket name for the object upload:
-  # ["gs:", "", "<bucket>", "dags"][2].
+  # The environment's DAG bucket; `dag_gcs_prefix` is `gs://<bucket>/dags`.
+  # Split to the bucket name: ["gs:", "", "<bucket>", "dags"][2].
   dag_bucket = split("/", google_composer_environment.this.config[0].dag_gcs_prefix)[2]
+
+  # The dbt project SOURCE files (models, macros, tests, profiles.yml, project
+  # yml) — target/ and logs/ excluded (target/manifest.json is uploaded on its
+  # own below). `source` points at repo files, never an inline heredoc.
+  dbt_src_files = toset([
+    for f in fileset("${path.module}/../../../dbt", "**") : f
+    if !startswith(f, "target/") && !startswith(f, "logs/")
+  ])
 }
 
-# Upload the committed Phase 8b DAG (and its task manifest) into the
-# environment's DAG bucket. `source` points at the repo file, never an inline
-# heredoc, so the deployed DAG cannot drift from the reviewed one. Whether the
-# Composer workers can EXECUTE the `make` targets the DAG shells out to (repo,
-# uv, dbt present on the workers) is Phase 12's live concern, with the Docker
-# Airflow → BigQuery fallback; Phase 11 proves the upload PLANS.
-resource "google_storage_bucket_object" "dag" {
-  name   = "dags/pipeline_dag.py"
+# The Cosmos + KubernetesPodOperator DAG and its two stdlib helpers, flat in the
+# DAG bucket (only `dags/` is on the worker's sys.path — the dual-path imports
+# resolve `import composer_tasks` / `import failure_email` there).
+resource "google_storage_bucket_object" "composer_dag" {
+  name   = "dags/composer_dag.py"
   bucket = local.dag_bucket
-  source = "${path.module}/../../../orchestration/dags/pipeline_dag.py"
+  source = "${path.module}/../../../orchestration/dags/composer_dag.py"
 }
 
-resource "google_storage_bucket_object" "tasks" {
-  name   = "dags/tasks.py"
+resource "google_storage_bucket_object" "composer_tasks" {
+  name   = "dags/composer_tasks.py"
   bucket = local.dag_bucket
-  source = "${path.module}/../../../orchestration/tasks.py"
+  source = "${path.module}/../../../orchestration/composer_tasks.py"
+}
+
+resource "google_storage_bucket_object" "failure_email" {
+  name   = "dags/failure_email.py"
+  bucket = local.dag_bucket
+  source = "${path.module}/../../../orchestration/failure_email.py"
+}
+
+# The dbt project under dags/dbt/ (Composer mounts the bucket at
+# /home/airflow/gcs/dags), so Cosmos reads /home/airflow/gcs/dags/dbt.
+resource "google_storage_bucket_object" "dbt_project" {
+  for_each = local.dbt_src_files
+  name     = "dags/dbt/${each.value}"
+  bucket   = local.dag_bucket
+  source   = "${path.module}/../../../dbt/${each.value}"
+}
+
+# The precompiled manifest Cosmos loads (LoadMode.DBT_MANIFEST) so the scheduler
+# runs no dbt at parse. A gitignored build artifact — the runbook runs
+# `make composer-dbt-manifest` before `tf-plan`/apply (the source must exist).
+resource "google_storage_bucket_object" "dbt_manifest" {
+  name   = "dags/dbt/target/manifest.json"
+  bucket = local.dag_bucket
+  source = "${path.module}/../../../dbt/target/manifest.json"
 }

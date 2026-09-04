@@ -1,7 +1,7 @@
 # On-Time Rate Recovery Pipeline. Pipeline targets land with their phases
 # (CLAUDE.md → Commands): seed/freeze (1); load, dbt-build (2); attribution-golden, eval (3); report (4); …
 
-.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate holdout power readme writeback pipeline test-int-airflow bq-load test-int-bigquery spanner-load test-int-spanner tf-validate tf-plan tf-apply tf-destroy tf-migrate-state tf-freeze
+.PHONY: setup test lint check-docs review-gate mutate round-reset seed freeze load dbt-build drop-db gen-sources attribution-golden eval report scores-golden simulate holdout power readme writeback pipeline test-int-airflow bq-load test-int-bigquery spanner-load test-int-spanner composer-dbt-manifest build-serving-image tf-validate tf-plan tf-apply tf-destroy tf-migrate-state tf-freeze
 
 # User variables reach recipes ONLY as make values via `$(call _Q,$(value VAR))`
 # — UNEXPANDED and single-quoted — so a value like `SPEC='$(shell …)'` or
@@ -238,6 +238,23 @@ spanner-load:
 # needs an `enable_spanner=true` apply); CI never runs it.
 test-int-spanner:
 	uv run python -m pipeline.cli test-int-spanner $(call _Q,$(if $(value PROFILE),$(value PROFILE),tiny)) --project $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
+
+# ------------------------------------------ fix/composer-cosmos (ROADMAP item 7)
+# The precompiled dbt manifest for the Cloud-Composer Cosmos DAG (offline `dbt
+# parse` on the duckdb target — structure only, no cloud). Renders
+# dbt/target/manifest.json (gitignored); the deploy uploads it into the DAG
+# bucket so Cosmos loads from it (LoadMode.DBT_MANIFEST) and the scheduler runs
+# no dbt at parse. Takes NO variable; non-destructive.
+composer-dbt-manifest:
+	uv run python -m pipeline.cli composer-manifest
+
+# Build and push the serving+landing image the KubernetesPodOperator pods run
+# (Artifact Registry). Cloud-cost (a registry push): CONFIRM=yes must have
+# COMMAND-LINE origin ($(origin CONFIRM)) and PROJECT is validated before any
+# docker/registry call; the push runs in 7b (ask first). No credential is baked
+# (Workload Identity at run).
+build-serving-image:
+	uv run python -m pipeline.cli build-serving-image $(call _Q,$(value PROJECT)) --confirm $(call _Q,$(value CONFIRM)) --confirm-origin '$(origin CONFIRM)'
 
 # ------------------------------------------------------------------ Phase 9a
 # Terraform foundation (infra/cli.py): validates PROJECT (a GCP project-id shape)

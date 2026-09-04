@@ -84,9 +84,19 @@ def test_no_dialect_function_in_any_model(tmp_path: Path) -> None:
     assert dialect_hits(tmp_path) == ["models/bad.sql", "models/mod.sql"]
 
 
-def test_no_freshness_block() -> None:
+def test_freshness_only_on_the_raw_source() -> None:
+    """fix/composer-cosmos (ROADMAP item 7): `dbt source freshness` is a
+    determinism CARVE-OUT — it reads the load clock and gates the Cloud-Composer
+    DAG, but never feeds a model. So a `freshness:` block may appear ONLY in the
+    generated `sources.yml` (on the raw source), nowhere else — no model, macro,
+    test, or other yml reads or declares one (ARCHITECTURE §4)."""
+    sources = DBT / "models" / "staging" / "sources.yml"
     for p in sql_files(DBT):
+        if p == sources:
+            continue
         assert "freshness:" not in p.read_text(), p
+    # the carve-out lives exactly once, on the raw source
+    assert sources.read_text().count("freshness:") == 1
 
 
 # Macro files that are dbt HOOK overrides, not dispatch macros (Phase 9b).

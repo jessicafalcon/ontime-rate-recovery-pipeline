@@ -1,0 +1,44 @@
+# Defence-in-depth for the serving+landing image (fix/composer-cosmos). The
+# Dockerfile already COPYs exact subpaths (never `COPY .`, never a truth/ tree),
+# so this only trims the build context sent to the daemon — but truth/, data/ and
+# secrets are excluded here too, so a future broad COPY cannot regress silently.
+# BuildKit reads `<dockerfile>.dockerignore` in preference to the root one.
+.git
+data
+.venv
+**/__pycache__
+**/*.pyc
+dbt
+dbt/target
+dbt/logs
+logs
+*.duckdb
+*.duckdb.wal
+.pytest_cache
+.ruff_cache
+.claude
+tests
+docs
+specs
+**/.terraform
+**/.terraform.lock.hcl
+# Truth is never part of a serving image (truth isolation): the write-back reads
+# BigQuery `ontime`, the landing reads raw/+dims/ only.
+**/truth
+# Secrets must never be baked (matches .gitignore's block, `**/`-anchored).
+**/.env
+**/.env.*
+**/.envrc
+**/*.tfvars
+**/*.tfvars.json
+**/*.tfstate
+**/*.tfstate.*
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*.key
+**/*.p8
+**/*-key.json
+**/*-credentials.json
+**/credentials*
+**/service-account*.json

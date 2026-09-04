@@ -376,6 +376,16 @@ data profile, `TARGET` the warehouse.
 Each phase spec restates the subset it touches with the scenario test that
 falsifies it (`specs/TEMPLATE.md` → Invariants).
 
+**Carved out of invariant 2 (never the clock):** the operational layer legitimately
+reads the wall clock, and those readers are never a model input nor a pinned value
+— Airflow/DAG run ids and timings, BigQuery/Spanner job ids, and (`fix/composer-cosmos`,
+ROADMAP item 7) **dbt source freshness**, the head gate of the Cloud-Composer DAG
+that fails early if raw is stale. Freshness compares `raw.events.server_upload_time`
+to `now()`, so its verdict is non-deterministic — it gates the run, never feeds a
+model, and nothing pinned reads it (`tests/test_composer_dag.py::test_freshness_verdict_is_never_a_pin`).
+On the frozen synthetic fixture the thresholds are wide (the timestamps are fixed
+2026-01); a production deployment tightens them.
+
 ## 5. Non-goals (v1)
 
 Real-time scoring; per-user send times outside the cohort band; a served ML
@@ -697,6 +707,17 @@ simulation and the power table.
   out of scope. The DAG is pointed at the cloud by config, not code:
   `orchestration/tasks.py::build_tasks` reads `OTR_DAG_TARGET`/`OTR_DAG_PROJECT`
   at parse time (unset → the local DuckDB default, byte-identical to Phase 8b).
+  **Superseded (`fix/composer-cosmos`, ROADMAP item 7):** a NEW DAG
+  (`orchestration/dags/composer_dag.py`, `ontime_cloud`) now executes on the
+  worker — dbt runs as Cosmos (`DbtTaskGroup`, `ExecutionMode.VIRTUALENV`,
+  `LoadMode.DBT_MANIFEST`, one task per model over the unchanged project), and
+  the two landings + the write-back run as `KubernetesPodOperator` pods over a
+  `serving/`+`landing/` Artifact-Registry image (Workload-Identity SA, no baked
+  credential). Cosmos + the k8s provider install via `software_config.pypi_packages`
+  (Composer-only, never `uv.lock`); the scheduler needs no dbt at parse (the
+  precompiled manifest). The make-based `pipeline_dag.py` stays for
+  `make test-int-airflow` but is no longer uploaded (one pipeline-shaped DAG per
+  bucket). 7a built and proved this plan-clean; 7b proves the live scheduled run.
 - **Enabling `composer.googleapis.com` transitively enables `compute` and can
   fail with a transient INTERNAL error** (Phase 12, live). The first
   `enable_composer=true` apply failed at `google_project_service.composer`:

@@ -164,6 +164,20 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   The make-based DAG parses on Composer but does NOT execute there (no
   repo/`make`/venv on a worker — §8; the Composer run proves parse+apply, the
   green data run is the local Docker → real-BigQuery+Spanner rehearsal).
+  *(fix/composer-cosmos-runtime, ROADMAP item 7a)* — the CLOUD runtime that DOES
+  execute on a worker: `dags/composer_dag.py` (`ontime_cloud`, imports cosmos /
+  airflow / the k8s provider; runs on Composer/Docker only, stub-loaded offline),
+  dbt as Cosmos `DbtTaskGroup` (`ExecutionMode.VIRTUALENV`, `LoadMode.DBT_MANIFEST`,
+  one task per model over the UNCHANGED project) + the two landings and the
+  write-back as `KubernetesPodOperator` pods over the `images/serving/Dockerfile`
+  image (Workload-Identity SA, no baked credential); `composer_tasks.py`
+  (stdlib-only: `build_kpo_command` — an allowlist over the step name — + the
+  Cosmos config the DAG assembles; inlines `PROJECT_RE`) and `failure_email.py`
+  (the `on_failure_callback` — injectable send/recipient, unit-tested offline),
+  both dual-path for the flat DAG bucket. Source freshness heads the graph as a
+  determinism carve-out (§4). The make-based `pipeline_dag.py`/`tasks.py` stay for
+  `make test-int-airflow` but are no longer uploaded (one pipeline-shaped DAG per
+  bucket). 7a built + plan-clean; 7b runs it live.
 - `infra/` *(Phase 9a; 10; 11)* — Terraform. `main.tf`/`variables.tf`/`outputs.tf` +
   `modules/{bigquery,gcs,iam,budget}` (unconditional, free/near-free) and
   `modules/{composer,spanner}` `count`-gated behind `enable_*` toggles that
@@ -575,6 +589,20 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   ask-first `make tf-apply … VARS='enable_spanner=true'` (bills from creation
   — the dated apply/teardown lines in `docs/DEPLOYMENT.md` are filled the same session,
   and the scoped teardown is `VARS='enable_spanner=false'` re-applied)
+- `make composer-dbt-manifest` *(fix/composer-cosmos-runtime, ROADMAP item 7a)* —
+  offline `dbt parse` on the duckdb target renders `dbt/target/manifest.json`
+  (structure only, no cloud), the precompiled manifest the Cloud-Composer Cosmos
+  DAG loads (`LoadMode.DBT_MANIFEST`) so the scheduler runs no dbt at parse. A
+  gitignored build artifact the deploy uploads into the DAG bucket; takes no
+  variable, non-destructive. Run it before `make tf-plan`/apply of the composer
+  module (Terraform's source path must exist)
+- `make build-serving-image PROJECT=<id> CONFIRM=yes` *(fix/composer-cosmos-runtime)* —
+  build and push the `serving/`+`landing/` image the Composer
+  `KubernetesPodOperator` pods run to Artifact Registry
+  (`<region>-docker.pkg.dev/<project>/ontime/serving:latest`). Cloud-cost (a
+  registry push): `CONFIRM=yes` command-line origin, `PROJECT` validated before
+  any docker/registry call; no credential baked (Workload Identity at run). The
+  recipe lands in 7a; the push runs in 7b (ask-first)
 - Later phases add their targets, each listed here in the same PR.
 
 ## Event model facts (from ARCHITECTURE.md §2; update if reality differs)
@@ -679,10 +707,14 @@ DECISIONS.md or fix it.
   subprocess so no in-process adapter state leaks between the two target DBs
   (fix/holdout-eval).
 - Non-deterministic by nature and carved out: dbt run ids and timings,
-  Airflow run ids, Terraform apply output, BigQuery job ids. Nothing asserted
-  reads them. The BigQuery build reproduces every DuckDB golden and pin
-  byte-for-byte (`make test-int-bigquery`, Phase 9b) — parity is proven by
-  diffing, never by re-freezing.
+  Airflow run ids, Terraform apply output, BigQuery job ids, and (fix/composer-cosmos-runtime)
+  **dbt source freshness** — the Cloud-Composer DAG's head gate reads the load
+  clock (`raw.events.server_upload_time` vs `now()`) to fail early on stale raw;
+  its verdict gates the run, never feeds a model, and nothing pinned reads it
+  (`tests/test_composer_dag.py::test_freshness_verdict_is_never_a_pin`;
+  ARCHITECTURE §4). Nothing asserted reads any of them. The BigQuery build
+  reproduces every DuckDB golden and pin byte-for-byte (`make test-int-bigquery`,
+  Phase 9b) — parity is proven by diffing, never by re-freezing.
 
 ## Engineering contracts
 
@@ -774,6 +806,10 @@ DECISIONS.md or fix it.
   the adapter's ~45 transitive packages incl. pandas/pyarrow sit in the venv on
   no pipeline path — DECISIONS);
   apache-airflow via Docker only (Phase 8); google-cloud-spanner (Phase 10);
+  `astronomer-cosmos` + `apache-airflow-providers-cncf-kubernetes` via the Cloud
+  Composer environment's `software_config.pypi_packages` ONLY, never `uv.lock`
+  (fix/composer-cosmos-runtime — the offline suite stubs them; `tests/test_deps.py`
+  pins them absent from the lock);
   dev: pytest, ruff, pre-commit. Anything else is a STOP-and-ask.
 - SQL keywords lowercase, one column per line in select lists, every model
   ends with an explicit `order by`-free select (ordering belongs to readers).
@@ -1004,7 +1040,35 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **18** — `fix/ci-bigquery-parity` (2026-09-04, ROADMAP item
+Open BACKLOG rows: **18** — `fix/composer-cosmos-runtime` (2026-09-04, ROADMAP
+item 7a) built the Cloud-Composer RUNTIME that actually EXECUTES on a worker,
+superseding Phase 12's parse-only Option A. A new DAG
+(`orchestration/dags/composer_dag.py`, `ontime_cloud`) runs dbt as Cosmos
+(`DbtTaskGroup`, `ExecutionMode.VIRTUALENV`, `LoadMode.DBT_MANIFEST`, one task per
+model over the UNCHANGED project) and the two landings + the write-back as
+`KubernetesPodOperator` pods over ONE `serving/`+`landing/` Artifact-Registry
+image (Workload-Identity SA, no baked credential; `orchestration/composer_tasks.py`
++ `orchestration/failure_email.py` are stdlib-only, dual-path for the flat DAG
+bucket). `dbt source freshness` heads the graph as a determinism CARVE-OUT (it
+reads the load clock; never a model input nor a pin — ARCHITECTURE §4;
+`gen_dbt_sources.py` emits it on `events`, replacing the "No freshness config"
+note), with an `on_failure_callback` email. `astronomer-cosmos` +
+`apache-airflow-providers-cncf-kubernetes` install via the Composer environment's
+`software_config.pypi_packages` ONLY — never `uv.lock` (the offline suite stubs
+them; `tests/test_deps.py`). The composer module gained an Artifact Registry
+Docker repo (`ontime`) + a repo-scoped `artifactregistry.reader` grant,
+`pypi_packages`/`env_variables`, and DAG-bucket uploads of the Cosmos DAG + the
+dbt tree (`for_each` fileset) + the precompiled manifest (the make-based DAG stays
+for `make test-int-airflow` but is no longer uploaded — one pipeline-shaped DAG per
+bucket). Two new `make` targets: `composer-dbt-manifest` (offline `dbt parse`) and
+`build-serving-image PROJECT=<id> CONFIRM=yes` (the AR push, 7b). Split by density
+(the Phase 11 → 12 precedent): **7a** is offline + `tf-validate`/`tf-plan`-clean
+(NOTHING applied, `tf-freeze` re-pinned); **7b** (`fix/composer-cosmos-liverun`,
+spec finalized after this merges) applies, pushes the image, runs ONE green
+scheduled run on real BigQuery + Spanner, and tears down the same session
+(≈ $30, ask-first). No pin, fixture, golden, model, or `.tf` semantics moved;
+`sources.yml` regenerated with the freshness carve-out. Prior:
+`fix/ci-bigquery-parity` (2026-09-04, ROADMAP item
 8) runs the DuckDB≡BigQuery parity suite (`make test-int-bigquery`) in CI. A
 `workflow_dispatch`-only job (`.github/workflows/bigquery-parity.yml`)
 authenticates via the existing `enable_ci_wif` WIF layer (`google-github-actions/auth`,

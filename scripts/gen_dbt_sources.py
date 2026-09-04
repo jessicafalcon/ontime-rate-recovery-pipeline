@@ -133,6 +133,26 @@ def render_bq_schema() -> str:
     return json.dumps(out, indent=2) + "\n"
 
 
+# The freshness gate (fix/composer-cosmos, ROADMAP item 7): `dbt source freshness`
+# runs at the head of the Cloud-Composer DAG, before any model. It reads the wall
+# clock, which the determinism policy bans ON THE DATA PATH — so it is a
+# determinism CARVE-OUT (ARCHITECTURE §4): its verdict is never a model input nor
+# a pinned value, beside Airflow run ids and job ids. `server_upload_time` is the
+# Amplitude load timestamp (§2.10). Thresholds are wide because the frozen tiny
+# fixture carries fixed 2026-01 timestamps (a synthetic-data accommodation) — a
+# real deployment tightens them; the gate MECHANISM (freshness runs first, an
+# on_failure email fires) is what this proves. Honest caveat: at ~10 years the gate
+# cannot fire on the demo — `now()` cannot be pinned, so the only value that keeps
+# the fixed 2026-01 fixture green is one no live feed would trip; on a real feed
+# these become real staleness bounds (hours, not years).
+FRESHNESS_LOADED_AT = "server_upload_time"
+FRESHNESS_WARN_DAYS = 3600
+FRESHNESS_ERROR_DAYS = 3650
+# The freshness table set (events carries the load timestamp; the dim seed is a
+# full replace, not an incremental landing, so it has no freshness clock).
+FRESHNESS_TABLES = {"events"}
+
+
 def render_sources() -> str:
     lines = [
         f"# {HEADER}",
@@ -143,7 +163,8 @@ def render_sources() -> str:
         f"    schema: {SCHEMA}",
         "    description: Raw landing — the Amplitude export shape and the dim seed"
         " file, loaded by `make load` (DuckDB) / `make bq-load` (BigQuery)."
-        " No freshness config (it reads the clock).",
+        " Source freshness is a determinism carve-out (ARCHITECTURE §4) — it reads"
+        " the load clock, never a model input nor a pin.",
         "    tables:",
     ]
     for table, model in TABLES:
@@ -152,6 +173,14 @@ def render_sources() -> str:
             f"      - name: {table}",
             f"        description: {doc}",
         ]
+        if table in FRESHNESS_TABLES:
+            per = "period: day"
+            lines += [
+                f"        loaded_at_field: {FRESHNESS_LOADED_AT}",
+                "        freshness:",
+                f"          warn_after: {{count: {FRESHNESS_WARN_DAYS}, {per}}}",
+                f"          error_after: {{count: {FRESHNESS_ERROR_DAYS}, {per}}}",
+            ]
         if table == "dim_user":
             # Phase 10: the §3.3 source swap. Default = the landed table
             # (every existing build unchanged); the Spanner integration run
