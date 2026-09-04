@@ -158,6 +158,87 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/composer-cosmos-runtime (after Phase 13, 2026-09-04)
+
+*ROADMAP item 7, split by density into 7a (this — the cloud runtime, built and
+plan-clean) and 7b (`fix/composer-cosmos-liverun` — the supervised live run),
+the Phase 11 → Phase 12 precedent (and the item-1 two-PR exception). The opening
+commit is the spec (`specs/fix-composer-cosmos-runtime.md`), alone, before any
+code; STOP for approval was taken before implementing. A design change (a new DAG
+task model, a container image, a Composer-only package add, a new run path), so a
+full spec. 7a applies NOTHING (like plan-only Phase 11); no golden, pin, model,
+or fixture moved — only `.tf`, `sources.yml` (regenerated) and new packages.*
+
+- **The make-shelling DAG is replaced by Cosmos + KubernetesPodOperator, which
+  actually EXECUTE on a Composer worker (supersedes Phase 12's Option A).**
+  Option A's `BashOperator`s shelled `make` at `cwd=/home/airflow`, where a
+  worker has no repo / `make` / dbt venv — it parsed but failed there by design.
+  The runtime: Cosmos (`DbtTaskGroup`) renders every dbt model as its own task;
+  the three non-dbt steps (BigQuery landing, Spanner dims landing, write-back)
+  run as `KubernetesPodOperator` pods over ONE `serving/`+`landing/` image in
+  Artifact Registry, authenticating by the environment's Workload-Identity SA
+  (no credential in the pod or image). Rejected: Option B (bake the repo +
+  toolchain into the Composer image — fights managed Airflow, blows the budget);
+  keeping Option A (the scheduled run stays unproven). The new DAG
+  (`ontime_cloud`) is uploaded; the make-based `pipeline_dag.py` is no longer
+  uploaded (one pipeline-shaped DAG per bucket) but stays in the repo for `make
+  test-int-airflow`.
+- **dbt runs as Cosmos `ExecutionMode.VIRTUALENV`, `LoadMode.DBT_MANIFEST`, over
+  the UNCHANGED project — a runner, not new logic.** VIRTUALENV is Google's
+  documented Composer choice (dbt-bigquery installed per-run in an isolated venv,
+  never the Composer image / `uv.lock`); DBT_MANIFEST loads from a precompiled
+  `manifest.json` in the DAG bucket so the SCHEDULER runs no dbt at parse
+  (`DBT_LS` at parse — the Composer anti-pattern — rejected). `ProfileConfig`
+  reuses the committed `dbt/profiles.yml` bigquery target, so macros / `location`
+  / `OTR_GCP_PROJECT` are unchanged and every golden holds. The manifest is a
+  gitignored build artifact from a new offline `make composer-dbt-manifest`
+  (`dbt parse`, duckdb target). Rejected: `ExecutionMode.KUBERNETES` (a second
+  dbt image); `LOCAL` (the Composer-2 dep-conflict class).
+- **Source freshness is the head gate and a determinism CARVE-OUT; an
+  `on_failure_callback` emails (ROADMAP item 7's two freshness clauses).**
+  Freshness reads the wall clock, which the determinism policy bans ON THE DATA
+  PATH; it is NOT the data path (its verdict is never a model input nor a pinned
+  value), so it joins the carve-out set beside Airflow run ids and job ids
+  (ARCHITECTURE §4). `gen_dbt_sources.py` now emits the freshness config on
+  `events` (`loaded_at_field: server_upload_time`), replacing the generated
+  `sources.yml`'s "No freshness config (it reads the clock)" note; thresholds are
+  wide so the frozen 2026-01 fixture passes (a synthetic-data accommodation,
+  documented — production tightens them). The callback is unit-tested OFFLINE
+  (`airflow.utils.email.send_email` + the recipient an Airflow Variable, never a
+  hardcoded address — no PII); a green run emails nothing, so the mechanism is
+  not proven by a red run — its live firing is 7b's. Rejected: a separate
+  `BashOperator` freshness task (duplicates the Cosmos venv); tight thresholds
+  against `now()` (the frozen fixture would hard-fail — no green run).
+- **The DAG, dbt project and manifest reach Composer through the Terraform DAG
+  bucket; cosmos + the k8s provider through `software_config.pypi_packages`.**
+  The composer module uploads `composer_dag.py` + the two stdlib helpers
+  (`composer_tasks.py`, `failure_email.py`, each dual-path so the flat `import`
+  resolves in the bucket), the dbt tree (`for_each = fileset`, target/ excluded),
+  and the precompiled manifest; `pypi_packages` pins `astronomer-cosmos` +
+  `apache-airflow-providers-cncf-kubernetes` (Composer-only — the offline suite
+  stubs them, `uv.lock` never gains them, `tests/test_deps.py`). A new Artifact
+  Registry Docker repo (`ontime`) holds the image with a REPO-scoped
+  `artifactregistry.reader` grant to the SA (least privilege — not project-level,
+  so `test_project_level_grant_is_only_bigquery_jobuser` is unchanged). All `.tf`
+  re-frozen (`tf-freeze`) in the same commit. Rejected: `gsutil rsync` uploads
+  outside Terraform (drift from the reviewed tree); committing the manifest
+  (version-brittle).
+- **The pod entrypoint bakes `--confirm yes --confirm-origin "command line"`.**
+  The make-level `$(origin CONFIRM)` gate is a SHELL-origin guard that
+  distinguishes a deliberate command-line CONFIRM from a stray env var; inside a
+  single-purpose pod whose argv is the reviewed DAG's baked command there is no
+  such distinction — the argv IS the whole reviewed input, equivalent to a human
+  typing it. So `build_kpo_command` (an ALLOWLIST over the step name + a validated
+  project — Boundary contract) bakes it; the module CLIs' own PROJECT validation
+  still runs. Rejected: a new confirm-less pod code path (more surface, weaker).
+- **7a applies nothing; the proof is offline + `tf-plan`-clean + `tf-freeze`
+  (plan-only Phase 11).** `make test`, `tf-validate OK`, and an ask-first
+  `tf-plan VARS='enable_composer=true'` showing exactly the new resources. The
+  live apply / image push / ONE green scheduled run / same-session toggle-flip
+  teardown / the RESULTS + DEPLOYMENT dated lines are 7b, whose spec is finalized
+  after this merges (the predecessor-merges rule). Rejected: one branch (blows
+  the ≤6-decision cap and puts the ≈$30 surface in the build review).
+
 ### fix/ci-bigquery-parity (after Phase 13, 2026-09-04)
 
 *ROADMAP item 8. The opening commit is the spec (`specs/fix-ci-bigquery-parity.md`),
