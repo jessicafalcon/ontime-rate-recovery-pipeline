@@ -11,7 +11,19 @@ the SAME `Golden` specs and renderer every DuckDB gate uses and diffs them
 against the read-only fixtures/tiny/expected/*.csv — byte-for-byte. The pins
 follow from the goldens (label accuracy, the overall rate, the send-time pins)
 and are re-asserted off the BigQuery rows with the same eval functions. Finally:
-exactly two datasets exist (invariant 1 — nothing created out of band)."""
+exactly two datasets exist (invariant 1 — nothing created out of band).
+
+fix/prune-live-proof adds the INCREMENTAL source-scan prune's live proof. The
+`built` reference is now a self-contained FULL reset (drop raw.events + a
+--full-refresh build, so a warehouse left by another profile can't corrupt the
+tiny parity — the hermeticity fix). A second phase then lands ≤ a cut and
+FULL-builds, lands the late tail and runs a PLAIN (incremental) build — so
+`is_incremental()` is true and the BigQuery source-scan prune predicate renders
+and executes live — and asserts the built tables converge byte-identical to the
+frozen full-scan goldens. (tiny's 9-day span sits inside the 10-day prune
+window, so the predicate prunes no partition here — this proves the prune's
+live correctness/byte-parity, not a bytes reduction, which is a >10-day-span
+effect measured on `large`.)"""
 
 from __future__ import annotations
 
@@ -54,15 +66,65 @@ def carried_gate() -> tuple[str, str]:
     return confirm, origin
 
 
+def _drop_raw_events(project: str) -> None:
+    """Reset raw.events to absent so the next landing self-creates a fresh
+    DAY-partitioned table. Insulates the run from a prior profile's leftover
+    partitions (hermeticity) AND from a pre-existing non-partitioned table (the
+    append-landing migration) — either otherwise silently corrupts the tiny
+    parity (fix/prune-live-proof)."""
+    _client(project).query(f"drop table if exists `{project}.raw.events`").result()
+
+
 @pytest.fixture(scope="module")
 def built() -> Iterator[str]:
-    """The landing + the build, once; yields the project id."""
+    """The full-scan reference, built once. Reset the warehouse clean first —
+    drop raw.events (the next landing self-creates it DAY-partitioned) and
+    --full-refresh the ontime models — so the run is self-contained no matter
+    what the dataset held before (fix/prune-live-proof: the hermeticity fix).
+    Yields the project id."""
     project = _project()
     assert os.environ.get("OTR_PROFILE", "tiny") == "tiny"  # tiny by definition
     confirm, origin = carried_gate()
-    rc = pipeline_cli.dbt_build("tiny", "bigquery", confirm, origin, project=project)
-    assert rc == 0, "make dbt-build TARGET=bigquery PROFILE=tiny failed"
+    _drop_raw_events(project)
+    rc = pipeline_cli.dbt_build(
+        "tiny",
+        "bigquery",
+        confirm,
+        origin,
+        full="yes",
+        full_origin=origin,
+        project=project,
+    )
+    assert rc == 0, "make dbt-build TARGET=bigquery PROFILE=tiny FULL=yes failed"
     yield project
+
+
+@pytest.fixture(scope="module")
+def incremental_parity(built: str) -> str:
+    """fix/prune-live-proof: prove the INCREMENTAL source-scan prune live, after
+    the full-scan reference. Reset raw.events, land ≤ the split cut and FULL-build
+    (the closed state), then land the late tail and run a PLAIN build — so
+    `is_incremental()` is true and the BigQuery source-scan prune predicate renders
+    and executes on a real warehouse. Yields the project id; the built tables must
+    converge byte-identical to the frozen full-scan goldens (the two-landing
+    convergence of tests/test_incremental.py, on the second dialect)."""
+    project = built
+    confirm, origin = carried_gate()
+    _drop_raw_events(project)  # cut-horizon raw + a fresh DAY-partitioned table
+    rc = pipeline_cli.dbt_build(
+        "tiny",
+        "bigquery",
+        confirm,
+        origin,
+        full="yes",
+        full_origin=origin,
+        through=pins.LANDING_SPLIT_TINY,
+        project=project,
+    )
+    assert rc == 0, "closed-state build (≤ cut, --full-refresh) failed"
+    rc = pipeline_cli.dbt_build("tiny", "bigquery", confirm, origin, project=project)
+    assert rc == 0, "incremental late-tail build failed"  # PLAIN → the prune fires
+    return project
 
 
 def _client(project: str):  # noqa: ANN202 — the google type is a runtime import
@@ -161,3 +223,36 @@ def test_planted_conflict_fails_on_bigquery(built: str) -> None:
     finally:
         client.query(f"delete from {table} where insert_id = 'e-planted'").result()
     assert dbtRunner().invoke(args).success
+
+
+def test_incremental_build_matches_frozen(incremental_parity: str) -> None:
+    """The prune's live byte-parity: after a two-landing INCREMENTAL build (the
+    prune predicate rendered and executed on BigQuery), every built golden is
+    byte-identical to the frozen full-scan golden — so the pruned source window
+    is a superset of every row the full scan keeps. This is what a full build
+    never exercised (the predicate fires only when `is_incremental()`)."""
+    for spec in GOLDENS:
+        rows = _rows(incremental_parity, spec)
+        got = golden.render(rows, spec)
+        assert got == (FIXTURES / spec.file).read_text(), spec.file
+    # The pins derive from these goldens; re-assert the two headline ones so the
+    # "pins hold on the incremental build" claim is explicit, not only transitive.
+    labels = {r[0]: r[3] for r in _rows(incremental_parity, golden.ATTRIBUTION)}
+    truth = score.truth_labels(FIXTURES / "truth" / "prompts.jsonl")
+    assert score.label_accuracy(labels, truth) == pins.LABEL_ACCURACY
+    daily = _rows(incremental_parity, golden.ONTIME_RATE_DAILY)
+    on_time = sum(int(r[4]) for r in daily)
+    delivered = sum(int(r[3]) for r in daily)
+    assert on_time / delivered == pins.ONTIME_RATE
+
+
+def test_incremental_prune_predicate_rendered(incremental_parity: str) -> None:
+    """The source-scan prune ran in the incremental build: the compiled
+    `stg_events` (dbt's last render — the incremental late-tail build) carries the
+    `timestamp_sub(...)` source predicate, which the template emits only inside
+    the `is_incremental() and target.type == 'bigquery'` guard. So the guard held
+    and the prune executed live, not only in the offline compile test."""
+    compiled = list((ROOT / "dbt" / "target" / "compiled").rglob("stg_events.sql"))
+    assert compiled, "no compiled stg_events.sql — did the incremental build run?"
+    sql = compiled[0].read_text()
+    assert "timestamp_sub" in sql, sql
