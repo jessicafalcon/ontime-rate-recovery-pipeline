@@ -49,8 +49,12 @@ with raw_events as (
     -- var('source_prune_margin_days'), a declared floor pinned by
     -- test_source_prune_margin_covers_every_profile to be >=
     -- ceil(late_arrival_max_hours/24) + tz_days + dup_days for every profile.
-    -- Correctness is proven live by test-int-bigquery byte parity plus the
-    -- offline duplicate-span bound.
+    -- Correctness is OFFLINE-verified: this predicate renders only under the
+    -- guard, the duplicate span is bounded (< 1 h, all seeds), and the margin is
+    -- a per-profile-pinned floor. Its live INCREMENTAL byte-parity is not yet
+    -- exercised — test-int-bigquery does one FULL build (the prune fires only when
+    -- is_incremental()), so it proves the landing/partitioning, not this predicate
+    -- (BACKLOG: an incremental second build).
     where server_upload_time >= (
         select timestamp_sub(
             cast(max(server_upload_time) as timestamp),

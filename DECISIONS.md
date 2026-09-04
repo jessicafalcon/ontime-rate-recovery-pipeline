@@ -210,13 +210,29 @@ STOP for approval before implementing.*
   `server_upload_time` (server), and wide enough to co-locate both copies of any
   duplicate `insert_id`, so the earliest-copy dedupe (`stg_events` invariant 1) is
   unchanged. DuckDB has no partitions and no benefit, so its SQL is left
-  unchanged — which is why every DuckDB golden is byte-identical for free, and the
-  prune's correctness is proven live by `make test-int-bigquery` byte parity (the
-  built tables match the full-scan build) plus the offline dedupe-span property.
+  unchanged — which is why every DuckDB golden is byte-identical for free. The
+  prune's correctness is OFFLINE-verified (the guard renders only incrementally
+  on BigQuery, the duplicate span is bounded, the margin is a per-profile-pinned
+  floor). Its LIVE incremental byte-parity is NOT yet proven: `make
+  test-int-bigquery` does one FULL build (the prune fires only when
+  `is_incremental()`), so it proves the landing + DAY-partitioning parity, not
+  this predicate — an incremental second build is the BACKLOG follow-up. The
+  full-build parity was run live 2026-09-03 (`4 passed` on a clean warehouse).
   Rejected: a tight `− lookback_days` window (the cross-clock offset can put an
   in-window row just below it); pruning on DuckDB too (risks the goldens for no
   gain). The measured pruned re-run bytes are a hand-filled `docs/RESULTS.md` line
   (job facts are non-deterministic and unasserted, the standing carve-out).
+- **BigQuery append-landing self-creates the partitioned table; a pre-existing
+  non-partitioned `raw.events` must be dropped once (migration).** Proven live
+  2026-09-03: a fresh decorator load into `raw.events$YYYYMMDD` with
+  `time_partitioning` created the DAY-partitioned table and loaded all 970 rows. But BigQuery refuses to add partition-decorator storage to an EXISTING
+  non-partitioned table (and cannot change partitioning in place), so a deployment
+  that already has a non-partitioned `raw.events` (e.g. Phase 9b's whole-table
+  landing) must `bq rm` it once before the first partitioned landing — a
+  `docs/DEPLOYMENT.md` migration note. The offline `Recorder` fake could not have
+  caught this (it does not model partition-vs-non-partition table state) — the
+  adapter-contract lesson: this landing was proven on the real type by the live
+  run, not the fake.
 - **The prune `margin` is DERIVED from bounded generator knobs, not tuned to a
   fixture** (the review refinement, spec commit 4e0c1b5). Every way an
   in-reprocess-window row can carry a low `server_upload_time` is a closed knob:

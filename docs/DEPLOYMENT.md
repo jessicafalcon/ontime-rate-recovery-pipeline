@@ -267,6 +267,20 @@ is idempotent (`WRITE_TRUNCATE`, `dbt build` rebuilds), so a second run does
 not double anything. `tf-destroy` still removes it all
 (`delete_contents_on_destroy`, `force_destroy`).
 
+**Migration — `raw.events` became DAY-partitioned (fix/append-landing).** The
+BigQuery landing now loads per upload-date partition into `raw.events$YYYYMMDD`,
+which requires the table to be DAY-partitioned. A fresh dataset is fine — the
+first decorator load self-creates it partitioned — but a dataset that already
+holds a **non-partitioned** `raw.events` (any project landed before this branch,
+Phase 9b's whole-table `WRITE_TRUNCATE`) makes the first landing fail with
+`Cannot add storage to a non-partitioned table with a partition reference`.
+BigQuery cannot change a table's partitioning in place, so drop it once:
+`bq rm -f -t <project>:raw.events`, then re-land. **Switching profiles on one
+warehouse** also needs care: `dbt build` is incremental, so building `tiny` on an
+`ontime` still holding another profile (e.g. a prior `large` run) mixes partitions
+— run `make dbt-build … TARGET=bigquery FULL=yes CONFIRM=yes` (a `--full-refresh`)
+to reset, or drop the `ontime` tables first.
+
 **CI leg (deferred — BACKLOG "Cross-warehouse dialect drift…", dated trigger).**
 A CI `test-int-bigquery` needs the opt-in WIF apply, never the default one:
 `make tf-apply PROJECT=<project_id> VARS='enable_ci_wif=true,github_repository=<owner>/<repo>'

@@ -71,9 +71,13 @@ make holdout PROFILE=tiny
   new DuckDB landing.
 - **Live cloud proof (ask-first, cents, run as the SA):**
   `make test-int-bigquery PROJECT=<id> CONFIRM=yes` — the three goldens read
-  back from BigQuery byte-for-byte + the pins (Evidence rows 4, 6). The prune's
-  own bytes-scanned number is a hand-recorded `docs/RESULTS.md` line (not a
-  pinned block; job facts are non-deterministic, §Determinism carve-out).
+  back from BigQuery byte-for-byte + the pins (Evidence rows 4, 6). Run live
+  2026-09-03: `4 passed` on a clean warehouse — this proves the gzip landing +
+  DAY-partitioned per-partition load + FULL-build parity. It does NOT exercise
+  the incremental source-scan prune (one full build; the prune fires only when
+  `is_incremental()`), whose live incremental byte-parity + bytes-scanned number
+  are the BACKLOG follow-up (an incremental second build in the harness). The
+  prune stands on its offline guards + bounds meanwhile.
 
 ## Done-when
 
@@ -130,7 +134,7 @@ branch; `docs/ROADMAP.md` item 6 carries the "as landed" note at exit.)
 | For all upload dates D and hours H, every event in `events_D_H.jsonl.gz` has `cast(server_upload_time as date) = D` — the file name is the partition key. | `tests/test_landing.py::test_file_date_equals_partition` — each hourly file's rows all fall on its named date |
 | For all cuts, `load(profile, db, through)` yields the same raw row multiset as the pre-change daily landing did for that cut — hourly packaging never moves a row across the `through` boundary. | `tests/test_landing.py::test_through_rolls_hourly_files_to_upload_date` |
 | For all partitions, re-landing an already-landed upload-date partition leaves `raw.events` content-identical and adds 0 net rows (idempotent, not table-recreate). | `tests/test_landing.py::test_double_land_partition_writes_zero_new_rows` |
-| For all incremental BigQuery re-runs, the built tables are byte-identical to the full-scan build (the pruned source window is a superset of every row the full scan keeps). | `tests/integration/test_int_bigquery.py` (byte parity) + `make test-int-bigquery` |
+| For all incremental BigQuery re-runs, the built tables are byte-identical to the full-scan build (the pruned source window is a superset of every row the full scan keeps). | OFFLINE: `tests/test_staging.py::test_prune_predicate_only_under_bigquery_incremental` (guard) + `tests/test_incremental.py::test_source_prune_margin_covers_every_profile` (window width) + `test_duplicate_upload_span_bounded`. LIVE incremental byte-parity is a BACKLOG follow-up — `make test-int-bigquery` does one FULL build (the prune fires only when `is_incremental()`), so it proves the landing + DAY-partitioning parity, not this predicate |
 | For all seeds and profiles, a duplicate's two copies span ≤ 1 h in `server_upload_time` (`inject_duplicates`: `+_secs(rng, 0, 3600)`), so a prune `margin` ≥ that bound always sees both copies together and the earliest-copy rule is unchanged. | `tests/test_generator.py::test_duplicate_upload_span_bounded` — assert every injected copy's offset is `< 3600` s over a sweep of seeds |
 
 Rules — the source-scan prune is upheld only in dbt SQL, which has no mutation
@@ -198,8 +202,10 @@ THROUGH and partition wrong.)
   profile (5 covers medium/large's 72 h) — so a profile whose late arrival grew
   past the floor fails LOUDLY offline, not silently under-covering the BigQuery
   window. The window is thus a superset of every row the full scan keeps, and
-  co-locates every duplicate, for the whole CLASS, not just tiny. The live
-  byte-parity run CONFIRMS the derivation; it is not the proof. Rejected: pruning on DuckDB too (no partitions, no benefit, and
+  co-locates every duplicate, for the whole CLASS, not just tiny. The pinned
+  offline test IS the proof of the floor; a live incremental byte-parity run
+  (a BACKLOG follow-up — the current `test-int-bigquery` does one full build) would
+  additionally confirm the rendered predicate end-to-end. Rejected: pruning on DuckDB too (no partitions, no benefit, and
   it would risk the DuckDB goldens for nothing — DuckDB SQL stays unchanged, so
   its goldens are unchanged for free); a tight `− lookback_days` window with no
   margin (a late-arrival-inflated horizon or a cross-clock offset drops an

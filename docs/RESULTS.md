@@ -267,11 +267,20 @@ upload-time window (`server_upload_time ≥ max(server_upload_time) −
 (lookback_days + margin) days`) inside `is_incremental()` and `target.type ==
 'bigquery'` — so the incremental re-run scans a window of partitions instead of
 all of raw. DuckDB is untouched (no partitions, no benefit) and every DuckDB
-golden is byte-identical. The pruned incremental re-run's bytes-scanned number
-lands here from the next ask-first `make test-int-bigquery` / `large` run on
-BigQuery (job facts are non-deterministic and hand-recorded, the standing
-carve-out); the offline half — the guard renders only on BigQuery, the duplicate
-span is bounded, the goldens hold — is pinned under `make test`.
+golden is byte-identical.
+
+**Live BigQuery parity, run 2026-09-03 (ask-first, `4 passed`, cents).** On a
+clean warehouse `make test-int-bigquery` read the three goldens back from
+BigQuery byte-for-byte and re-asserted the pins — confirming the **gzip landing,
+DAY-partitioned per-partition load, and FULL-build** output are byte-identical to
+DuckDB. (A fresh decorator load self-created the DAY-partitioned `raw.events`; a
+pre-existing non-partitioned table must be dropped once — `docs/DEPLOYMENT.md`.)
+NOT yet proven live: the **incremental** source-scan prune (it fires only when
+`is_incremental()`, and the harness does one full build), so its incremental
+byte-parity and the pruned bytes-scanned number are the BACKLOG follow-up (an
+incremental second build). The prune's offline half — the guard renders only on
+BigQuery, the duplicate span is bounded, the margin floor covers every profile —
+is pinned under `make test`.
 
 ### Partition pruning on the marts (`--dry_run`, free)
 
