@@ -169,6 +169,29 @@ strategy, so that dispatch body raises by design (Phase 9b, Amendment U; §8). T
 partition. Running the lookback twice over the same raw converges (idempotent).
 Loads are driven by the partitions a landing touched, never by the wall clock.
 
+**Append-only landing and the source-scan prune** *(fix/append-landing)*. Raw
+lands append-only: `raw.events` persists across loads and each load overwrites
+only the selected upload-date partitions — DuckDB delete-then-insert per
+`cast(server_upload_time as date)`, BigQuery a `WRITE_TRUNCATE` load per
+`raw.events$YYYYMMDD` on a DAY-partitioned table — mirroring the
+`partition_overwrite` strategy one layer up; re-landing a date adds 0 net rows.
+On BigQuery only, `stg_events` then prunes its `source('raw','events')` read to a
+superset upload-time window (`server_upload_time ≥ max(server_upload_time) −
+(lookback_days + margin) days`) so an incremental re-run scans a window of
+partitions instead of all of raw — the measured item-6 cost (an unpartitioned raw
+forced a 19.45 GB re-scan). The window is a superset: wide enough to hold every
+row whose local `event_date` is in the reprocess window despite the client↔server
+clock offset, and to co-locate both copies of any duplicate `insert_id` (≤ 1 h
+apart by generator construction), so the earliest-copy dedupe is unchanged. DuckDB
+has no partitions and no benefit, so its SQL is untouched and every DuckDB golden
+is byte-identical; the prune is offline-verified (the guard renders only
+incrementally on BigQuery, the duplicate span is bounded, the margin is a
+per-profile-pinned floor). Its live INCREMENTAL byte-parity is a follow-up:
+`make test-int-bigquery` does one FULL build, so it proves the landing +
+DAY-partitioning parity (run live 2026-09-03, byte-identical), not the prune
+predicate (which fires only when `is_incremental()`). The margin is derived from bounded generator
+knobs (`ceil(late_arrival_max_hours/24) + tz_days + 1`), not tuned to a fixture.
+
 ### 2.8 Features and scores *(Phase 5)*
 
 - `features_user_hour`: per user, local-hour histogram of **organic
@@ -253,6 +276,14 @@ mapping the export path relies on:
 | `event_properties` | `event_properties` (json) | the per-type payload in §2.2 (`prompt_id`, `cohort_id`, `error_code`, …) |
 | `user_properties` | — | **not consumed**; `tz`/`cohort_id` come from the `dim_user` SCD2 dimension (§2.3), not the event |
 
+The file shape matches a real export too *(fix/append-landing)*: raw lands as
+gzipped hourly files `events_<upload-date>_<HH>.jsonl.gz`, one gzip member per
+`server_upload_time` hour (`.json.gz` is Amplitude's own export unit). The name's
+first 10 chars are the upload-date partition key (`landing.load._file_date`); the
+hour is packaging only, so `THROUGH` still selects by date and a date's hourly
+files land together. Gzip is written with no embedded name and `mtime=0`, so the
+bytes are reproducible and the frozen manifest matches on a re-seed.
+
 Production landing (§3.3) is the Amplitude → GCS → BigQuery export writing
 `raw.events` with the schema **generated** from `generator/models.py`
 (`landing/bq_schema.json`); locally the same schema lands the fixture files. Two
@@ -269,7 +300,7 @@ the schema authority, so a new consumed field is a generator change first
 GENERATOR (seeded)  ── truth side-file (never a source) ── dim_user seed file (tz SCD2)
    │ raw events, Amplitude export shape (three clocks, insert_id)
    ▼
-RAW LANDING   fixtures/<profile>/{raw/*.jsonl, dims/dim_user.csv}  →  DuckDB `raw` schema (local, `make load`) | BigQuery (prod, Amplitude export)
+RAW LANDING   fixtures/<profile>/{raw/*.jsonl.gz, dims/dim_user.csv}  →  DuckDB `raw` schema (local, `make load`) | BigQuery (prod, Amplitude export)
    ▼
 dbt  staging      dedupe on insert_id · tz → local time · typed columns
      attribution  exhaustive label per prompt×user · provisional→final over LOOKBACK_DAYS
@@ -293,7 +324,7 @@ TERRAFORM  BigQuery datasets · GCS · Spanner (toggle) · Composer (toggle) · 
 | component | reads | writes | may NOT |
 |---|---|---|---|
 | generator | profile, seed | raw events, truth, dim seed | read anything else |
-| landing | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events`, `raw.dim_user` (recreated each load); on BigQuery also the staging objects `gs://<project>-ontime/landing/<p>/{raw,dims}/` incl. a zero-byte `_empty.jsonl` (Phase 9b); on Spanner the `dim_user` table (`make spanner-load`, idempotent upsert — Phase 10) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
+| landing | `fixtures/<p>/{raw,dims}` (or `data/out/<p>/`, marked; a `THROUGH` upload date lands a file subset — a landing is a raw-table state, §2.7) | `raw.events` (append-only: persists, per-upload-date partition overwrite; DAY-partitioned on BigQuery), `raw.dim_user` (full replace each load); on BigQuery also the staging objects `gs://<project>-ontime/landing/<p>/{raw,dims}/` incl. a zero-byte `_empty.jsonl` (Phase 9b); on Spanner the `dim_user` table (`make spanner-load`, idempotent upsert — Phase 10) | read any other byte of the fixture; name or read `truth/`; dedupe (staging's job) |
 | dbt | raw, dims | staging → scores | reference `truth/`; call `now()` on a data path |
 | eval | dbt outputs, truth, the profile JSON (the generator's input), `tests/pins.py` (which the committed RESULTS blocks are pinned to; Phase 13 `make readme`) | console, `data/out/<p>/expected/` (the golden, frozen only by `make freeze`), the marker-confined blocks of `docs/RESULTS.md` and `docs/AB_DESIGN.md` *(Phase 6; `WRITE=yes` only)*, the `README.md` first-screen block + the wholly-generated `docs/img/lift.svg` *(Phase 13 `make readme`; `WRITE=yes` only)* | write any table the pipeline reads; write under `fixtures/`; create or append to a doc |
 | write-back | `scores_send_time`, `dim_user_current` (the open `dim_user` row's tz — Phase 8a) | `send_schedule` | read truth; read raw; re-derive a score |
@@ -323,8 +354,8 @@ data profile, `TARGET` the warehouse.
 
 | stub | replaces | swap |
 |---|---|---|
-| generator → `fixtures/<profile>/raw/events_<upload-date>.jsonl` (one file per UTC `server_upload_time` date — the landing unit Phase 7 replays) | Amplitude → BigQuery export | dbt `source` config |
-| `make bq-load` — the fixture files → the GCS staging bucket (`landing/<profile>/`) → `raw.events` / `raw.dim_user`, explicit schema generated from the contract, one `WRITE_TRUNCATE` load job per table — an empty selection lands a zero-byte object through it (Phase 9b, X) | Amplitude's own export job writing the `raw` dataset | the landing step is dropped; the source config is unchanged |
+| generator → `fixtures/<profile>/raw/events_<upload-date>_<HH>.jsonl.gz` (one gzip per UTC `server_upload_time` HOUR; the date is the landing partition key Phase 7 replays, the hour is packaging — §2.10) | Amplitude → BigQuery export | dbt `source` config |
+| `make bq-load` — the fixture files → the GCS staging bucket (`landing/<profile>/`) → `raw.events` / `raw.dim_user`, explicit schema generated from the contract; append-only — a `WRITE_TRUNCATE` load per upload-date partition into the DAY-partitioned `raw.events$YYYYMMDD` plus one for `raw.dim_user`; an empty events selection lands a zero-byte object into the base table (Phase 9b, X; fix/append-landing) | Amplitude's own export job writing the `raw` dataset | the landing step is dropped; the source config is unchanged |
 | `dim_user` seed file (`dims/dim_user.csv`, loaded as the `raw.dim_user` source by `make load` — not a dbt seed, whose path could not follow `PROFILE`) | Spanner change streams / federation | *Delivered Phase 10:* the `raw.dim_user_spanner` `EXTERNAL_QUERY` view (spanner module, behind `enable_spanner`) over the Spanner dims `make spanner-load` lands; the swap is the generated source's `dim_user_identifier` var (default = the landed table, so free-tier builds never touch Spanner) — a source-config swap, no model changes. Dataflow template stays the prod path |
 | DuckDB `send_schedule` table | Spanner serving table | *Delivered Phase 10:* `make writeback TARGET=spanner` (default `duckdb` keeps the stand-in) |
 
@@ -678,3 +709,28 @@ simulation and the power table.
   each resolves its own path cleanly — exactly how the real `make dbt-build`
   runs one build per process. Any future multi-warehouse builder (ROADMAP items
   6, 7) must isolate its builds the same way, not swap the env in-process.
+- **gzip embeds an mtime and (via `fileobj.name`) a source name** (fix/append-landing).
+  `gzip.open` at defaults writes a wall-clock mtime into every member, and
+  `gzip.GzipFile(fileobj=f)` copies `f.name` into the header — either makes the
+  bytes non-reproducible, so the same SEED would fail the frozen manifest.
+  Remedy: write raw with `gzip.GzipFile(filename="", fileobj=…, mtime=0,
+  compresslevel=<fixed>)` — no name, no timestamp. (Cross-zlib reproducibility
+  is assumed; a reseed-identity test proves same-machine, the frozen manifest
+  assumes CI's zlib matches — the standing stack risk to watch.)
+- **A DAY-partitioned source needs an explicit predicate to prune; a duplicate
+  can straddle upload dates** (fix/append-landing). On BigQuery a partition
+  filter is what turns an incremental re-run from a full raw re-scan into a
+  window scan (§2.7). But `stg_events` dedupes over the source before the
+  lookback filter, and a duplicate `insert_id`'s two copies share
+  `client_event_time` (hence `event_date`) while differing in
+  `server_upload_time` — so a naive `server_upload_time` prune could keep one
+  copy and drop the other, changing the earliest-copy winner. Remedy: prune to a
+  SUPERSET window whose margin is derived from the bounded generator knobs (the
+  ≤ 1 h duplicate span, `late_arrival_max_hours`, the max tz offset), never a
+  tight `− lookback_days` cut. Offline-verified (guard + bounds); its live
+  incremental byte-parity is a BACKLOG follow-up (`make test-int-bigquery` runs
+  one full build, which does not fire the prune).
+  The predicate is native BigQuery SQL (`timestamp_sub` on a bare
+  `server_upload_time`), a documented carve-out from the five-macro dialect
+  contract (DECISIONS): a dispatch macro is the wrong shape — it must be a bare
+  partition-column predicate to prune, and it never runs on DuckDB.

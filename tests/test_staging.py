@@ -190,7 +190,7 @@ def test_build_under_a_non_utc_host_zone_is_identical(built: Path, tmp_path: Pat
 
 
 def test_tokyo_day_one_lands_on_the_previous_utc_day(built: Path) -> None:
-    """events_2026-01-04.jsonl: 08:00 Tokyo local is 23:00 UTC on the 4th."""
+    """events_2026-01-04_23.jsonl.gz: 08:00 Tokyo local is 23:00 UTC on the 4th."""
     rows = q(
         built,
         "select sent_at, sent_at_local, tz from main_staging.stg_prompts "
@@ -247,3 +247,17 @@ def test_conflicting_duplicate_fails_the_dbt_test(tmp_path: Path) -> None:
             )
         con.close()
         assert not dbtRunner().invoke(args).success
+
+
+def test_prune_predicate_only_under_bigquery_incremental() -> None:
+    """fix/append-landing (Done-when 4): the source-scan prune renders ONLY
+    inside `is_incremental()` AND `target.type == 'bigquery'`. DuckDB never sees
+    it (so its goldens are byte-identical for free); the rendered BigQuery
+    predicate is proven live by `make test-int-bigquery` byte parity."""
+    sql = (ROOT / "dbt" / "models" / "staging" / "stg_events.sql").read_text()
+    guard = "{% if is_incremental() and target.type == 'bigquery' %}"
+    assert guard in sql
+    assert sql.count("server_upload_time >= (") == 1  # the predicate, exactly once
+    # it sits inside that guard block, before the guard's {% endif %}
+    body = sql.split(guard, 1)[1].split("{% endif %}", 1)[0]
+    assert "server_upload_time >= (" in body and "timestamp_sub" in body

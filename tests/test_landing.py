@@ -3,6 +3,7 @@ no service, no network; every db lives in tmp_path."""
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 from pathlib import Path
@@ -21,7 +22,8 @@ TINY = ROOT / "fixtures" / "tiny"
 
 def test_landing_globs_every_raw_file(tmp_path: Path) -> None:
     files = landing.event_files(TINY)
-    assert [f.name for f in files][0] == "events_2026-01-04.jsonl"  # the Tokyo day
+    assert files[0].name == pins.RAW_FILES_FIRST_TINY  # earliest upload hour
+    assert all(f.name.endswith(".jsonl.gz") for f in files)
     assert len(files) == pins.RAW_FILES
     n_files, n_events, n_dims = landing.load("tiny", tmp_path / "t.duckdb")
     assert (n_files, n_events, n_dims) == (
@@ -29,7 +31,7 @@ def test_landing_globs_every_raw_file(tmp_path: Path) -> None:
         pins.RAW_EVENT_ROWS,
         pins.DIM_USER_ROWS,
     )
-    assert n_events == sum(1 for f in files for _ in f.open())
+    assert n_events == sum(1 for f in files for _ in gzip.open(f, "rt"))
 
 
 def test_load_twice_gives_the_same_row_count(tmp_path: Path) -> None:
@@ -38,29 +40,95 @@ def test_load_twice_gives_the_same_row_count(tmp_path: Path) -> None:
 
 
 def test_through_loads_only_files_on_or_before(tmp_path: Path) -> None:
-    """Phase 7: THROUGH filters landing files by upload date (a landing is the
-    raw-table state); None loads them all."""
+    """Phase 7: THROUGH filters landing files by upload DATE — the hourly split
+    never moves a file across the boundary (its first 10 chars are the key); a
+    landing is the raw-table state, None loads them all."""
     kept = landing.event_files(TINY, through=pins.LANDING_SPLIT_TINY)
-    assert [f.name for f in kept] == [
-        f"events_{d}.jsonl"
-        for d in (
-            "2026-01-04",
-            "2026-01-05",
-            "2026-01-06",
-            "2026-01-07",
-            "2026-01-08",
-            "2026-01-09",
-            "2026-01-10",
-            "2026-01-11",
-            "2026-01-12",
-        )
-    ]
+    assert len(kept) == pins.RAW_FILES_THROUGH_SPLIT_TINY
+    # every kept file's upload date is <= the split; nothing on the late date
+    assert all(landing._file_date(f.name) <= pins.LANDING_SPLIT_TINY for f in kept)
+    assert not any(landing._file_date(f.name) == pins.LATE_FILE_TINY for f in kept)
     assert landing.event_files(TINY, through="2025-12-31") == []  # before every file
     assert landing.event_files(TINY, through=None) == landing.event_files(TINY)
     n_files, _, _ = landing.load(
         "tiny", tmp_path / "t.duckdb", through=pins.LANDING_SPLIT_TINY
     )
-    assert n_files == pins.RAW_FILES - 1  # the late file (01-13) is not landed
+    assert n_files == pins.RAW_FILES - pins.LATE_FILES_TINY  # late 01-13 not landed
+
+
+def _snapshot(db: Path) -> list:
+    con = duckdb.connect(str(db))
+    con.execute("set TimeZone = 'UTC'")
+    rows = con.execute(
+        "select insert_id, cast(server_upload_time as varchar) "
+        "from raw.events order by insert_id, server_upload_time"
+    ).fetchall()
+    con.close()
+    return rows
+
+
+def test_double_land_partition_writes_zero_new_rows(tmp_path: Path) -> None:
+    """Done-when 3: the events landing is append-only + idempotent per upload-date
+    partition. Re-landing every partition leaves the table content-identical (0
+    net rows); a split landing then the rest accumulates FORWARD to the same table
+    as one full load (THROUGH is monotonic-forward within a warehouse)."""
+    full = tmp_path / "full.duckdb"
+    landing.load("tiny", full)
+    once = _snapshot(full)
+    assert len(once) == pins.RAW_EVENT_ROWS
+    landing.load("tiny", full)  # re-land every partition
+    assert _snapshot(full) == once  # 0 net rows, content-identical
+
+    acc = tmp_path / "acc.duckdb"
+    landing.load("tiny", acc, through=pins.LANDING_SPLIT_TINY)  # bulk
+    landing.load("tiny", acc)  # then the late tail — accumulates forward
+    assert _snapshot(acc) == once  # same table as one full load
+
+
+def test_file_date_equals_partition() -> None:
+    """Invariant: every event in events_<D>_<H>.jsonl.gz has
+    cast(server_upload_time as date) == D — the file name is the partition key."""
+    for f in landing.event_files(TINY):
+        d = landing._file_date(f.name)
+        with gzip.open(f, "rt") as fh:
+            for ln in fh:
+                assert json.loads(ln)["server_upload_time"][:10] == d, (f.name, d)
+
+
+def test_file_date_refuses_a_malformed_name() -> None:
+    """_file_date asserts the YYYY-MM-DD shape (security note): the value that
+    reaches a DuckDB partition delete or the raw.events$YYYYMMDD decorator is the
+    declared shape, never a bare slice. Valid names return the date."""
+    assert landing._file_date("events_2026-01-04_23.jsonl.gz") == "2026-01-04"
+    assert landing._file_date("events_2026-01-04.jsonl.gz") == "2026-01-04"
+    for bad in (
+        "events_2026-1-4_23.jsonl.gz",
+        "events_notadate.jsonl.gz",
+        "events_../etc/pw.jsonl.gz",
+    ):
+        with pytest.raises(ValueError, match="YYYY-MM-DD"):
+            landing._file_date(bad)
+
+
+def test_through_rolls_hourly_files_to_upload_date(tmp_path: Path) -> None:
+    """Done-when 2: THROUGH filters by upload DATE; the hourly split never moves a
+    row across the boundary. Landing <= a cut lands the same raw row multiset as
+    every event whose server_upload_time date is <= the cut."""
+    cut = pins.LANDING_SPLIT_TINY
+    db = tmp_path / "t.duckdb"
+    _, n_events, _ = landing.load("tiny", db, through=cut)
+    con = duckdb.connect(str(db))
+    con.execute("set TimeZone = 'UTC'")
+    maxd = con.execute(
+        "select max(cast(server_upload_time as date)) from raw.events"
+    ).fetchone()[0]
+    landed = con.execute("select count(*) from raw.events").fetchone()[0]
+    con.close()
+    assert str(maxd) <= cut  # nothing landed after the cut
+    want = sum(
+        1 for f in landing.event_files(TINY, through=cut) for _ in gzip.open(f, "rt")
+    )
+    assert landed == want == n_events
 
 
 def test_load_refuses_bad_through() -> None:
@@ -122,13 +190,17 @@ def test_json_null_error_code_survives_as_json_null(tmp_path: Path) -> None:
 
 
 def _mini_fixture(root: Path, rows_by_file: dict[str, list[dict]]) -> Path:
+    """A throwaway fixture. Keys may be given as `.jsonl` for brevity; each is
+    written as the gzipped `.jsonl.gz` the landing globs (mtime=0, so stable)."""
     fx = root / "fixtures" / "mini"
     (fx / "raw").mkdir(parents=True)
     (fx / "dims").mkdir()
     for name, rows in rows_by_file.items():
-        (fx / "raw" / name).write_text(
-            "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows)
-        )
+        gz_name = name if name.endswith(".gz") else name + ".gz"
+        body = "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows).encode()
+        with (fx / "raw" / gz_name).open("wb") as raw:
+            with gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as gz:
+                gz.write(body)
     (fx / "dims" / "dim_user.csv").write_text(
         "user_id,tz,cohort_id,signup_date,valid_from,valid_to\n"
         "u-000001,UTC,c-morning,2025-12-01,2025-12-01 00:00:00.000000,\n"
@@ -291,15 +363,20 @@ def test_bigquery_build_lands_through_bq_not_duckdb(
     assert rc == 0
     assert seen["env"] == "my-project" and "--target" in seen["args"]
     assert seen["args"][seen["args"].index("--target") + 1] == "bigquery"
+    ev_files = landing.event_files(landing.fixture_dir("tiny"), "2026-01-07")
+    n_dates = len({landing._file_date(f.name) for f in ev_files})  # one load per date
     kinds = [c[0] for c in _FakeClients.calls]
-    assert kinds[0] == "init" and "upload" in kinds and kinds.count("load") == 2
+    # append-only: one events load per upload-date partition + one dim load
+    assert kinds[0] == "init" and "upload" in kinds
+    assert kinds.count("load") == n_dates + 1
     uploads = [c for c in _FakeClients.calls if c[0] == "upload"]
     assert all(c[1] == "my-project-ontime" for c in uploads)
-    # THROUGH selected the same subset the DuckDB landing would (4 files ≤ 01-07)
-    assert len([u for u in uploads if u[3].startswith("events_")]) == len(
-        landing.event_files(landing.fixture_dir("tiny"), "2026-01-07")
+    # THROUGH selected the same subset the DuckDB landing would (hourly gz files)
+    assert len([u for u in uploads if u[3].startswith("events_")]) == len(ev_files)
+    assert (
+        f"bq-load OK: tiny — {len(ev_files)} files, landing ≤ 2026-01-07"
+        in capsys.readouterr().out
     )
-    assert "bq-load OK: tiny — 4 files, landing ≤ 2026-01-07" in capsys.readouterr().out
     # the duckdb build: load() runs, no client is built
     monkeypatch.setattr(cli, "load", lambda p, t="": 0)
     _FakeClients.calls = []
@@ -321,8 +398,8 @@ def test_load_reports_its_source_and_refuses_manifest_drift(
     out = capsys.readouterr().out
     assert "load: source=fixtures/tiny\n" in out and "(unfrozen)" not in out
     # one edited byte in a frozen fixture → refused, exit 1, nothing loaded
-    f = root / "fixtures" / "tiny" / "raw" / "events_2026-01-04.jsonl"
-    f.write_text(f.read_text().replace("u-000008", "u-000009", 1))
+    f = next((root / "fixtures" / "tiny" / "raw").glob("events_*.jsonl.gz"))
+    f.write_bytes(f.read_bytes() + b"\x00")  # perturb the hash (gzip is binary)
     assert cli.load("tiny") == 1
     assert "load DRIFT: 1 files" in capsys.readouterr().out
     # an unfrozen profile (no manifest) loads from data/out and says so
@@ -362,7 +439,8 @@ def test_conflicting_duplicate_is_refused_at_landing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     """Same insert_id, same three clocks, different payload: never a dedupe
-    choice — the load fails and leaves no raw tables behind."""
+    choice — the load's transaction rolls back and commits nothing (append-only:
+    a fresh warehouse is left empty, an existing one unchanged)."""
     a = _event("e-1", "2026-01-05 08:01:00.000000")
     b = dict(a, event_properties={"x": 1}, event_type="app_opened")
     same = dict(a)  # an exact copy is fine
@@ -372,13 +450,8 @@ def test_conflicting_duplicate_is_refused_at_landing(
     with pytest.raises(landing.ConflictingDuplicates, match="e-1"):
         landing.load("mini", tmp_path / "m.duckdb")
     con = duckdb.connect(str(tmp_path / "m.duckdb"))
-    tables = {
-        r[0]
-        for r in con.execute(
-            "select table_name from information_schema.tables"
-        ).fetchall()
-    }
-    assert "events" not in tables
+    # the table exists (create-if-not-exists) but the rollback committed no rows
+    assert con.execute("select count(*) from raw.events").fetchone()[0] == 0
     con.close()
     assert cli.load("mini") == 1
     assert "load CONFLICT" in capsys.readouterr().out

@@ -3,7 +3,9 @@ Read off the first green build of the committed fixture; a drift is a red
 test, never a rewritten constant (spec Phase 2 invariant 5)."""
 
 # fixtures/tiny — Phase 2 (staging)
-RAW_FILES = 10  # events_2026-01-04 (Tokyo day 1) … events_2026-01-13 (late arrivals)
+RAW_FILES = 169  # gzipped hourly export files events_<date>_<HH>.jsonl.gz (§2.10),
+# events_2026-01-04_23 (08:00 Tokyo = 23:00 UTC) … events_2026-01-13_* (late arrivals)
+RAW_FILES_FIRST_TINY = "events_2026-01-04_23.jsonl.gz"  # earliest upload hour
 RAW_EVENT_ROWS = 970  # includes the duplicate injector's copies
 DIM_USER_ROWS = 22  # 20 users, two with a tz change (u-000008, u-000010)
 DIM_USER_CLOSED_ROWS = 2  # rows with valid_to set
@@ -32,7 +34,8 @@ UNATTRIBUTED_SHARE = 6 / 140  # 0.043 < var unattributed_max (0.10)
 SKEW_MAX_MIN = 5  # == generator/models.py::SKEW_MAX_MIN == dbt var skew_max_min
 # The Phase 1 manifest lines (raw/dims/truth) — the Phase 3 re-freeze added
 # expected/attribution.csv and moved none of these.
-PHASE1_MANIFEST_LINES = 13
+# 169 hourly-gzip raw + 1 dims + 2 truth (fix/append-landing).
+PHASE1_MANIFEST_LINES = 172
 
 # fixtures/tiny — Phase 4 (marts). Read off the first green build.
 COHORT_DAYS = 14  # 2 cohorts × 7 local prompt dates (2026-01-05 … 01-11)
@@ -122,6 +125,8 @@ LOOKBACK_DAYS = 5  # == dbt var lookback_days; lookback_days * 24 (120 h) > the
 # late_arrival_max_hours of every profile (tiny 48 h, medium 72 h)
 LATE_FILE_TINY = "2026-01-13"  # the upload date the late arrivals land on
 LANDING_SPLIT_TINY = "2026-01-12"  # bulk landing <= this, then the late tail
+RAW_FILES_THROUGH_SPLIT_TINY = 163  # hourly files uploaded <= LANDING_SPLIT_TINY
+LATE_FILES_TINY = RAW_FILES - RAW_FILES_THROUGH_SPLIT_TINY  # 6 late 01-13 hourly files
 # After the full landing (horizon 2026-01-13): final = prompt_date <= 2026-01-08
 # (2026-01-05 .. 08), the four closed local send dates; the rest provisional.
 FINAL_PROMPTS_TINY = 80

@@ -49,8 +49,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   within a shard, byte-identical to the old single `Random` at `shards == 1`;
   `SIM_START` fixed), `response.py` (the one response function,
   reused by Phase 6), `dims.py` (SCD2 seed, its own un-sharded stream),
-  `writer.py` (canonical JSON/CSV — `JsonlAppender` the streaming form;
-  refuses `fixtures/`), `manifest.py`, `truth.py` (the ONLY truth writer;
+  `writer.py` (canonical JSON/CSV — `JsonlAppender` the streaming form; raw
+  events are gzipped hourly via `write_gzip_jsonl` / `GzipJsonlAppender`,
+  `filename=""` + `mtime=0` + fixed level so the bytes are reproducible
+  (fix/append-landing); refuses `fixtures/`), `manifest.py`, `truth.py` (the ONLY truth writer;
   `TruthStream` the streaming form), `cli.py` (`seed`, `freeze`;
   `write_output` in-memory at `shards == 1`, `write_output_streaming`
   per-shard for `shards > 1`). Truth goes to `<out>/truth/`, never read by the
@@ -67,12 +69,17 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   `generate_schema_name.sql` — a dbt hook override, not a dispatch macro),
   `tests/` (singular data tests), `profiles.yml` (`duckdb`, `bigquery` targets).
   `models/staging/sources.yml` is GENERATED (`make gen-sources`), never edited.
-- `landing/` *(Phase 2; 9b; 10; renamed from `loader/` in `fix/landing-package`)*
+- `landing/` *(Phase 2; 9b; 10; renamed from `loader/` in `fix/landing-package`;
+  append-only in `fix/append-landing`)*
   — raw landing: `load.py` (fixtures → DuckDB
-  `raw` schema, types from the generated `ddl.sql`), `bq.py` (Phase 9b: the
-  same files → GCS staging → BigQuery `raw`, schema from the generated
-  `bq_schema.json`, `WRITE_TRUNCATE`; every cloud call through an injectable
-  `Clients` factory — the offline suite injects fakes), `spanner.py`
+  `raw` schema, types from the generated `ddl.sql`; append-only —
+  `raw.events` persists, `partition_overwrite_events` overwrites one upload-date
+  partition at a time from gzipped hourly files, `raw.dim_user` a full replace),
+  `bq.py` (Phase 9b: the same files → GCS staging → BigQuery `raw`, schema from
+  the generated `bq_schema.json`; append-only — a `WRITE_TRUNCATE` load per
+  upload-date partition into the DAY-partitioned `raw.events$YYYYMMDD`; every
+  cloud call through an injectable `Clients` factory — the offline suite injects
+  fakes), `spanner.py`
   (Phase 10: the same dim seed → the Spanner `dim_user` table, contract
   types from `bq_schema.json`, idempotent batch upsert, injectable client),
   `cli.py` (`load`, `bq-load`, `spanner-load`, `drop-db`) and `land` — the
@@ -206,7 +213,7 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   by `test_truth_isolation.py`; the `.tf` tree is pinned byte-for-byte by
   `MANIFEST.sha256` (`make tf-freeze CONFIRM=yes` its only writer) plus the
   static property checks in `tests/test_infra.py`.
-- `fixtures/tiny/` — golden `raw/events_<upload-date>.jsonl` + `dims/` +
+- `fixtures/tiny/` — golden `raw/events_<upload-date>_<HH>.jsonl.gz` + `dims/` +
   `truth/` + `expected/attribution.csv` (Phase 3) + `MANIFEST.sha256`. **READ-ONLY**: the
   review gate FAILs any change without a `Freeze:` line in the phase spec;
   `make freeze` is the only writer.
@@ -304,13 +311,18 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   (`$(origin CONFIRM)`); a re-freeze also needs a DECISIONS entry and a
   `Freeze: fixtures/<p>/MANIFEST.sha256` line in the spec
 - `make load PROFILE=<p> [THROUGH=<upload-date>]` — validates `[a-z0-9_]+`, loads
-  `fixtures/<p>/{raw/events_*.jsonl,dims/dim_user.csv}` into `data/<p>.duckdb`
+  `fixtures/<p>/{raw/events_*.jsonl.gz,dims/dim_user.csv}` into `data/<p>.duckdb`
   schema `raw`; prints `load: source=…` (falls back to `data/out/<p>/`,
   marked `(unfrozen)`), verifies `MANIFEST.sha256` first when one exists
   (`load DRIFT`, exit 1); types come from the generated `landing/ddl.sql`, never
-  inferred. Idempotent: tables are recreated. `THROUGH` (an upload date
-  `YYYY-MM-DD`, validated, never a path) lands only the files uploaded on or
-  before it — a landing is the raw-table state (Phase 7); empty loads them all
+  inferred. Append-only (fix/append-landing): `raw.events` persists across loads
+  and each load overwrites the selected upload-date partitions (delete-then-insert
+  per `cast(server_upload_time as date)`); re-landing a date adds 0 net rows,
+  `raw.dim_user` is a full replace, and a payload conflict rolls the load back.
+  `THROUGH` (an upload date `YYYY-MM-DD`, validated, never a path) lands only the
+  files uploaded on or before it — a landing is the raw-table state (Phase 7);
+  empty loads them all. THROUGH accumulates FORWARD within a warehouse (a
+  `make drop-db` resets); a smaller THROUGH after a larger one does not trim
 - `make dbt-build PROFILE=<p> [TARGET=duckdb] [CONFIRM=yes] [FULL=yes] [THROUGH=<upload-date>]` — `load`,
   then `dbt build` (source tests → `stg_events`, `stg_prompts`, `attribution` →
   data, unit and singular tests) against `data/<p>.duckdb`; prints `dbt-build OK:
@@ -336,11 +348,13 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   *(Phase 9b)* — the BigQuery landing alone (`landing/cli.py bq-load`): the same
   files `load` selects → `gs://<id>-ontime/landing/<p>/{raw,dims}/` → `raw.events`
   / `raw.dim_user` with the schema GENERATED from `generator/models.py`
-  (`landing/bq_schema.json`), one `WRITE_TRUNCATE` load job per table — the
-  only landing mechanism; an empty selection lands a zero-byte
-  `_empty.jsonl` through it (BigQuery rejects a job over zero URIs; §8) —
-  idempotent; prints `bq-load OK: <p> — N files[, landing ≤ <THROUGH>], E
-  event rows, D dim rows`. Cloud-cost (cents):
+  (`landing/bq_schema.json`); append-only (fix/append-landing): a `WRITE_TRUNCATE`
+  load per upload-date partition into the DAY-partitioned
+  `raw.events$YYYYMMDD` (re-landing a date replaces just that partition, 0 net
+  rows) plus one for the `raw.dim_user` seed — load jobs only; an empty events
+  selection lands a zero-byte `_empty.jsonl` into the base table through it
+  (BigQuery rejects a job over zero URIs; §8) — idempotent; prints `bq-load OK:
+  <p> — N files[, landing ≤ <THROUGH>], E event rows, D dim rows`. Cloud-cost (cents):
   `CONFIRM=yes` command-line origin; `PROJECT` validated before any client;
   ADC (impersonated SA), never a key. Verifies `MANIFEST.sha256` like `load`
 - `make drop-db PROFILE=<p> CONFIRM=yes` — deletes `data/<p>.duckdb` and its
@@ -590,7 +604,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   the send-time model's `feature_window_days` (30), `max_user_shift_min`
   (120), `shrinkage_pseudo_count` (5), `model_version` (`v1`), the
   incremental `lookback_days` (5 — Phase 7; `lookback_days·24 >
-  late_arrival_max_hours` on every profile), and `dim_user_identifier`
+  late_arrival_max_hours` on every profile), `source_prune_margin_days`
+  (5 — fix/append-landing: the BigQuery source-scan prune reaches
+  `lookback_days + this` days below the horizon; a declared floor pinned per
+  profile by `test_source_prune_margin_covers_every_profile`), and `dim_user_identifier`
   (`dim_user` — Phase 10: which relation the `raw.dim_user` SOURCE resolves
   to; the Spanner run overrides it to the federation view
   `dim_user_spanner`) in `dbt_project.yml`.
@@ -723,7 +740,11 @@ DECISIONS.md or fix it.
   `target.type` — dbt-bigquery admits no custom strategy, so that dispatch
   body raises by design, Amendment U) — never a `default__`.
   A sixth needs a DECISIONS entry. `generate_schema_name` is a hook override
-  keyed on `target.type`, not a dispatch macro.
+  keyed on `target.type`, not a dispatch macro. The `fix/append-landing`
+  source-scan prune in `stg_events` is a documented carve-out from the five-macro
+  rule (DECISIONS): native BigQuery `timestamp_sub` on a bare partition-column
+  predicate, guarded to `target.type == 'bigquery'` — a macro would defeat
+  partition pruning and there is no DuckDB body (it never runs there).
 - Airflow contains no logic: a task is a `make` target or a dbt command.
 - Minimal but scalable: simplest standard solution now; the scaling path is a
   DECISIONS note, not speculative code. Do not claim scale we don't run.
@@ -981,7 +1002,44 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **17** — `fix/holdout-eval` (2026-09-02, ROADMAP item 4) added
+Open BACKLOG rows: **20** — `fix/append-landing` (2026-09-03, ROADMAP item 6)
+made raw landing append-only. The writer emits the §2.10 export shape — gzipped
+hourly files `events_<date>_<HH>.jsonl.gz` (`filename=""` + `mtime=0` + fixed
+level, byte-reproducible; `fixtures/tiny` re-frozen 10 → 169 files). The DuckDB
+landing keeps `raw.events` across loads and overwrites the selected upload-date
+partitions (delete-then-insert per `cast(server_upload_time as date)`); BigQuery
+lands a `WRITE_TRUNCATE` per `raw.events$YYYYMMDD` on a DAY-partitioned table;
+re-landing a date adds 0 net rows, `raw.dim_user` is a full replace, a payload
+conflict rolls the load back, and `THROUGH` accumulates forward within a
+warehouse. On BigQuery only, `stg_events` prunes its source read to a
+derived-margin (`ceil(late_arrival_max_hours/24) + tz_days + 1`) superset
+upload-time window that keeps every duplicate's copies co-located (≤ 1 h apart, a
+generator invariant pinned by `test_duplicate_upload_span_bounded`), closing the
+measured item-6 cost (an unpartitioned raw forced a 19.45 GB incremental
+re-scan). DuckDB SQL is untouched, so every DuckDB golden is byte-identical
+(attribution / ontime_rate_daily / scores_send_time — 0 differ) and the
+MAE/coverage/accuracy/holdout pins hold; only the raw-structure pins moved
+(`RAW_FILES` 10 → 169, `PHASE1_MANIFEST_LINES` 13 → 172). Two commits (packaging
++ DuckDB append-only + re-freeze; then the BigQuery prune + DAY-partitioned
+landing) plus the records. **Remaining live proof: `make test-int-bigquery`
+(ask-first, cents) — the BigQuery byte parity + pruned-bytes RESULTS line.**
+Struck the item-6 BACKLOG row and opened one (gzip fixture reproducibility is
+proven same-machine only — the frozen manifest assumes CI's zlib, no in-suite
+canary); the append-landing on Spanner dims, finer-than-day partitioning, and
+Composer-on-a-schedule (item 7) stay out of scope (BACKLOG if a case appears).
+The review round found no survivors and no blockers; its should-fixes (the prune
+margin is now a test-pinned var, the dialect carve-out is recorded, `_file_date`
+asserts its shape) landed before merge. **Live BigQuery run (2026-09-03, ask-first,
+`4 passed`):** on a clean warehouse the gzip landing + DAY-partitioned per-partition
+load + FULL-build goldens are byte-identical to DuckDB and the pins hold — the
+landing/partitioning are live-proven. The run also surfaced three follow-ups (now
+BACKLOG rows): `test-int-bigquery` does one full build so it never exercises the
+INCREMENTAL prune (offline-verified only); a pre-existing non-partitioned
+`raw.events` must be dropped once (DEPLOYMENT migration; the fake could not model
+partition state); and the test is not hermetic (a prior profile's `ontime` data
+broke the first run until a `FULL=yes` reset). The docs that had overstated "prune
+proven live by test-int-bigquery" were corrected to state what actually ran. Prior:
+`fix/holdout-eval` (2026-09-02, ROADMAP item 4) added
 the temporal holdout, the non-circular counterpart to the counterfactual
 simulation (ARCHITECTURE §7 report (d), the opening amendment committed alone).
 `eval/cli.py holdout` serves a schedule on data landed ≤ an upload-date cut

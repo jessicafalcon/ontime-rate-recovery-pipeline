@@ -1,12 +1,15 @@
-"""The BigQuery landing (specs/phase-9b-bigquery-dialect.md invariants 3, 7):
-the same files the DuckDB landing selects, the generated schema, ONE
-WRITE_TRUNCATE load job per table (a zero-byte object for an empty selection —
-Amendment X) — against FAKE clients. No google client is ever built here: the
-default factory is replaced by a sentinel that raises, so a code path
-constructing one goes red offline instead of reaching the network."""
+"""The BigQuery landing (specs/phase-9b-bigquery-dialect.md invariants 3, 7;
+append-only in fix/append-landing): the same files the DuckDB landing selects,
+the generated schema, a WRITE_TRUNCATE load per upload-date partition into the
+DAY-partitioned raw.events$YYYYMMDD plus one for the dim seed (a zero-byte object
+for an empty events selection — Amendment X) — against FAKE clients. No google
+client is ever built here: the default factory is replaced by a sentinel that
+raises, so a code path constructing one goes red offline instead of reaching the
+network."""
 
 from __future__ import annotations
 
+import gzip
 import json
 import re
 from pathlib import Path
@@ -16,9 +19,22 @@ import pytest
 from landing import bq, cli
 from landing import load as landing
 from pipeline import cli as pipeline_cli
+from tests import pins
 
 TINY = landing.fixture_dir("tiny")
 ROOT = Path(__file__).parent.parent
+
+
+def _rows_of(name: str, path: Path) -> int:
+    """The row count a load of `path` would report, as BigQuery's would: a gz
+    events file is its decompressed line count, the dim CSV its rows minus the
+    header, a zero-byte object 0. So per-partition loads sum to the real total."""
+    if name.endswith(bq.EMPTY_OBJECT):
+        return 0
+    if name.endswith(".jsonl.gz"):
+        with gzip.open(path, "rt") as fh:
+            return sum(1 for _ in fh)
+    return sum(1 for _ in path.open()) - 1  # CSV: minus the header
 
 
 class Recorder:
@@ -27,18 +43,17 @@ class Recorder:
         self.uploads: list[tuple[str, str, Path]] = []
         self.loads: list[tuple[str, list[str], dict]] = []
         self.sizes: dict[str, int] = {}
+        self.rows: dict[str, int] = {}  # object name → rows it would load
 
     def upload(self, bucket: str, name: str, path: Path) -> None:
         self.uploads.append((bucket, name, path))
         self.sizes[name] = path.stat().st_size  # read now: a temp file may vanish
+        self.rows[name] = _rows_of(name, path)
 
     def load(self, table_id: str, uris: list[str], config: dict) -> int:
-        """Rows follow the URIs, as BigQuery's would: a zero-byte object loads
-        0 rows (round 4 #2 — a constant could not pin the empty landing)."""
+        """Rows follow the URIs (a per-partition sum), as BigQuery's would."""
         self.loads.append((table_id, uris, config))
-        if all(u.endswith(bq.EMPTY_OBJECT) for u in uris):
-            return 0
-        return {"events": 970, "dim_user": 22}[table_id.rsplit(".", 1)[1]]
+        return sum(self.rows[u.split("/", 3)[3]] for u in uris)
 
 
 def _factory() -> tuple[list[Recorder], bq.ClientFactory]:
@@ -57,44 +72,51 @@ def test_selects_the_same_files_as_the_duckdb_landing() -> None:
         files = bq.selected_files(TINY, through)
         assert files["events"] == landing.event_files(TINY, through)
         assert files["dim_user"] == [TINY / "dims" / "dim_user.csv"]
-    assert len(bq.selected_files(TINY, "2026-01-07")["events"]) == 4
+    # hourly gzip: 65 files uploaded on or before 2026-01-07 (01-04 … 01-07)
+    assert len(bq.selected_files(TINY, "2026-01-07")["events"]) == 65
     assert bq.selected_files(TINY, "2025-01-01")["events"] == []
 
 
-def test_uploads_then_loads_with_the_generated_schema() -> None:
-    """Invariant 3: every selected file is uploaded under landing/<profile>/,
-    then ONE load job per table over exactly those URIs, with the contract
-    schema (landing/bq_schema.json — generated) and WRITE_TRUNCATE."""
+def test_uploads_then_loads_per_partition_with_the_generated_schema() -> None:
+    """Done-when 3/4 (BigQuery): every selected file is uploaded under
+    landing/<profile>/, then ONE WRITE_TRUNCATE load per upload-date partition
+    into raw.events$YYYYMMDD on the DAY-partitioned table, plus one for the dim
+    seed — the generated schema (landing/bq_schema.json), no read/query/DDL. Rows
+    follow the URIs, so the per-partition loads sum to the real ≤through total."""
+    from collections import defaultdict
+
     made, make = _factory()
-    files, events, dims = bq.bq_load("tiny", "my-project", "2026-01-07", make)
-    assert (files, events, dims) == (4, 970, 22)
+    through = "2026-01-07"
+    ev_files = landing.event_files(TINY, through)
+    files, events, dims = bq.bq_load("tiny", "my-project", through, make)
+    real_rows = sum(sum(1 for _ in gzip.open(f, "rt")) for f in ev_files)
+    assert (files, events, dims) == (65, real_rows, 22)
     assert [r.project for r in made] == ["my-project"]
     r = made[0]
     assert all(b == "my-project-ontime" for b, _, _ in r.uploads)
-    names = [n for _, n, _ in r.uploads]
-    assert names == [
-        *[
-            f"landing/tiny/raw/{p.name}"
-            for p in landing.event_files(TINY, "2026-01-07")
-        ],
-        "landing/tiny/dims/dim_user.csv",
-    ]
-    assert [t for t, _, _ in r.loads] == [
-        "my-project.raw.events",
-        "my-project.raw.dim_user",
-    ]
-    ev_uris, dim_uris = r.loads[0][1], r.loads[1][1]
-    assert ev_uris == [f"gs://my-project-ontime/{n}" for n in names[:-1]]
-    assert dim_uris == [f"gs://my-project-ontime/{names[-1]}"]
+    ev_names = [f"landing/tiny/raw/{p.name}" for p in ev_files]
+    assert [n for _, n, _ in r.uploads] == [*ev_names, "landing/tiny/dims/dim_user.csv"]
+    by_date: dict[str, list[Path]] = defaultdict(list)
+    for p in ev_files:
+        by_date[landing._file_date(p.name)].append(p)
+    ids = [f"my-project.raw.events${d.replace('-', '')}" for d in sorted(by_date)]
+    assert [t for t, _, _ in r.loads] == [*ids, "my-project.raw.dim_user"]
     schema = json.loads(bq.SCHEMA_PATH.read_text())
-    for (table_id, _, cfg), table in zip(r.loads, ("events", "dim_user"), strict=True):
-        assert cfg["schema"] == schema[table], table_id
-        assert cfg["write_disposition"] == "WRITE_TRUNCATE", table_id
-    assert r.loads[0][2]["source_format"] == "NEWLINE_DELIMITED_JSON"
-    assert r.loads[1][2]["source_format"] == "CSV"
-    assert r.loads[1][2]["skip_leading_rows"] == 1
-    assert r.loads[1][2]["null_marker"] == ""  # empty valid_to = the open row
-    # the config is the only place the disposition lives (a mutation target)
+    for (tid, uris, cfg), d in zip(r.loads[:-1], sorted(by_date), strict=True):
+        want = [f"gs://my-project-ontime/landing/tiny/raw/{p.name}" for p in by_date[d]]
+        assert uris == want, tid
+        assert cfg["schema"] == schema["events"]
+        assert cfg["write_disposition"] == "WRITE_TRUNCATE"
+        assert cfg["source_format"] == "NEWLINE_DELIMITED_JSON"
+        assert cfg["time_partitioning"] == {
+            "type": "DAY",
+            "field": "server_upload_time",
+        }
+    dim_cfg = r.loads[-1][2]
+    assert dim_cfg["schema"] == schema["dim_user"]
+    assert dim_cfg["source_format"] == "CSV" and dim_cfg["skip_leading_rows"] == 1
+    assert dim_cfg["null_marker"] == ""  # empty valid_to = the open row
+    assert "time_partitioning" not in dim_cfg  # only events is partitioned
     assert bq.load_job_config("events")["write_disposition"] == "WRITE_TRUNCATE"
     assert all(bq.EMPTY_OBJECT not in n for _, n, _ in r.uploads)  # no empty marker
 
@@ -113,10 +135,10 @@ def test_landing_reads_nothing_and_uses_one_mechanism(
     monkeypatch.setattr(bq, "RAW_DATASET", "zz")
     made, make = _factory()
     bq.bq_load("tiny", "my-project", None, make)
-    assert [t for t, _, _ in made[0].loads] == [
-        "my-project.zz.events",
-        "my-project.zz.dim_user",
-    ]
+    loads = [t for t, _, _ in made[0].loads]
+    assert loads[-1] == "my-project.zz.dim_user"  # dim last, base table
+    assert all(t.startswith("my-project.zz.events$") for t in loads[:-1])  # per date
+    assert len(loads[:-1]) == 10  # one events load per upload date, 01-04 … 01-13
     for module in ("bq.py", "cli.py"):  # round 4 #1: the whole cloud path
         src = (ROOT / "landing" / module).read_text()
         for forbidden in (".query(", "truncate", "delete_table", "create_table"):
@@ -201,7 +223,9 @@ def test_no_client_is_built_before_validation(
     assert len(made) == 1
     out = capsys.readouterr().out
     assert "bq-load: source=fixtures/tiny → my-project.raw" in out
-    assert "bq-load OK: tiny — 10 files, 970 event rows, 22 dim rows" in out
+    assert (
+        f"bq-load OK: tiny — {pins.RAW_FILES} files, 970 event rows, 22 dim rows" in out
+    )
 
 
 def test_int_bigquery_entry_validates_and_gates_before_pytest(

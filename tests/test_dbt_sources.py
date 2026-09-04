@@ -74,7 +74,7 @@ def test_source_tests_cover_every_required_column() -> None:
             ), name
     assert gen.duckdb_type(dict[str, object]) == "json"
     assert gen.duckdb_type(gen.Event.model_fields["event_type"].annotation) == "varchar"
-    assert gen.render_ddl().count("create or replace table") == 2
+    assert gen.render_ddl().count("create table if not exists") == 2
 
 
 # --------------------------------------------------- Phase 10: the Spanner shapes

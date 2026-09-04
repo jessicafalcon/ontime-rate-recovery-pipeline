@@ -29,6 +29,14 @@ clean-targets: ["target", "dbt_packages"]
 # dim_user_identifier — which relation the raw.dim_user SOURCE resolves to
 # (§3.3's source-config swap): default the landed table on every target; the
 # Spanner integration run overrides it to the federation view dim_user_spanner.
+# fix/append-landing adds source_prune_margin_days: the extra days the BigQuery
+# source-scan prune reaches BELOW the lookback window (a SUPERSET — covering the
+# client<->server clock offset AND co-locating a duplicate's copies). A declared
+# floor pinned by tests/test_incremental.py::test_source_prune_margin_covers_every_profile
+# to be >= ceil(late_arrival_max_hours/24) + tz_days + dup_days per profile (5
+# covers medium/large's 72 h). NOTE: every line inside `vars:` below must be a
+# bare `key: value` — tests/test_attribution.py::project_vars parses it without a
+# YAML lib, so no in-block comments.
 vars:
   skew_max_min: 5
   delivery_grace_min: 10
@@ -39,6 +47,7 @@ vars:
   shrinkage_pseudo_count: 5
   model_version: v1
   lookback_days: 5
+  source_prune_margin_days: 5
   dim_user_identifier: dim_user
 
 models:

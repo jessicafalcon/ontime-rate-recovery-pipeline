@@ -158,6 +158,117 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/append-landing (after Phase 13, 2026-09-02)
+
+*ROADMAP item 6. The opening commit is the spec (`specs/fix-append-landing.md`)
+and this entry, alone, before any code — it changes the landing write path and
+who-writes-what, and re-freezes `fixtures/tiny/raw`, so it is a spec + DECISIONS
+entry, not a bare amendment (CLAUDE.md → Fix amendments; ROADMAP item 6).
+STOP for approval before implementing.*
+
+- **The warehouse content does not move — only raw's packaging and the bytes
+  scanned to read it.** The generator emits the same events; the writer
+  repackages them and the landing appends them per partition. Every DuckDB
+  golden, every warehouse-derived pin (label accuracy, MAE, coverage, the
+  simulation, the holdout, `HOLDOUT_CUTS`) and every `send_schedule` hash is
+  byte-identical; only the raw file-structure pins (`RAW_FILES`, `_file_date`
+  assertions) and the frozen `MANIFEST.sha256` move. This is the central
+  constraint the branch is built to keep.
+- **The writer emits gzipped hourly files (`events_<date>_<HH>.jsonl.gz`),
+  written with `gzip.GzipFile(mtime=0)` and a fixed compresslevel.** The §2.10
+  export shape is a real Amplitude export's shape (hourly `.json.gz`), not a
+  plain daily file. Why the explicit `mtime=0`: `gzip.open` at defaults embeds a
+  wall-clock mtime and OS byte in the header, so the same SEED would produce
+  different bytes every run — breaking the frozen manifest and the determinism
+  policy. The hour is packaging only; the partition key is the date (`_file_date`
+  = the first 10 chars), so `THROUGH` still selects by upload date and rolls a
+  date's hourly files up together. Rejected: daily plain files (not the export
+  shape item 6 names); a manifest of loaded objects (a second source of truth off
+  the file name).
+- **The events landing is partition-overwrite per upload-date partition, one
+  layer up from the incremental models.** DuckDB deletes then inserts each
+  `cast(server_upload_time as date)` partition; BigQuery loads through the
+  `raw.events$YYYYMMDD` partition decorator with `WRITE_TRUNCATE` on a
+  DAY-partitioned table; the table persists across loads (append-only, not
+  table-recreate). A re-land of an already-landed partition leaves the content
+  identical and adds 0 net rows. This mirrors the `partition_overwrite` strategy
+  the dbt models already use — the same upload-date key at the layer below.
+  Rejected: insert-only skip-if-present (cannot absorb a date that later gains an
+  hour; a changed re-land would be silently dropped); the status-quo whole-table
+  recreate / `WRITE_TRUNCATE` (exactly what the measured 19.45 GB cost row
+  indicts). `raw.dim_user` is the one SCD2 seed, has no upload-date partition, and
+  stays a full replace each load. DuckDB `THROUGH` is monotonic-forward within a
+  warehouse (a `drop-db` resets; every test lands forward), documented in the
+  `make load` contract.
+- **`stg_events` prunes its raw source read to a superset upload-time window on
+  BigQuery only.** Inside `is_incremental()` and `target.type == 'bigquery'`, the
+  source read is bounded to `server_upload_time >= horizon_ts − (lookback_days +
+  margin) days` — the fix for the measured item-6 cost, where an unpartitioned
+  raw forced every incremental re-run to re-scan all of raw (19.45 GB). The window
+  is a *superset*: wide enough to include every row whose `event_date`
+  (client-local) is in the reprocess window despite the cross-clock offset to
+  `server_upload_time` (server), and wide enough to co-locate both copies of any
+  duplicate `insert_id`, so the earliest-copy dedupe (`stg_events` invariant 1) is
+  unchanged. DuckDB has no partitions and no benefit, so its SQL is left
+  unchanged — which is why every DuckDB golden is byte-identical for free. The
+  prune's correctness is OFFLINE-verified (the guard renders only incrementally
+  on BigQuery, the duplicate span is bounded, the margin is a per-profile-pinned
+  floor). Its LIVE incremental byte-parity is NOT yet proven: `make
+  test-int-bigquery` does one FULL build (the prune fires only when
+  `is_incremental()`), so it proves the landing + DAY-partitioning parity, not
+  this predicate — an incremental second build is the BACKLOG follow-up. The
+  full-build parity was run live 2026-09-03 (`4 passed` on a clean warehouse).
+  Rejected: a tight `− lookback_days` window (the cross-clock offset can put an
+  in-window row just below it); pruning on DuckDB too (risks the goldens for no
+  gain). The measured pruned re-run bytes are a hand-filled `docs/RESULTS.md` line
+  (job facts are non-deterministic and unasserted, the standing carve-out).
+- **BigQuery append-landing self-creates the partitioned table; a pre-existing
+  non-partitioned `raw.events` must be dropped once (migration).** Proven live
+  2026-09-03: a fresh decorator load into `raw.events$YYYYMMDD` with
+  `time_partitioning` created the DAY-partitioned table and loaded all 970 rows. But BigQuery refuses to add partition-decorator storage to an EXISTING
+  non-partitioned table (and cannot change partitioning in place), so a deployment
+  that already has a non-partitioned `raw.events` (e.g. Phase 9b's whole-table
+  landing) must `bq rm` it once before the first partitioned landing — a
+  `docs/DEPLOYMENT.md` migration note. The offline `Recorder` fake could not have
+  caught this (it does not model partition-vs-non-partition table state) — the
+  adapter-contract lesson: this landing was proven on the real type by the live
+  run, not the fake.
+- **The prune `margin` is DERIVED from bounded generator knobs, not tuned to a
+  fixture** (the review refinement, spec commit 4e0c1b5). Every way an
+  in-reprocess-window row can carry a low `server_upload_time` is a closed knob:
+  the ≤ 1 h duplicate span (`inject_duplicates` offsets a copy by
+  `_secs(rng, 0, 3600)` — a generator invariant over ALL seeds, pinned by
+  `test_duplicate_upload_span_bounded`, not measured off tiny), the ≤
+  `late_arrival_max_hours` horizon inflation, and the ≤ 1-day tz offset. So
+  `margin = ceil(late_arrival_max_hours/24) + tz_days + 1` (5 covers every
+  profile), a model-local `{% set %}` constant — the live parity run CONFIRMS the
+  derivation, it is not the proof (Boundary contract: prove the class, not the
+  case). Rejected: a margin fit to tiny's measured span.
+- **Implementation choices the spec left open.** (a) Gzip is written
+  `gzip.GzipFile(filename="", mtime=0, compresslevel=<fixed>)` — `filename=""`
+  suppresses the source name `GzipFile` would otherwise copy from `fileobj.name`
+  (path-dependent bytes), beside the `mtime=0` the spec already named (§8). (b)
+  The streaming writer lifts the open-file soft limit first (`_raise_fd_limit`,
+  best effort) — a wide-horizon sharded run holds up to `days×24` per-hour gzip
+  members open at once (720 on `large`, up from ~30 per-day), so single-member
+  byte-identity to the in-memory path is kept without hitting the FD ceiling. (c)
+  A payload conflict rolls the whole load back in one transaction (nothing
+  committed) instead of dropping the tables — append-only means the tables
+  persist, so a fresh warehouse is left empty and an existing one unchanged.
+- **Dialect-contract carve-out: the source-scan prune is native BigQuery SQL,
+  not a sixth dispatch macro.** The five-macro dialect contract admits new
+  dialect SQL only as a sixth macro (each with a DuckDB + a BigQuery body) or an
+  explicit carve-out here. The prune uses BigQuery `timestamp_sub(max(...),
+  interval N day)` on a bare `server_upload_time >=` predicate, guarded to
+  `is_incremental() and target.type == 'bigquery'`. A dispatch macro is the WRONG
+  shape: it must be a bare partition-column predicate for BigQuery to prune, and
+  it never runs on DuckDB (which has no partitions and is left byte-identical) —
+  so there is no DuckDB body to write and wrapping the column in the existing
+  `timestamp_diff` macro would defeat pruning. Recorded as a native, BigQuery-only,
+  pruning-motivated carve-out (not a `default__`, not a new macro); ARCHITECTURE §8
+  and CLAUDE.md's Dialect contract name it. Rejected: a sixth macro (wrong shape,
+  a raising DuckDB body for nothing); leaving it as undocumented inline SQL.
+
 ### fix/holdout-eval (after Phase 13, 2026-09-02)
 
 *ROADMAP item 4. The opening amendment (ARCHITECTURE §7 report (d)) was committed
@@ -2294,7 +2405,10 @@ allowlist (M); the root `workload_identity_provider` output (J); two datasets,
   `truth/{users,prompts}.jsonl`; canonical JSON (`sort_keys`, no spaces),
   Amplitude timestamp strings, whole seconds, counter ids, `SIM_START` =
   2026-01-05 (January: no DST transition in any profile tz). Rejected: one
-  `events.jsonl` (Phase 7 would split it).
+  `events.jsonl` (Phase 7 would split it). **Superseded by fix/append-landing:**
+  raw is now gzipped hourly `raw/events_<date>_<HH>.jsonl.gz`; the upload date
+  (the first 10 chars of the name) stays the landing partition key, the hour is
+  packaging.
 - **`cli.py` joins `truth.py`/`models.py` as a file that may name truth.** The
   rule's property is "generation logic never names the side-file"; something
   has to call the writer, and the entry point is the least-logic place. The

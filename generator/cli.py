@@ -9,6 +9,7 @@ freeze — copy data/out/<p>/ over fixtures/<p>/ and write the manifest; only
 from __future__ import annotations
 
 import argparse
+import resource
 import shutil
 import sys
 from collections import defaultdict
@@ -18,7 +19,12 @@ from pathlib import Path
 from generator import manifest, profiles, truth
 from generator.generate import Output, arrival_order, generate, iter_shards, prepare
 from generator.profiles import Profile
-from generator.writer import ROOT, JsonlAppender, write_csv, write_jsonl
+from generator.writer import (
+    ROOT,
+    GzipJsonlAppender,
+    write_csv,
+    write_gzip_jsonl,
+)
 
 DATA_OUT = ROOT / "data" / "out"
 FIXTURES = ROOT / "fixtures"
@@ -29,15 +35,38 @@ def die(msg: str, code: int = 2) -> None:
     sys.exit(code)
 
 
+def _raise_fd_limit(target: int) -> None:
+    """Best-effort lift of the open-file soft limit toward the hard limit, for
+    the many concurrent per-hour gzip writers a wide-horizon sharded run holds."""
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        want = min(max(soft, target), hard)
+        if want > soft:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
+    except (ValueError, OSError):
+        pass
+
+
+def raw_file_name(ev) -> str:
+    """The gzipped hourly export unit an event lands in: `events_<upload
+    date>_<HH>.jsonl.gz` (§2.10). The name's first 10 chars are the upload-date
+    partition key the landing reads (`landing.load._file_date`); the hour is
+    packaging only."""
+    return (
+        f"events_{ev.server_upload_time.strftime('%Y-%m-%d')}"
+        f"_{ev.server_upload_time.strftime('%H')}.jsonl.gz"
+    )
+
+
 def write_output(out: Path, output: Output) -> int:
-    """raw/events_<upload date>.jsonl (the Phase 7 landing unit), dims/, truth/.
-    In-memory: holds every event. Used at shards == 1 (tiny/medium/tests)."""
-    by_day: dict[str, list] = defaultdict(list)
+    """raw/events_<upload date>_<HH>.jsonl.gz (the §2.10 export unit), dims/,
+    truth/. In-memory: holds every event. Used at shards == 1 (tiny/medium)."""
+    by_file: dict[str, list] = defaultdict(list)
     for ev in output.events:  # already in arrival order
-        by_day[ev.server_upload_time.strftime("%Y-%m-%d")].append(ev)
+        by_file[raw_file_name(ev)].append(ev)
     n = 0
-    for day in sorted(by_day):
-        n += write_jsonl(out / "raw" / f"events_{day}.jsonl", by_day[day])
+    for name in sorted(by_file):
+        n += write_gzip_jsonl(out / "raw" / name, by_file[name])
     n += write_csv(out / "dims" / "dim_user.csv", output.dims)
     n += truth.write_truth(out, output)
     return n
@@ -46,27 +75,31 @@ def write_output(out: Path, output: Output) -> int:
 def write_output_streaming(out: Path, profile: Profile) -> int:
     """The memory-bounded write for a sharded run (shards > 1): dims once, then
     each shard's events — arrival-ordered within the shard — appended to
-    per-upload-day files, and its truth appended, so no run holds every event.
-    Byte-equivalent to `write_output(generate(profile))` (shard-major, arrival
-    order within a shard), pinned on a small 2-shard profile in test_generator."""
+    per-upload-hour gzip files, and its truth appended, so no run holds every
+    event. Byte-equivalent to `write_output(generate(profile))` (shard-major,
+    arrival order within a shard), pinned on a small 2-shard profile."""
     prep = prepare(profile)
     n = write_csv(out / "dims" / "dim_user.csv", prep.dims)
+    # Each upload-hour file stays open across the run so every shard appends to
+    # one gzip member (byte-identical to the in-memory path). A wide horizon has
+    # up to (days × 24) files open at once (720 on `large`), so lift the soft FD
+    # limit toward the hard limit first — best effort; a genuine exhaustion still
+    # surfaces loudly at open().
+    _raise_fd_limit(4096)
     with ExitStack() as stack:  # every appender closes even if a shard raises
         ts = truth.TruthStream(out)
         stack.callback(ts.close)
-        day_writers: dict[str, JsonlAppender] = {}
+        hour_writers: dict[str, GzipJsonlAppender] = {}
         for so in iter_shards(profile, prep):
             for ev in arrival_order(so.events):
-                day = ev.server_upload_time.strftime("%Y-%m-%d")
-                w = day_writers.get(day)
+                name = raw_file_name(ev)
+                w = hour_writers.get(name)
                 if w is None:
-                    w = day_writers[day] = JsonlAppender(
-                        out / "raw" / f"events_{day}.jsonl"
-                    )
+                    w = hour_writers[name] = GzipJsonlAppender(out / "raw" / name)
                     stack.callback(w.close)
                 w.write_one(ev)
             ts.write_shard(so)
-        n += sum(w.n for w in day_writers.values()) + ts.n_written
+        n += sum(w.n for w in hour_writers.values()) + ts.n_written
     return n
 
 
