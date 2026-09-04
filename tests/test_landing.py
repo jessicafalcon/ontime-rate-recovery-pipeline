@@ -95,6 +95,21 @@ def test_file_date_equals_partition() -> None:
                 assert json.loads(ln)["server_upload_time"][:10] == d, (f.name, d)
 
 
+def test_file_date_refuses_a_malformed_name() -> None:
+    """_file_date asserts the YYYY-MM-DD shape (security note): the value that
+    reaches a DuckDB partition delete or the raw.events$YYYYMMDD decorator is the
+    declared shape, never a bare slice. Valid names return the date."""
+    assert landing._file_date("events_2026-01-04_23.jsonl.gz") == "2026-01-04"
+    assert landing._file_date("events_2026-01-04.jsonl.gz") == "2026-01-04"
+    for bad in (
+        "events_2026-1-4_23.jsonl.gz",
+        "events_notadate.jsonl.gz",
+        "events_../etc/pw.jsonl.gz",
+    ):
+        with pytest.raises(ValueError, match="YYYY-MM-DD"):
+            landing._file_date(bad)
+
+
 def test_through_rolls_hourly_files_to_upload_date(tmp_path: Path) -> None:
     """Done-when 2: THROUGH filters by upload DATE; the hourly split never moves a
     row across the boundary. Landing <= a cut lands the same raw row multiset as

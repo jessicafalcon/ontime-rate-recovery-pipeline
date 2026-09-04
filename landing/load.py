@@ -84,12 +84,24 @@ def conflicting_duplicates(con: duckdb.DuckDBPyConnection) -> list[str]:
     return [r[0] for r in rows]
 
 
+_UPLOAD_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
 def _file_date(name: str) -> str:
     """The upload date in `events_YYYY-MM-DD[_HH].jsonl.gz` (the partition key):
     the first 10 chars of the stem. The hour, when present, is packaging only —
-    every event in the file has `cast(server_upload_time as date)` == this date."""
+    every event in the file has `cast(server_upload_time as date)` == this date.
+    Asserts the `YYYY-MM-DD` shape and refuses otherwise, so the value fed to a
+    DuckDB partition delete or a `raw.events$YYYYMMDD` decorator is always the
+    declared shape, never a raw slice — the guarantee the spec Threat model and
+    `bq._partition_decorator` rely on (round: security note)."""
     stem = name[len("events_") : -len(".jsonl.gz")]
-    return stem[:10]
+    date = stem[:10]
+    if not _UPLOAD_DATE.match(date):
+        raise ValueError(
+            f"refusing raw file name (no YYYY-MM-DD upload date): {name!r}"
+        )
+    return date
 
 
 def event_files(fixture: Path, through: str | None = None) -> list[Path]:
