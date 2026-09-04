@@ -158,6 +158,66 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/ci-bigquery-parity (after Phase 13, 2026-09-04)
+
+*ROADMAP item 8. The opening commit is the spec (`specs/fix-ci-bigquery-parity.md`),
+alone, before any code. It adds a CI workflow and its offline pin test and
+performs one persisting `enable_ci_wif=true` apply; it moves no data structure,
+write path, pin, golden, model, or `.tf`, so it is a spec + this entry, not a
+data-structure amendment. STOP for approval was taken before implementing.*
+
+- **CI hands the WIF credential to the pipeline as ADC via `CLOUDSDK_CONFIG`, and
+  `CLOUD_ENV_ALLOW` stays unwidened.** `google-github-actions/auth` by default
+  exports `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_GHA_CREDS_PATH` and
+  `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE` into the job environment — every one is
+  in the cloud-env domain (`infra.cli.in_cloud_namespace`) and absent from
+  `CLOUD_ENV_ALLOW`, so `make test-int-bigquery` would REFUSE to run (the boundary
+  contract working as designed: a domain name that is not a listed setting is a
+  credential). The workflow sets `export_environment_variables: false` (so the
+  action exports nothing), copies the action's `credentials_file_path` output to
+  `$CLOUDSDK_CONFIG/application_default_credentials.json`, and sets
+  `CLOUDSDK_CONFIG` for the make step; google-auth resolves ADC from there when
+  `GOOGLE_APPLICATION_CREDENTIALS` is unset. `CLOUDSDK_CONFIG` is the one
+  identity-bearing setting the allowlist already admits (P4), so nothing is
+  widened. Rejected: adding `GOOGLE_APPLICATION_CREDENTIALS` to `CLOUD_ENV_ALLOW`
+  — the credential standard names a credential-file override a secret, and
+  admitting a `GOOGLE_`-domain name is the denylist concession the Boundary
+  contract forbids; relocating ADC into the already-admitted setting removes
+  nothing and widens nothing. Pinned by
+  `tests/test_ci_parity_workflow.py::test_make_step_carries_no_refused_cloud_env`
+  offline; the live proof is that the dispatched run's `refuse_cloud_env` (first
+  inside `test-int-bigquery`) did not refuse.
+- **`workflow_dispatch`-only, `permissions: {id-token: write, contents: read}`,
+  every action SHA-pinned.** A manual trigger cannot be reached by a fork PR or a
+  branch push, so no untrusted event ever reaches the cloud credential;
+  `id-token: write` is the minimum for OIDC, `contents: read` for checkout; SHA
+  pins stop a compromised action tag from running attacker code with the token.
+  The WIF provider already trusts only `<owner>/<repo>` on `refs/heads/main`
+  (Phase 9a), so a dispatch from any other ref is refused at the token exchange.
+  Rejected: `on: schedule` (the row wants on-demand — a cron parity run is a later
+  BACKLOG row); `on: pull_request` with an environment gate (a fork could race the
+  approval; a manual trigger closes the surface entirely). Pinned by
+  `test_dispatch_only`, `test_permissions_are_minimal`, `test_every_action_is_sha_pinned`.
+- **Identity lives in GitHub repo variables (`${{ vars.* }}`), not the tree.** The
+  provider name, SA email and project id are operator-set repo variables; the
+  committed workflow holds only refs, so `check-docs` check 5 keeps the
+  `<owner>/<repo>` / `<project_id>` placeholders and no demo identifier lands in a
+  tracked record. Rejected: hardcoding (check 5 red); GitHub *secrets* for
+  non-secret identifiers (variables are the right store; secrets would only mask
+  them from the diagnostic log). Pinned by `test_auth_uses_wif_and_no_literal_identity`.
+- **The `enable_ci_wif=true` apply PERSISTS — the first "stays up between
+  sessions" apply.** WIF is free and must stay up for CI to authenticate, so there
+  is no same-session teardown (unlike Spanner/Composer). This is now safe because
+  Terraform state lives on the GCS remote backend (`fix/tf-remote-state`); the
+  standing Spanner/Composer `Listed 0 items.` exit check still runs. The WIF
+  resources were written and frozen in Phase 9a, so the apply supplies only
+  runtime `VARS` and moves no `.tf` (no `tf-freeze`). The apply command is
+  `make tf-apply PROJECT=<project_id>
+  VARS='enable_ci_wif=true,github_repository=<owner>/<repo>' CONFIRM=yes`.
+  *(Live status PENDING: the ask-first apply and the first green dispatched run
+  are filled here and in `docs/DEPLOYMENT.md`, dated, the session they happen;
+  until then this branch is the offline artifacts only.)*
+
 ### fix/append-landing (after Phase 13, 2026-09-02)
 
 *ROADMAP item 6. The opening commit is the spec (`specs/fix-append-landing.md`)

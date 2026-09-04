@@ -1,0 +1,65 @@
+name: bigquery-parity
+
+# The DuckDB≡BigQuery pin-parity run (`make test-int-bigquery`) in CI, so
+# cross-warehouse dialect drift is caught automatically, not only by a manual
+# laptop run. Manual only: a fork PR or a branch push can never trigger it or
+# reach the cloud credential.
+on:
+  workflow_dispatch:
+
+# The minimum: mint a GitHub OIDC token (id-token) and read the repo (checkout).
+# No key is ever downloaded — auth is short-lived Workload Identity Federation.
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # No token in .git/config for the third-party steps that follow.
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          version: "0.12.5" # match local; bump deliberately
+      - run: uv sync --locked
+
+      # Exchange the OIDC token for a short-lived credential impersonating the
+      # pipeline SA. `export_environment_variables: false` is deliberate: the
+      # default export writes GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_GHA_CREDS_PATH
+      # / CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE into the environment, and the
+      # pipeline's cloud-env allowlist (infra.cli.CLOUD_ENV_ALLOW) refuses every
+      # one of those — a domain name that is not a listed setting is a credential
+      # by definition. Instead the run step below hands the credential to the
+      # pipeline as ADC via CLOUDSDK_CONFIG, the one identity-bearing setting the
+      # allowlist admits. Identity (provider, SA) lives in repo variables, never
+      # a literal in this tracked file.
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+          export_environment_variables: false
+
+      # The parity suite. ADC is discovered from CLOUDSDK_CONFIG (google-auth
+      # reads $CLOUDSDK_CONFIG/application_default_credentials.json when
+      # GOOGLE_APPLICATION_CREDENTIALS is unset — which it is, since the auth step
+      # exported nothing). The copied config JSON keeps the absolute path to the
+      # OIDC token file the auth step wrote, so it resolves in this job. No
+      # cloud-env name the gate refuses is in this step's environment; CONFIRM=yes
+      # is on the command line, so $(origin CONFIRM) is "command line".
+      - name: parity
+        env:
+          CLOUDSDK_CONFIG: ${{ runner.temp }}/gcloud
+        run: |
+          mkdir -p "$CLOUDSDK_CONFIG"
+          cp "${{ steps.auth.outputs.credentials_file_path }}" \
+             "$CLOUDSDK_CONFIG/application_default_credentials.json"
+          make test-int-bigquery PROJECT=${{ vars.GCP_PROJECT }} CONFIRM=yes
