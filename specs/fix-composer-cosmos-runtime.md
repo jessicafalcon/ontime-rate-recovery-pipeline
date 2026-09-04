@@ -222,13 +222,16 @@ config the builder assembles) and `orchestration/failure_email.py` (the callback
 ```mutations
 orchestration/composer_tasks.py::build_kpo_command        constant-return:[]
 orchestration/composer_tasks.py::build_kpo_command        invert-guard
-orchestration/failure_email.py::pipeline_failure_email    delete-call
+orchestration/failure_email.py::pipeline_failure_email    constant-return:None
 ```
 
 (`build_kpo_command` renders the pod argv from a step name — an ALLOWLIST like
 `tasks.py::build_tasks`; neutering it makes a KPO step run nothing or a wrong
-command → the shape test reds. `pipeline_failure_email` without its `send_email`
-call → the callback test reds. The Cosmos-render and plan invariants are
+command → the shape test reds. `pipeline_failure_email` returning early (`None`)
+before its `send()` call → the callback test reds (`sent` stays empty). The
+callback is passed as a reference (`on_failure_callback`), never called at
+statement level, so `delete-call` has no target — `constant-return:None` is the
+neuter that skips the send. The Cosmos-render and plan invariants are
 SQL/plan-pinned, not Python-mutated — no data path changes.)
 
 ## Pinned decisions (do not re-litigate)
