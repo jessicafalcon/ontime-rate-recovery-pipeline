@@ -348,17 +348,18 @@ def test_bigquery_build_lands_through_bq_not_duckdb(
     assert rc == 0
     assert seen["env"] == "my-project" and "--target" in seen["args"]
     assert seen["args"][seen["args"].index("--target") + 1] == "bigquery"
+    ev_files = landing.event_files(landing.fixture_dir("tiny"), "2026-01-07")
+    n_dates = len({landing._file_date(f.name) for f in ev_files})  # one load per date
     kinds = [c[0] for c in _FakeClients.calls]
-    assert kinds[0] == "init" and "upload" in kinds and kinds.count("load") == 2
+    # append-only: one events load per upload-date partition + one dim load
+    assert kinds[0] == "init" and "upload" in kinds
+    assert kinds.count("load") == n_dates + 1
     uploads = [c for c in _FakeClients.calls if c[0] == "upload"]
     assert all(c[1] == "my-project-ontime" for c in uploads)
-    # THROUGH selected the same subset the DuckDB landing would (4 files ≤ 01-07)
-    assert len([u for u in uploads if u[3].startswith("events_")]) == len(
-        landing.event_files(landing.fixture_dir("tiny"), "2026-01-07")
-    )
-    n_le_07 = len(landing.event_files(landing.fixture_dir("tiny"), "2026-01-07"))
+    # THROUGH selected the same subset the DuckDB landing would (hourly gz files)
+    assert len([u for u in uploads if u[3].startswith("events_")]) == len(ev_files)
     assert (
-        f"bq-load OK: tiny — {n_le_07} files, landing ≤ 2026-01-07"
+        f"bq-load OK: tiny — {len(ev_files)} files, landing ≤ 2026-01-07"
         in capsys.readouterr().out
     )
     # the duckdb build: load() runs, no client is built

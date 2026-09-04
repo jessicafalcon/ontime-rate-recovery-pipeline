@@ -6,11 +6,13 @@
 -- the landing step refuses a landing where they differ in event_properties.
 --
 -- Incremental (Phase 7) on event_date (the local date; an app_opened has no
--- prompt_id). The dedupe qualify runs over the WHOLE raw source before the
--- lookback filter, so both copies of a duplicate — which share client_event_time,
--- hence event_date — are always seen together and never split across landings.
--- Reprocess partitions inside the lookback of the data-derived horizon
--- (max(server_upload_time)); a closed partition is never rewritten.
+-- prompt_id). The dedupe qualify runs over the raw source before the lookback
+-- filter; on BigQuery the source read is first pruned to a SUPERSET upload-time
+-- window (fix/append-landing, below) that still co-locates both copies of any
+-- duplicate (they are <= 1 h apart, a generator invariant), so a duplicate is
+-- never split and the earliest-copy rule is unchanged. Reprocess partitions
+-- inside the lookback of the data-derived horizon (max(server_upload_time)); a
+-- closed partition is never rewritten.
 
 {{ config(
     materialized='incremental',
@@ -32,6 +34,30 @@ with raw_events as (
         server_upload_time,
         event_properties
     from {{ source('raw', 'events') }}
+    {% if is_incremental() and target.type == 'bigquery' %}
+    -- Source-scan prune (fix/append-landing): on BigQuery raw.events is
+    -- DAY-partitioned on server_upload_time, so bounding the read to a superset
+    -- upload-time window lets an incremental re-run prune source partitions
+    -- instead of re-scanning all of raw (the measured item-6 cost). Native
+    -- BigQuery, guarded to this adapter — DuckDB has no partitions, so its SQL is
+    -- untouched and every DuckDB golden is byte-identical for free (no dispatch
+    -- macro: this never runs on DuckDB). The window is a SUPERSET, wide enough to
+    -- (a) include every row whose event_date (client-local) is in the lookback
+    -- reprocess window despite the client<->server clock offset and (b) co-locate
+    -- both copies of any duplicate insert_id (<= 1 h apart, generator invariant),
+    -- so the earliest-copy dedupe below is unchanged. margin (days) =
+    -- ceil(late_arrival_max_hours/24) + tz_days + 1; 5 covers every profile
+    -- (medium/large 72 h). Correctness is proven live by test-int-bigquery byte
+    -- parity plus the offline duplicate-span bound.
+    {% set prune_margin_days = 5 %}
+    where server_upload_time >= (
+        select timestamp_sub(
+            cast(max(server_upload_time) as timestamp),
+            interval {{ var('lookback_days') + prune_margin_days }} day
+        )
+        from {{ source('raw', 'events') }}
+    )
+    {% endif %}
     qualify row_number() over (
         partition by insert_id
         order by
