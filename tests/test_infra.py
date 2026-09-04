@@ -221,6 +221,11 @@ GATED_ALLOWED_RESOURCE_TYPES = {
         "google_project_iam_member",
         "google_composer_environment",
         "google_storage_bucket_object",
+        # fix/composer-cosmos: the serving image's Docker repo + a repo-scoped
+        # reader grant to the pipeline SA (NOT project-level — the one
+        # project-level grant stays composer.worker).
+        "google_artifact_registry_repository",
+        "google_artifact_registry_repository_iam_member",
     },
     INFRA / "modules" / "spanner": {
         "google_project_service",
@@ -435,21 +440,65 @@ def test_composer_runtime_grant_scope() -> None:
     )
 
 
-def test_composer_uploads_the_committed_dag() -> None:
-    """Phase 11 invariant 4 / Done-when 4: the DAG-bucket upload SOURCES the
-    committed 8b DAG file (never an inline `content` heredoc that could drift),
-    and that file exists in the repo."""
+def test_composer_uploads_the_cosmos_dag_and_dbt_project() -> None:
+    """fix/composer-cosmos: the DAG bucket gets the Cosmos + KPO DAG and its two
+    stdlib helpers (never the make-based pipeline_dag.py), each SOURCED from the
+    committed file (no inline `content` heredoc); the dbt project uploads via a
+    for_each fileset and the precompiled manifest as its own object."""
     text = _stripped("modules", "composer", "main.tf")
     for obj, repo_path in (
-        ("dag", "orchestration/dags/pipeline_dag.py"),
-        ("tasks", "orchestration/tasks.py"),  # Done-when 4: "and tasks.py"
+        ("composer_dag", "orchestration/dags/composer_dag.py"),
+        ("composer_tasks", "orchestration/composer_tasks.py"),
+        ("failure_email", "orchestration/failure_email.py"),
     ):
         block = _block(text, rf'resource "google_storage_bucket_object" "{obj}"')
         src = re.search(r'source\s*=\s*"([^"]+)"', block).group(1)
         assert src.endswith(repo_path), src
-        # a file source, not an inline copy that could drift
-        assert not _has_arg(block, "content"), block
+        assert not _has_arg(block, "content"), block  # a file source, never inline
         assert (ROOT / repo_path).is_file()
+    # the make-based DAG is no longer uploaded (one pipeline-shaped DAG per bucket)
+    assert "pipeline_dag.py" not in text and "orchestration/tasks.py" not in text
+    # the dbt project (for_each fileset) + the precompiled manifest
+    project = _block(text, r'resource "google_storage_bucket_object" "dbt_project"')
+    assert "for_each" in project and "dags/dbt/" in project
+    manifest = _block(text, r'resource "google_storage_bucket_object" "dbt_manifest"')
+    assert manifest.rstrip().endswith('/dbt/target/manifest.json"') or (
+        "target/manifest.json" in manifest
+    )
+
+
+def test_composer_serving_image_repo_matches_the_cli() -> None:
+    """fix/composer-cosmos: the Artifact Registry repo id and the environment's
+    OTR_SERVING_IMAGE URI agree with pipeline.cli's serving_image_uri (a drift
+    would leave the KPO pods pulling a non-existent image). Repo-scoped reader
+    grant to the SA, never project-level."""
+    from pipeline.cli import (
+        SERVING_IMAGE_NAME,
+        SERVING_IMAGE_REGION,
+        SERVING_IMAGE_REPO,
+        serving_image_uri,
+    )
+
+    text = _stripped("modules", "composer", "main.tf")
+    repo = _block(text, r'resource "google_artifact_registry_repository" "serving"')
+    assert re.search(rf'repository_id\s*=\s*"{SERVING_IMAGE_REPO}"', repo)
+    assert re.search(r'format\s*=\s*"DOCKER"', repo)
+    # the env var URI equals the CLI's shape (region/project/repo/name:latest);
+    # the .tf interpolates ${var.region}, whose default equals the CLI's region.
+    assert SERVING_IMAGE_REGION == "us-central1"  # == infra/variables.tf region default
+    assert "${var.region}-docker.pkg.dev/${var.project_id}" in text
+    assert f"/{SERVING_IMAGE_NAME}:latest" in text
+    assert "OTR_SERVING_IMAGE" in text and "OTR_DAG_PROJECT" in text
+    # sanity: the CLI builds exactly that path for a sample project
+    assert serving_image_uri("demo-proj").startswith(
+        f"{SERVING_IMAGE_REGION}-docker.pkg.dev/demo-proj/{SERVING_IMAGE_REPO}/"
+    )
+    # the reader grant is repo-scoped (not a google_project_iam_member)
+    grant = _block(
+        text, r'resource "google_artifact_registry_repository_iam_member" "puller"'
+    )
+    assert re.search(r'role\s*=\s*"roles/artifactregistry\.reader"', grant)
+    assert re.search(r'member\s*=\s*"serviceAccount:\$\{var\.sa_email\}"', grant)
 
 
 def test_region_is_validated_wherever_it_is_declared() -> None:
@@ -933,6 +982,11 @@ LEAST_PRIVILEGE_ROLES = {
     # it beside bigquery.jobUser; a custom role is deferred (BACKLOG) — no
     # documented custom role replaces composer.worker cleanly.
     "roles/composer.worker",
+    # fix/composer-cosmos (composer module): the SA pulls the serving image at
+    # pod start — a REPO-scoped reader grant (google_artifact_registry_-
+    # repository_iam_member), never project-level, so
+    # test_project_level_grant_is_only_bigquery_jobuser is unchanged.
+    "roles/artifactregistry.reader",
 }
 # … and ON the SA (who may act as it): CI's WIF binding, the operator's
 # impersonation (Amendment Q). Both are `google_service_account_iam_member`.
@@ -1016,10 +1070,15 @@ def test_every_grant_member_is_pinned() -> None:
                 b.splitlines()[0]
             )
             assert member == "serviceAccount:${var.sa_email}", member
+        elif '"puller"' in b.splitlines()[0]:  # fix/composer-cosmos AR reader
+            assert b.startswith(
+                'resource "google_artifact_registry_repository_iam_member" "puller"'
+            ), b.splitlines()[0]
+            assert member == "serviceAccount:${var.sa_email}", member
         else:
             assert member == SA_MEMBER, member
         seen += 1
-    assert seen == 9, seen
+    assert seen == 10, seen
 
 
 def test_no_role_can_create_a_dataset() -> None:
