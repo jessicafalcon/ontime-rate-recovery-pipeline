@@ -369,11 +369,13 @@ accuracy / holdout pins; `serving/`, `landing/` module logic; `fixtures/`.
       the attachment / Spanner / kill-switch rows re-deferred to 7b with triggers
 - [ ] `dbt/models/staging/sources.yml` — regenerated (`make gen-sources`)
 - [ ] `infra/MANIFEST.sha256` — re-frozen
+- [ ] `Makefile` — the two new targets (`composer-dbt-manifest`,
+      `build-serving-image`) + `.PHONY`
 - [ ] Spec amendments — 7b's spec is authored after this merges (not here)
-- [ ] `docs/PHASES.md` — none (post-13 fix branch; the log points to ROADMAP)
-- [ ] `docs/RESULTS.md` / `docs/DEPLOYMENT.md` — none in 7a (7b fills the live
-      block + dated lines)
-- [ ] docs/METRICS.md / README — none (README's "unfinished" line retires in 7b,
+- [ ] docs/PHASES.md — none (post-13 fix branch; the log points to ROADMAP)
+- [ ] docs/RESULTS.md, docs/DEPLOYMENT.md — none in 7a (7b fills the live block +
+      dated lines)
+- [ ] docs/METRICS.md, README — none (README's "unfinished" line retires in 7b,
       when the run is proven)
 
 ## Threat model (REQUIRED)
