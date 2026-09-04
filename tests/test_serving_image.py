@@ -26,13 +26,16 @@ def _directives() -> list[str]:
 
 
 def _copy_targets() -> list[str]:
-    """The source paths of every `COPY` in the Dockerfile (the first arg of each,
-    ignoring `--from=` build-stage copies of the uv binary)."""
-    out = []
+    """Every SOURCE path of every `COPY` in the Dockerfile — all args except the
+    final destination (a COPY may list several sources into one dir); `--from=`
+    build-stage copies of the uv binary are skipped."""
+    out: list[str] = []
     for line in DOCKERFILE.read_text().splitlines():
-        m = re.match(r"\s*COPY\s+(?!--from=)(\S+)", line)
-        if m:
-            out.append(m.group(1))
+        m = re.match(r"\s*COPY\s+(?!--from=)(.+)", line)
+        if not m:
+            continue
+        args = m.group(1).split()
+        out.extend(args[:-1])  # all but the destination
     return out
 
 
@@ -54,6 +57,33 @@ def test_image_context_is_serving_and_landing_only() -> None:
     assert "fixtures/tiny/raw/" in targets
     assert "fixtures/tiny/dims/" in targets
     assert not any("fixtures/tiny/truth" in t for t in targets)
+
+
+def test_image_ships_no_generation_logic_or_truth_writer() -> None:
+    """Invariant 1 (code-review finding): the serving image copies ONLY the
+    manifest hasher from `generator/` (what the landing needs to verify
+    MANIFEST.sha256), never the generation logic or the truth writer — a broad
+    `COPY generator/` would ship `generator/truth.py` and `generate.py` into the
+    serving layer. Assert the exact generator files copied, and that no
+    generation/truth module is anywhere in the build context (a directory COPY of
+    `generator/` reddens)."""
+    targets = _copy_targets()
+    gen = sorted(t for t in targets if t.startswith("generator"))
+    assert gen == ["generator/__init__.py", "generator/manifest.py"], gen
+    # a whole-directory `generator/` copy (or any generation/truth module) is banned
+    banned = (
+        "generator/",  # the broad directory copy the finding named
+        "generate.py",
+        "response.py",
+        "dims.py",
+        "writer.py",
+        "truth.py",
+        "models.py",
+        "profiles.py",
+    )
+    for t in targets:
+        assert t != "generator/", "broad COPY generator/ ships the truth writer"
+        assert not any(b in t for b in banned[1:]), t
 
 
 def test_image_bakes_no_credential() -> None:

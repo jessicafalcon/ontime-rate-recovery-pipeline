@@ -35,7 +35,11 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 # Layer 2: ONLY the packages the two entrypoints import, each an explicit path so
 # nothing else (no truth/, no data/, no dbt project) can slip in via a broad COPY.
-COPY generator/ /opt/otr/generator/
+# generator/: JUST the manifest hasher the landing uses to verify MANIFEST.sha256
+# (stdlib-only) — NEVER the generation logic (generate/response/dims/writer) or
+# the truth writer (generator/truth.py); the serving side must not ship either
+# (truth isolation, invariant 1). test_serving_image.py pins the exact set.
+COPY generator/__init__.py generator/manifest.py /opt/otr/generator/
 COPY landing/ /opt/otr/landing/
 COPY serving/ /opt/otr/serving/
 COPY pipeline/ /opt/otr/pipeline/
