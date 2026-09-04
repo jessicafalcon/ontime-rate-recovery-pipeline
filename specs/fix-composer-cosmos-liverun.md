@@ -240,12 +240,59 @@ live invariants are proven by the supervised run and its pasted output. No
   Satisfies the offline invariant. Rejected: patching the runtime inside 7b to
   make a run go green (that would be a design change owed a 7a-style amendment).
 
+## Amendments (live-run findings, 2026-09-04)
+
+The first supervised run surfaced two defects in the 7a runtime (decision 5's
+STOP-and-report path). Each is recorded here and in ARCHITECTURE §8.
+
+- **Amendment 1 (build recipe, finding 1).** `build-serving-image` ran a bare
+  `docker build` with no `--platform`, so on an Apple-Silicon operator laptop it
+  shipped an `arm64` image the Composer/GKE `amd64` nodes could not pull
+  (`ImagePullBackOff`, the KPO pods wedged). Restores the invariant *the pushed
+  image runs on the Composer nodes regardless of the build host*: pin
+  `--platform linux/amd64` as a fixed declared target (Boundary contract),
+  asserted on the pure `serving_build_command` helper. A build-recipe correctness
+  fix (mechanism-level, not a data/write-path change), verified live (the fixed
+  image ran the `bq_load`/`spanner_load` pods green).
+
+- **Amendment 2 (execution model, finding 2 — amends 7a pinned decision 2).**
+  Cosmos `ExecutionMode.VIRTUALENV` built a FRESH `dbt-bigquery[pandas]` venv
+  per task (~10 min each, fragile under memory pressure), too slow/fragile to
+  green ~13 dbt tasks on the SMALL environment (the venv-install process was
+  killed mid-build; on retry it completed in ~9–12 min but no full-green run was
+  reached). This restores the invariant *the scheduled run completes green on the
+  target environment* by INSTALLING THE VENV ONCE PER WORKER AND REUSING IT: the
+  builder passes `ExecutionConfig(virtualenv_dir=…)` (a persistent worker-local
+  path, `composer_tasks.DBT_VENV_DIR`), so Cosmos builds the venv once and reuses
+  it across every model/test/source task (~a handful of installs, not ~13). The
+  execution MODE is unchanged (still VIRTUALENV — dbt-bigquery stays out of the
+  Composer image / `uv.lock`); only the reuse is added. Rejected: bumping the
+  environment size (masks the per-task waste, more spend); `ExecutionMode.
+  KUBERNETES` over a baked dbt image (the robust fallback recorded below if the
+  single per-worker install still proves too fragile on SMALL — a larger change,
+  a new dbt image). The offline shape test pins `virtualenv_dir`
+  (`test_cosmos_group_renders_the_unchanged_project`); its LIVE effect (one
+  install per worker, a green run) is proven by the next supervised run.
+
+  Fallback, if the single per-worker install is still killed on SMALL: either an
+  env-size bump or `ExecutionMode.KUBERNETES` over a dbt image (reusing the AR
+  machinery) — its own decision, recorded here, not built now.
+
 ## Scope (files)
 
 New:
 - `specs/fix-composer-cosmos-liverun.md` — this spec (committed alone first).
 
-Changed (records only — no code, no `.tf` semantics):
+Changed — code (the two live-run fixes, Amendments 1–2 — no `.tf`/model/pin
+semantics, no fixture):
+- `pipeline/cli.py` + `tests/test_serving_image.py` — Amendment 1, the
+  `--platform linux/amd64` pin on the serving-image build.
+- `orchestration/dags/composer_dag.py` + `orchestration/composer_tasks.py` +
+  `tests/test_composer_dag.py` — Amendment 2, the persistent-venv reuse
+  (`virtualenv_dir`); the dbt project, macros, and `profiles.yml` are UNCHANGED
+  (a runner tweak, not new logic).
+
+Changed — records:
 - `docs/RESULTS.md` — a `fix/composer-cosmos-liverun` live block (run log +
   `send_schedule` count/hash), beside the Phase 12 block.
 - `docs/DEPLOYMENT.md` — the dated apply / run / teardown lines under the Composer
@@ -261,11 +308,14 @@ Changed (records only — no code, no `.tf` semantics):
 - `BACKLOG.md` — the make-based-DAG row struck (`DONE — fix/composer-cosmos-liverun`);
   the attachment / Spanner / kill-switch / operator_principal rows re-dispositioned
   with the live exit.
-- `docs/ARCHITECTURE.md` §8 — only if the live run surfaces a stack gotcha.
+- `docs/ARCHITECTURE.md` §8 — the two live-run gotchas (the amd64 image build;
+  the Cosmos VIRTUALENV per-task install cost + the venv-reuse fix).
 
-Unchanged (verify): `orchestration/**` code, `dbt/**`, macros, `profiles.yml`,
-`serving/`, `landing/`, `infra/**/*.tf` SEMANTICS + `MANIFEST.sha256`,
-`tests/**`, `tests/pins.py`, `fixtures/`. No `make` target added or changed.
+Unchanged (verify): `dbt/**` models, macros, `profiles.yml`, `serving/`,
+`landing/`, `infra/**/*.tf` SEMANTICS + `MANIFEST.sha256`, `tests/pins.py`,
+`fixtures/`, `orchestration/failure_email.py`. No `make` target added or changed;
+no golden, pin, model, or `.tf` SEMANTIC moved (the two fixes are a build-recipe
+platform pin and a Cosmos runner tweak).
 
 ## Record updates (REQUIRED)
 
@@ -278,7 +328,8 @@ Unchanged (verify): `orchestration/**` code, `dbt/**`, macros, `profiles.yml`,
 - [ ] `CLAUDE.md` — Current status; BACKLOG count; the orchestration status line
 - [ ] `BACKLOG.md` — the make-based-DAG row struck; the attachment / Spanner /
       kill-switch / operator_principal rows re-dispositioned
-- [ ] docs/ARCHITECTURE.md — §8 only if the live run surfaces a gotcha (else none)
+- [ ] `docs/ARCHITECTURE.md` — §8 the two live-run gotchas (amd64 build; Cosmos
+      venv per-task cost + reuse fix)
 - [ ] docs/PHASES.md — none (post-13 fix branch; the log points to ROADMAP)
 - [ ] docs/METRICS.md — none (no metric changes)
 - [ ] Spec amendments — none (7b is the last ROADMAP item; nothing later to
