@@ -80,6 +80,7 @@ def test_skew_var_equals_generator_pin() -> None:
         "shrinkage_pseudo_count",
         "model_version",
         "lookback_days",  # Phase 7
+        "source_prune_margin_days",  # fix/append-landing (the BigQuery prune floor)
         "dim_user_identifier",  # Phase 10 (the §3.3 source swap; default unchanged)
     }
 
