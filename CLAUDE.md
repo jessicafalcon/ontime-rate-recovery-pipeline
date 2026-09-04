@@ -540,8 +540,10 @@ AIRFLOW orders: dbt build (THROUGH) → write-back    TERRAFORM: BigQuery · GCS
   pinned file has vanished from disk (delete it from the manifest by hand); the
   manifest hunk lands in the same commit as the `.tf` change
 - `make test-int-bigquery PROJECT=<id> CONFIRM=yes [PROFILE=tiny]` *(Phase 9b)*
-  — the DuckDB≡BigQuery pin-parity run behind `OTR_INT` (CI never runs it; the
-  CI leg needs an explicit `enable_ci_wif = true` apply — BACKLOG, dated):
+  — the DuckDB≡BigQuery pin-parity run behind `OTR_INT` (the push CI suite never
+  runs it; the `workflow_dispatch` parity job `.github/workflows/bigquery-parity.yml`
+  does, authenticating via the `enable_ci_wif` WIF layer — landed and run green
+  live 2026-09-04, `fix/ci-bigquery-parity`):
   `pipeline/cli.py test-int-bigquery` validates `PROJECT`/`PROFILE` and gates
   `CONFIRM` FIRST, then runs `tests/integration/test_int_bigquery.py` with
   `OTR_INT=1` + the validated project: lands tiny, builds on `bigquery`, reads

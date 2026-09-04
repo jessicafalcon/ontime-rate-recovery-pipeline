@@ -1483,7 +1483,8 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
   singular dbt test comparing the payload key by key through `json_extract`
   (BigQuery cannot group or cast a JSON column — §8). Rejected: a
   BigQuery-specific CSV writer; re-freezing.
-- **The CI parity job is deferred (reconciliation item 4, choice (b)).** The
+- **The CI parity job is deferred (reconciliation item 4, choice (b)).**
+  *(Landed 2026-09-04 — see `fix/ci-bigquery-parity`.)* The
   laptop `make test-int-bigquery` is the Done-when; the CI leg needs the opt-in
   `enable_ci_wif = true` + `github_repository` apply (a DEPLOYMENT runbook
   step) and the SA-id reservation (until ~2026-09-28) makes any 9b apply a

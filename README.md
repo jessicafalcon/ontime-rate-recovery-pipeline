@@ -196,9 +196,8 @@ did not. The operating manual is [CLAUDE.md](CLAUDE.md); the why-not-X log is
 - [docs/ROADMAP.md](docs/ROADMAP.md) — what comes next, in order, and the
   one-week cut.
 
-The pipeline is complete on correctness at 2,000 users, not yet on scale or on
-a scheduled cloud run. What would change that, in order, is
-[docs/ROADMAP.md](docs/ROADMAP.md): one layering fix, a real-scale cost run, a
-holdout evaluation that is not circular, a Composer-runnable DAG, an
-append-only landing and the CI parity leg. Each is a [BACKLOG.md](BACKLOG.md)
-row with a trigger.
+The pipeline is complete on correctness, proven at real scale (200,000 users on
+BigQuery), not yet on a scheduled cloud run. What remains, in
+[docs/ROADMAP.md](docs/ROADMAP.md): a Composer-runnable DAG, so the pipeline
+runs on a schedule in the cloud. It is a [BACKLOG.md](BACKLOG.md) row with a
+trigger.

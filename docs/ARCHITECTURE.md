@@ -524,6 +524,15 @@ simulation and the power table.
   (`docs/DEPLOYMENT.md`). Harmless for a single demo-day apply/destroy; the
   destroy itself still leaves nothing billable. Datasets and the bucket have no
   such reservation.
+- **`operator_principal` lives in Terraform state, not tracked config**
+  (`fix/ci-bigquery-parity`, found live). It defaults `null` with no tracked
+  value, so a `tf-apply` that omits it from `VARS` re-proposes DESTROYING the
+  resource-scoped `serviceAccountTokenCreator` grant that lets the operator
+  impersonate the SA for manual BigQuery builds. The plan-first apply's
+  `SAFE_ACTIONS` refuses the destroy without `ALLOW_DESTROY=yes`, so it fails
+  safe, not silent — but every future apply must re-pass
+  `VARS='operator_principal=user:<operator>'` or lose the grant
+  (`docs/DEPLOYMENT.md`, `BACKLOG.md`).
 - **User ADC has no quota project; `billingbudgets.googleapis.com` refuses it**
   (Phase 9a, found on the first live apply). A developer's `gcloud auth
   application-default login` credential carries no quota project, and the
