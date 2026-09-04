@@ -217,12 +217,17 @@ data-structure amendment. STOP for approval was taken before implementing.*
   Terraform state lives on the GCS remote backend (`fix/tf-remote-state`); the
   standing Spanner/Composer `Listed 0 items.` exit check still runs. The WIF
   resources were written and frozen in Phase 9a, so the apply supplies only
-  runtime `VARS` and moves no `.tf` (no `tf-freeze`). The apply command is
-  `make tf-apply PROJECT=<project_id>
-  VARS='enable_ci_wif=true,github_repository=<owner>/<repo>' CONFIRM=yes`.
-  *(Live status PENDING: the ask-first apply and the first green dispatched run
-  are filled here and in `docs/DEPLOYMENT.md`, dated, the session they happen;
-  until then this branch is the offline artifacts only.)*
+  runtime `VARS` and moves no `.tf` (no `tf-freeze`). Live 2026-09-04: applied on
+  `<project_id>` — `3 added, 0 changed, 0 destroyed` (the WIF pool/provider/
+  binding), `operator_principal` re-passed in `VARS` to preserve the operator's
+  existing SA-impersonation grant (a bare apply proposed destroying it — the
+  plan-first apply refuses that without `ALLOW_DESTROY`, so it failed safe; the
+  in-state-not-in-config trap is a new BACKLOG row). The `bigquery-parity`
+  workflow, dispatched on `main`, went green (`6 passed` in 16m53s): WIF auth
+  succeeded on the `refs/heads/main` ref and `refuse_cloud_env` passed (the ADC
+  relocation held). The live run had to be post-merge — `workflow_dispatch` is
+  dispatchable only from the default branch and the WIF binding trusts
+  `refs/heads/main` only.
 
 ### fix/append-landing (after Phase 13, 2026-09-02)
 
@@ -1478,7 +1483,8 @@ reconciliation items 1–9 approved 2026-08-29 (item 4 = choice (b)).
   singular dbt test comparing the payload key by key through `json_extract`
   (BigQuery cannot group or cast a JSON column — §8). Rejected: a
   BigQuery-specific CSV writer; re-freezing.
-- **The CI parity job is deferred (reconciliation item 4, choice (b)).** The
+- **The CI parity job is deferred (reconciliation item 4, choice (b)).**
+  *(Landed 2026-09-04 — see `fix/ci-bigquery-parity`.)* The
   laptop `make test-int-bigquery` is the Done-when; the CI leg needs the opt-in
   `enable_ci_wif = true` + `github_repository` apply (a DEPLOYMENT runbook
   step) and the SA-id reservation (until ~2026-09-28) makes any 9b apply a
