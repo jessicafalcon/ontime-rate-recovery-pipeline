@@ -49,12 +49,17 @@ with raw_events as (
     -- var('source_prune_margin_days'), a declared floor pinned by
     -- test_source_prune_margin_covers_every_profile to be >=
     -- ceil(late_arrival_max_hours/24) + tz_days + dup_days for every profile.
-    -- Correctness is OFFLINE-verified: this predicate renders only under the
-    -- guard, the duplicate span is bounded (< 1 h, all seeds), and the margin is
-    -- a per-profile-pinned floor. Its live INCREMENTAL byte-parity is not yet
-    -- exercised — test-int-bigquery does one FULL build (the prune fires only when
-    -- is_incremental()), so it proves the landing/partitioning, not this predicate
-    -- (BACKLOG: an incremental second build).
+    -- Correctness is proven both offline (this predicate renders only under the
+    -- guard, the duplicate span is bounded < 1 h for all seeds, the margin is a
+    -- per-profile-pinned floor) and LIVE: test-int-bigquery's incremental parity
+    -- phase (fix/prune-live-proof) lands a late tail and runs a PLAIN build, so
+    -- this predicate renders and executes on BigQuery, and the built tables are
+    -- byte-identical to the full-scan goldens. tiny's 9-day span sits inside the
+    -- 10-day window, so the prune excludes no partition there: the LIVE half proves
+    -- the predicate renders/executes and preserves byte-parity, while the
+    -- superset-under-EXCLUSION property (a truly excluded partition never splits a
+    -- duplicate or drops an in-window row) stays the OFFLINE half above; the byte
+    -- reduction is likewise a >10-day-span / large-profile effect.
     where server_upload_time >= (
         select timestamp_sub(
             cast(max(server_upload_time) as timestamp),

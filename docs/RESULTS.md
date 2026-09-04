@@ -269,18 +269,29 @@ upload-time window (`server_upload_time ≥ max(server_upload_time) −
 all of raw. DuckDB is untouched (no partitions, no benefit) and every DuckDB
 golden is byte-identical.
 
-**Live BigQuery parity, run 2026-09-03 (ask-first, `4 passed`, cents).** On a
-clean warehouse `make test-int-bigquery` read the three goldens back from
-BigQuery byte-for-byte and re-asserted the pins — confirming the **gzip landing,
-DAY-partitioned per-partition load, and FULL-build** output are byte-identical to
-DuckDB. (A fresh decorator load self-created the DAY-partitioned `raw.events`; a
+**Live BigQuery parity, run 2026-09-03 (ask-first, cents).** On a clean warehouse
+`make test-int-bigquery` read the three goldens back from BigQuery byte-for-byte
+and re-asserted the pins — confirming the **gzip landing, DAY-partitioned
+per-partition load, and FULL-build** output are byte-identical to DuckDB (`4 passed`).
+(A fresh decorator load self-created the DAY-partitioned `raw.events`; a
 pre-existing non-partitioned table must be dropped once — `docs/DEPLOYMENT.md`.)
-NOT yet proven live: the **incremental** source-scan prune (it fires only when
-`is_incremental()`, and the harness does one full build), so its incremental
-byte-parity and the pruned bytes-scanned number are the BACKLOG follow-up (an
-incremental second build). The prune's offline half — the guard renders only on
-BigQuery, the duplicate span is bounded, the margin floor covers every profile —
-is pinned under `make test`.
+
+**The incremental source-scan prune, proven live (fix/prune-live-proof, run
+2026-09-03, `6 passed`, ~20 min, cents).** The harness now adds an incremental
+parity phase: reset `raw.events` clean, land ≤ a cut and FULL-build (the closed
+state), land the late tail and run a **PLAIN** build — so `is_incremental()` is
+true, the source-scan prune predicate renders and **executes on BigQuery**, and
+the built tables converge **byte-identical** to the frozen full-scan goldens
+(`test_incremental_build_matches_frozen`); the compiled `stg_events` carries the
+`timestamp_sub` source predicate, proving the guard held live
+(`test_incremental_prune_predicate_rendered`). The prune's live **correctness /
+byte-parity** is thus proven, not only offline. One honest limit: tiny's raw
+spans 9 days, inside the 10-day prune window (`lookback_days + margin`), so the
+predicate excludes **no** partition here — the byte **reduction** is a
+>10-day-span effect. Its magnitude is the large-profile number: raw was
+un-partitioned there, forcing the 19.45 GB re-scan above; a large **incremental**
+re-run on the now-partitioned raw would measure the reduced window scan (a
+hand-recorded follow-up, non-deterministic — not a pin).
 
 ### Partition pruning on the marts (`--dry_run`, free)
 

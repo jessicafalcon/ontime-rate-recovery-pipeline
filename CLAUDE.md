@@ -1002,7 +1002,29 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **20** — `fix/append-landing` (2026-09-03, ROADMAP item 6)
+Open BACKLOG rows: **19** — `fix/prune-live-proof` (2026-09-03) proved the
+BigQuery incremental source-scan prune LIVE — the one live proof `fix/append-landing`
+left open. Test-only: `tests/integration/test_int_bigquery.py` gained an
+incremental parity phase — the `built` reference is now a self-contained FULL
+reset (`_drop_raw_events` + `--full-refresh`, the hermeticity fix), then a second
+phase lands ≤ a cut and FULL-builds, lands the late tail and runs a PLAIN build,
+so `is_incremental()` is true and the source-scan prune predicate renders and
+EXECUTES on BigQuery. `test_incremental_build_matches_frozen` asserts the built
+tables are byte-identical to the frozen full-scan goldens (+ the accuracy/on-time
+pins); `test_incremental_prune_predicate_rendered` asserts the compiled
+`stg_events` carries the `timestamp_sub` predicate (the guard held live). Run live
+2026-09-03, `6 passed` (~20 min, cents). One honest limit: tiny's 9-day raw span
+is inside the 10-day prune window, so the predicate excludes no partition here —
+the live BYTE-PARITY is proven, the byte REDUCTION is a large-profile effect (the
+19.45 GB un-pruned baseline stands; a `large` incremental re-run is the remaining
+measurement). Struck two `fix/append-landing` follow-up rows (the prune live-proof,
+the harness hermeticity) and opened one (the byte-reduction magnitude, unmeasured
+on a within-window profile); the non-partitioned-table migration row stays open
+(the harness now self-heals it, but a real deployment and the Terraform-ownership
+fix remain). Reverted the "offline-only / not yet proven live" hedges in
+`stg_events.sql`, DECISIONS, ARCHITECTURE §2.7/§8, the spec and RESULTS to say the
+prune is proven live. No pin, fixture, model, or `.tf` moved. Prior:
+`fix/append-landing` (2026-09-03, ROADMAP item 6)
 made raw landing append-only. The writer emits the §2.10 export shape — gzipped
 hourly files `events_<date>_<HH>.jsonl.gz` (`filename=""` + `mtime=0` + fixed
 level, byte-reproducible; `fixtures/tiny` re-frozen 10 → 169 files). The DuckDB
@@ -1021,8 +1043,9 @@ re-scan). DuckDB SQL is untouched, so every DuckDB golden is byte-identical
 MAE/coverage/accuracy/holdout pins hold; only the raw-structure pins moved
 (`RAW_FILES` 10 → 169, `PHASE1_MANIFEST_LINES` 13 → 172). Two commits (packaging
 + DuckDB append-only + re-freeze; then the BigQuery prune + DAY-partitioned
-landing) plus the records. **Remaining live proof: `make test-int-bigquery`
-(ask-first, cents) — the BigQuery byte parity + pruned-bytes RESULTS line.**
+landing) plus the records. **Live proof: `make test-int-bigquery` proved the
+FULL-build byte parity 2026-09-03 (`4 passed`); the incremental source-scan prune
+is now proven live by `fix/prune-live-proof` (above, `6 passed`).**
 Struck the item-6 BACKLOG row and opened one (gzip fixture reproducibility is
 proven same-machine only — the frozen manifest assumes CI's zlib, no in-suite
 canary); the append-landing on Spanner dims, finer-than-day partitioning, and
@@ -1032,13 +1055,14 @@ margin is now a test-pinned var, the dialect carve-out is recorded, `_file_date`
 asserts its shape) landed before merge. **Live BigQuery run (2026-09-03, ask-first,
 `4 passed`):** on a clean warehouse the gzip landing + DAY-partitioned per-partition
 load + FULL-build goldens are byte-identical to DuckDB and the pins hold — the
-landing/partitioning are live-proven. The run also surfaced three follow-ups (now
-BACKLOG rows): `test-int-bigquery` does one full build so it never exercises the
-INCREMENTAL prune (offline-verified only); a pre-existing non-partitioned
-`raw.events` must be dropped once (DEPLOYMENT migration; the fake could not model
-partition state); and the test is not hermetic (a prior profile's `ontime` data
-broke the first run until a `FULL=yes` reset). The docs that had overstated "prune
-proven live by test-int-bigquery" were corrected to state what actually ran. Prior:
+landing/partitioning are live-proven. The run also surfaced three follow-ups (then
+BACKLOG rows): `test-int-bigquery` did one full build so it never exercised the
+INCREMENTAL prune; a pre-existing non-partitioned `raw.events` must be dropped once
+(DEPLOYMENT migration; the fake could not model partition state); and the test was
+not hermetic (a prior profile's `ontime` data broke the first run until a `FULL=yes`
+reset). `fix/prune-live-proof` (above) then closed the first and third of these; the
+migration row stays open. The docs that had overstated "prune proven live by
+test-int-bigquery" were corrected to state what actually ran. Prior:
 `fix/holdout-eval` (2026-09-02, ROADMAP item 4) added
 the temporal holdout, the non-circular counterpart to the counterfactual
 simulation (ARCHITECTURE §7 report (d), the opening amendment committed alone).

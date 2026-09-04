@@ -211,17 +211,20 @@ STOP for approval before implementing.*
   duplicate `insert_id`, so the earliest-copy dedupe (`stg_events` invariant 1) is
   unchanged. DuckDB has no partitions and no benefit, so its SQL is left
   unchanged — which is why every DuckDB golden is byte-identical for free. The
-  prune's correctness is OFFLINE-verified (the guard renders only incrementally
+  prune's correctness is proven both offline (the guard renders only incrementally
   on BigQuery, the duplicate span is bounded, the margin is a per-profile-pinned
-  floor). Its LIVE incremental byte-parity is NOT yet proven: `make
-  test-int-bigquery` does one FULL build (the prune fires only when
-  `is_incremental()`), so it proves the landing + DAY-partitioning parity, not
-  this predicate — an incremental second build is the BACKLOG follow-up. The
-  full-build parity was run live 2026-09-03 (`4 passed` on a clean warehouse).
+  floor) and LIVE (fix/prune-live-proof): `make test-int-bigquery`'s incremental
+  parity phase lands a late tail and runs a PLAIN build, so the predicate renders
+  and executes on BigQuery and every built table is byte-identical to the full-scan
+  goldens (run live 2026-09-03, `6 passed`). tiny's 9-day span sits inside the
+  10-day prune window, so the predicate excludes no partition here — its live
+  *byte-parity* is proven; the byte *reduction* is a >10-day-span / large-profile
+  effect (the 19.45 GB un-pruned baseline in `docs/RESULTS.md`, a large incremental
+  re-run its remaining measurement).
   Rejected: a tight `− lookback_days` window (the cross-clock offset can put an
   in-window row just below it); pruning on DuckDB too (risks the goldens for no
-  gain). The measured pruned re-run bytes are a hand-filled `docs/RESULTS.md` line
-  (job facts are non-deterministic and unasserted, the standing carve-out).
+  gain). Job facts (bytes scanned, slot-ms) are non-deterministic and unasserted —
+  any measured number is a hand-filled `docs/RESULTS.md` line, the standing carve-out.
 - **BigQuery append-landing self-creates the partitioned table; a pre-existing
   non-partitioned `raw.events` must be dropped once (migration).** Proven live
   2026-09-03: a fresh decorator load into `raw.events$YYYYMMDD` with
