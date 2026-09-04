@@ -108,6 +108,11 @@ def incremental_parity(built: str) -> str:
     and executes on a real warehouse. Yields the project id; the built tables must
     converge byte-identical to the frozen full-scan goldens (the two-landing
     convergence of tests/test_incremental.py, on the second dialect)."""
+    # ORDERING: the `built`-only tests (goldens / pins / datasets / planted-conflict)
+    # read the full-scan warehouse and MUST run before this fixture mutates it —
+    # guaranteed by pytest's definition order (the two incremental tests are last in
+    # the file; no pytest-randomly in the dep allowlist). The end state converges to
+    # `built`'s anyway (the incremental build re-lands all tiny), so it is not fragile.
     project = built
     confirm, origin = carried_gate()
     _drop_raw_events(project)  # cut-horizon raw + a fresh DAY-partitioned table
@@ -252,7 +257,11 @@ def test_incremental_prune_predicate_rendered(incremental_parity: str) -> None:
     `timestamp_sub(...)` source predicate, which the template emits only inside
     the `is_incremental() and target.type == 'bigquery'` guard. So the guard held
     and the prune executed live, not only in the offline compile test."""
-    compiled = list((ROOT / "dbt" / "target" / "compiled").rglob("stg_events.sql"))
-    assert compiled, "no compiled stg_events.sql — did the incremental build run?"
-    sql = compiled[0].read_text()
-    assert "timestamp_sub" in sql, sql
+    # The model compile ONLY — a `*` never crosses `/`, so this excludes the dbt
+    # unit-test mock inputs at `.../models/<folder>/schema.yml/stg_events.sql` that a
+    # recursive glob would also match (and order nondeterministically). Exactly one.
+    compiled = list(
+        (ROOT / "dbt" / "target" / "compiled").glob("*/models/staging/stg_events.sql")
+    )
+    assert len(compiled) == 1, f"expected one compiled stg_events model, got {compiled}"
+    assert "timestamp_sub" in compiled[0].read_text(), compiled[0]

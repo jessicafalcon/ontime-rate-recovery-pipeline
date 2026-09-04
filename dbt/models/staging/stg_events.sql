@@ -54,9 +54,12 @@ with raw_events as (
     -- per-profile-pinned floor) and LIVE: test-int-bigquery's incremental parity
     -- phase (fix/prune-live-proof) lands a late tail and runs a PLAIN build, so
     -- this predicate renders and executes on BigQuery, and the built tables are
-    -- byte-identical to the full-scan goldens (tiny's 9-day span sits inside the
-    -- 10-day window, so the prune excludes no partition here — the byte reduction
-    -- is a >10-day-span / large-profile effect).
+    -- byte-identical to the full-scan goldens. tiny's 9-day span sits inside the
+    -- 10-day window, so the prune excludes no partition there: the LIVE half proves
+    -- the predicate renders/executes and preserves byte-parity, while the
+    -- superset-under-EXCLUSION property (a truly excluded partition never splits a
+    -- duplicate or drops an in-window row) stays the OFFLINE half above; the byte
+    -- reduction is likewise a >10-day-span / large-profile effect.
     where server_upload_time >= (
         select timestamp_sub(
             cast(max(server_upload_time) as timestamp),
