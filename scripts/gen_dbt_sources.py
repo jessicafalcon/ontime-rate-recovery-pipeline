@@ -140,7 +140,11 @@ def render_bq_schema() -> str:
 # a pinned value, beside Airflow run ids and job ids. `server_upload_time` is the
 # Amplitude load timestamp (§2.10). Thresholds are wide because the frozen tiny
 # fixture carries fixed 2026-01 timestamps (a synthetic-data accommodation) — a
-# real deployment tightens them; the gate mechanism is what this proves.
+# real deployment tightens them; the gate MECHANISM (freshness runs first, an
+# on_failure email fires) is what this proves. Honest caveat: at ~10 years the gate
+# cannot fire on the demo — `now()` cannot be pinned, so the only value that keeps
+# the fixed 2026-01 fixture green is one no live feed would trip; on a real feed
+# these become real staleness bounds (hours, not years).
 FRESHNESS_LOADED_AT = "server_upload_time"
 FRESHNESS_WARN_DAYS = 3600
 FRESHNESS_ERROR_DAYS = 3650
