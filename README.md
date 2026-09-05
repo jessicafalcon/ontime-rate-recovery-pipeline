@@ -194,8 +194,8 @@ did not. The operating manual is [CLAUDE.md](CLAUDE.md); the why-not-X log is
   (ask-first).
 - [docs/PHASES.md](docs/PHASES.md) — how it was built, step by step, each with a
   one-line Done-when.
-- [docs/ROADMAP.md](docs/ROADMAP.md) — what comes next, in order, and the
-  one-week cut.
+- [docs/ROADMAP.md](docs/ROADMAP.md) — the post-13 plan (now complete), in order,
+  and the one-week cut.
 
 The pipeline is complete on correctness, proven at real scale (200,000 users on
 BigQuery), and proven on a scheduled cloud run: the `ontime_cloud` DAG runs on
