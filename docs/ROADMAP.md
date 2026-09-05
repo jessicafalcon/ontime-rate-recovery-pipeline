@@ -16,9 +16,10 @@ at every `fix/` branch exit now that phases are over.
 
 ## The gap the plan closes
 
-The repo proves correctness at 2,000 users. It does not yet show scale, a
-scheduled cloud run, or a non-circular offline evaluation. The plan is ordered
-by application value per day, cheapest first; items 1–4 need no cloud spend
+As decided 2026-09-01, the repo proved correctness at 2,000 users but did not yet
+show scale, a scheduled cloud run, or a non-circular offline evaluation. The plan
+below closed all three (items 5, 7b and 4 respectively); it was ordered by
+application value per day, cheapest first, with items 1–4 needing no cloud spend
 beyond cents.
 
 ## The ordered plan
