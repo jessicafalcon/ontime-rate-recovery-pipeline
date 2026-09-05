@@ -91,6 +91,11 @@ with DAG(
     catchup=False,  # backfill is explicit; never auto-catch-up-to-now
     is_paused_upon_creation=True,
     max_active_runs=1,
+    # Serialize task execution so exactly ONE task builds the shared Cosmos venv
+    # (virtualenv_dir) and the rest reuse it — concurrent first-builds race the
+    # venv dir (Cosmos lock does not serialize them; fix/composer-cosmos-liverun,
+    # §8). With reuse each task after the first ~6-min build runs in ~1.5 min.
+    max_active_tasks=1,
     default_args={"retries": 0, "on_failure_callback": pipeline_failure_email},
     tags=["ontime", "cosmos", "composer"],
 ) as dag:

@@ -178,6 +178,9 @@ def test_dag_shape_loads_under_stubs(monkeypatch: Any) -> None:
     assert dag.kw["schedule"] == "@daily"
     assert dag.kw["catchup"] is False
     assert dag.kw["max_active_runs"] == 1
+    # serialize tasks so one builds the shared Cosmos venv, the rest reuse it
+    # (fix/composer-cosmos-liverun — concurrent first-builds race the venv dir).
+    assert dag.kw["max_active_tasks"] == 1
     assert dag.kw["default_args"]["retries"] == 0
 
     assert [op.task_id for op in _KPO.instances] == list(ct.KPO_STEPS)
