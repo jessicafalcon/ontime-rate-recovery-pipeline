@@ -182,12 +182,10 @@ reporting DONE".
 
 ## Invariants (REQUIRED)
 
-7b is a live-run + records branch — it adds NO new upholding Python (the Cosmos +
-KPO runtime and its two pure helpers landed in 7a and do not change). So its
-invariants split into two kinds, and there is **no `mutations` block**: the
-offline invariants are the standing suite's (unchanged code → nothing new to
-mutate; the Phase 12 live-run precedent), and the live invariants are proven by
-the supervised runbook step named beside each, not by an offline mutation.
+7b is a live-run branch that ALSO landed two runtime fixes (Amendments 1–2, found
+live). Its invariants split into two kinds: the live invariants (proven by the
+supervised run) and the two fix invariants (offline, one with a mutation-testable
+helper).
 
 | Invariant ("for all …, … holds") | Falsified by (scenario test / live observation) |
 |---|---|
@@ -195,11 +193,24 @@ the supervised runbook step named beside each, not by an offline mutation.
 | For all scheduled `ontime_cloud` runs, the DAG EXECUTES on the Composer worker: every dbt model renders as its own task under the `dbt` group, the source-freshness gate heads it, the three KPO pods run the pushed image, and the run reaches `state=success`. | the live run (Done-when 3): a task that fails on the worker, a missing per-model task, freshness below a model, or a KPO pod that cannot pull/run the image, fails the run — captured in the RESULTS live block |
 | For all served rows the run writes, the Spanner `send_schedule` is byte-parity with the frozen DuckDB truth — 20 rows hashing to `SEND_SCHEDULE_SHA256_TINY`, a re-run writing 0. | the live read-back (Done-when 4): a row count ≠ 20, a hash ≠ the pin, or a non-idempotent re-run, fails the parity check |
 | For all apply/teardown steps, every persisted toggle is carried so no persisted resource is re-proposed for destroy, and the session ends with `Listed 0 items.` on both meters. | the pasted plan/apply/teardown (Done-when 1, 5): a plan that destroys a persisted resource (WIF/operator) without the toggle, or a meter not empty at exit, fails |
+| (Amendment 1) For all serving-image builds, the `docker build` argv targets `linux/amd64` regardless of the build host, so the pushed image runs on the Composer/GKE nodes. | `tests/test_serving_image.py::test_serving_image_build_targets_amd64` — a build command without `--platform linux/amd64` fails |
+| (Amendment 2) For all Cosmos runs, the builder passes `virtualenv_dir` (venv built once per worker, reused) and the DAG sets `max_active_tasks=1` (one task builds the shared venv, no race). | `tests/test_composer_dag.py::test_cosmos_group_renders_the_unchanged_project` (virtualenv_dir) + `::test_dag_shape_loads_under_stubs` (max_active_tasks) — either kwarg missing fails |
 
-The offline invariance is guarded by the UNCHANGED standing suite; the three
-live invariants are proven by the supervised run and its pasted output. No
-`path.py::function` in this branch's diff is new, so `make mutate` has no target
-(the DONE command omits it) — exactly a records + live-run branch.
+The live invariants are proven by the supervised green run and its pasted output.
+Amendment 1's helper `serving_build_command` is pure and mutation-testable (below);
+Amendment 2's `virtualenv_dir` / `max_active_tasks` are module-level DAG config
+pinned by the two named shape tests (no function to mutate, like a config or SQL
+invariant). The offline invariance (nothing else moved) is the UNCHANGED standing
+suite.
+
+```mutations
+pipeline/cli.py::serving_build_command   constant-return:[]
+```
+
+(`constant-return:[]` empties the build argv → `test_serving_image_build_targets_amd64`
+reds, since the `--platform linux/amd64` guard the invariant requires is gone.
+`serving_build_command` is a pure list-builder with no call/guard/sort-key, so the
+other operators have no target — `constant-return` is the one that exercises it.)
 
 ## Pinned decisions (do not re-litigate)
 
