@@ -174,7 +174,7 @@ is up.*
 
 - **The live run proved the runtime EXECUTES on the worker (surpassing Phase 12's
   Option A), and found two defects.** Proven live: the apply/teardown are clean
-  and cheap (~$2, ~3.5 h); the Cosmos + KPO DAG imports with NO errors on managed
+  and cheap (≈ $3 for the whole session's two applies); the Cosmos + KPO DAG imports with NO errors on managed
   Airflow; it renders EXACTLY one task per model + the `dbt source freshness` gate
   + the three KPO pods (`tasks states-for-dag-run`); the KPO pods RUN on the
   worker (`bq_load` ✓, `spanner_load` ✓); the source-freshness carve-out PASSES

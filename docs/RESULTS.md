@@ -195,8 +195,10 @@ tasks fail on a toolchain-less worker). 7a built the Cosmos + `KubernetesPodOper
 runtime (`ontime_cloud`) that actually EXECUTES on the worker; 7b ran it live. One
 green scheduled run on real BigQuery + Spanner, then same-session teardown.
 
-**Session: 2026-09-04** (`<project_id>`, operator `<operator>`; `tf-*` on operator
-ADC, the pods as the environment's Workload-Identity SA). Run ids / task timings /
+**Session: 2026-09-04** — a first apply/attempt on 2026-09-04 UTC surfaced two
+runtime defects (below), fixed in-branch, and the **green re-run completed early
+2026-09-05 UTC** (`<project_id>`, operator `<operator>`; `tf-*` on operator ADC,
+the pods as the environment's Workload-Identity SA). Run ids / task timings /
 BigQuery job ids are non-deterministic and unasserted; the pinned evidence is the
 `send_schedule` row count (`tests/pins.py::SEND_SCHEDULE_ROWS_TINY` = 20) and hash
 (`SEND_SCHEDULE_SHA256_TINY`).
@@ -227,7 +229,7 @@ per task was too slow/fragile on the SMALL environment, and concurrent first-bui
 raced the venv dir (Amendment 2; ARCHITECTURE §8).
 
 **Spend.** Composer + Spanner up ~20:08→~23:31 (first attempt, torn down) and
-~00:47→~02:2x (the green re-run) — the whole session ≈ $3, well under the ~$30 cap.
+~00:47→~02:30 (the green re-run) — the whole session ≈ $3, well under the ~$30 cap.
 The meter-stopped proof is the two empty environment lists above.
 
 ## Large profile — real-scale BigQuery cost (`fix/large-profile`, 2026-09-02)

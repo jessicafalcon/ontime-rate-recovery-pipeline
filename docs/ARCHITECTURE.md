@@ -707,7 +707,7 @@ simulation and the power table.
   out of scope. The DAG is pointed at the cloud by config, not code:
   `orchestration/tasks.py::build_tasks` reads `OTR_DAG_TARGET`/`OTR_DAG_PROJECT`
   at parse time (unset → the local DuckDB default, byte-identical to Phase 8b).
-  **Superseded (`fix/composer-cosmos`, ROADMAP item 7):** a NEW DAG
+  **Superseded (`fix/composer-cosmos-runtime` + `fix/composer-cosmos-liverun`, ROADMAP item 7):** a NEW DAG
   (`orchestration/dags/composer_dag.py`, `ontime_cloud`) now executes on the
   worker — dbt runs as Cosmos (`DbtTaskGroup`, `ExecutionMode.VIRTUALENV`,
   `LoadMode.DBT_MANIFEST`, one task per model over the unchanged project), and
@@ -717,7 +717,10 @@ simulation and the power table.
   (Composer-only, never `uv.lock`); the scheduler needs no dbt at parse (the
   precompiled manifest). The make-based `pipeline_dag.py` stays for
   `make test-int-airflow` but is no longer uploaded (one pipeline-shaped DAG per
-  bucket). 7a built and proved this plan-clean; 7b proves the live scheduled run.
+  bucket). 7a built and proved this plan-clean; 7b (`fix/composer-cosmos-liverun`)
+  then proved the live scheduled run — one green `ontime_cloud` run on Composer
+  (2026-09-04 session, green early 2026-09-05 UTC), Spanner `send_schedule` ==
+  `SEND_SCHEDULE_SHA256_TINY`, torn down the same session.
 - **Enabling `composer.googleapis.com` transitively enables `compute` and can
   fail with a transient INTERNAL error** (Phase 12, live). The first
   `enable_composer=true` apply failed at `google_project_service.composer`:

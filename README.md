@@ -201,5 +201,6 @@ The pipeline is complete on correctness, proven at real scale (200,000 users on
 BigQuery), and proven on a scheduled cloud run: the `ontime_cloud` DAG runs on
 Cloud Composer (dbt as Cosmos, one task per model; the landings and write-back as
 Kubernetes pods), and its cloud-written schedule is byte-identical to the frozen
-local truth — run live 2026-09-04, then torn down (`docs/RESULTS.md`). The
+local truth — proven live in the 2026-09-04 session (the green run completed early
+2026-09-05 UTC), then torn down (`docs/RESULTS.md`). The
 [docs/ROADMAP.md](docs/ROADMAP.md) plan is complete.

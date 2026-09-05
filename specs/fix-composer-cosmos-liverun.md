@@ -346,7 +346,9 @@ platform pin and a Cosmos runner tweak).
 - [ ] `BACKLOG.md` — the make-based-DAG row struck; the attachment / Spanner /
       kill-switch / operator_principal rows re-dispositioned
 - [ ] `docs/ARCHITECTURE.md` — §8 the two live-run gotchas (amd64 build; Cosmos
-      venv per-task cost + reuse fix)
+      venv per-task cost + reuse fix); §8 superseded-note tense
+- [ ] `docs/INSIGHT.md` — the "future work" paragraph retired (holdout, scale,
+      and the scheduled cloud run all landed — the plan is complete)
 - [ ] docs/PHASES.md — none (post-13 fix branch; the log points to ROADMAP)
 - [ ] docs/METRICS.md — none (no metric changes)
 - [ ] Spec amendments — none (7b is the last ROADMAP item; nothing later to

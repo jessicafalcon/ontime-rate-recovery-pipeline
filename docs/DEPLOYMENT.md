@@ -648,7 +648,7 @@ Dated lines (first live attempt, 2026-09-04):
   **`DagRun state=success`** (all 23 tasks — one per model + the freshness gate +
   the three KPO pods; `writeback OK: … 20 users, 20 written`; Spanner
   `send_schedule` = 20 rows, hash `== SEND_SCHEDULE_SHA256_TINY`). Torn down the
-  same session **2026-09-05** (~02:2x UTC): `Apply complete! Resources: 0 added,
+  same session **2026-09-05** (~02:30 UTC): `Apply complete! Resources: 0 added,
   0 changed, 51 destroyed`; `gcloud spanner instances list` /
   `gcloud composer environments list` → `Listed 0 items.`, `bq ls` → `raw`,
   `ontime`. **Nothing billable is up.** Whole session ≈ $3 (well under the ~$30
