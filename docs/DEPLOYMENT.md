@@ -576,3 +576,70 @@ Dated lines (Phase 12 demo-day run, 2026-09-01):
   ls` → `raw`, `ontime`. **Nothing billable is up.** Session spend ≈ cents (well
   under the $25 cap). The `composer.googleapis.com` / `compute` API enablements
   stay on (free); the state keeps the free-tier layer + `operator_principal`.
+
+### Cloud runtime — `ontime_cloud` (Cosmos + KPO) run and teardown (`fix/composer-cosmos-liverun`, 7b)
+
+7a built the runtime that EXECUTES on the worker (Cosmos + `KubernetesPodOperator`,
+`orchestration/dags/composer_dag.py` = `ontime_cloud`) and proved it plan-clean.
+7b is the supervised live run. It differs from the Phase 12 runbook above in three
+bootstrap steps found live, and it triggers a REAL scheduled run (not `dags test`
+— the pods must run on the workers). Ask-first, cloud-cost, same session; operator
+ADC for every `tf-*` (never the SA — the git-account trap).
+
+Runbook (each step authorized individually):
+
+0. **Entry meters + operator ADC.** `gcloud spanner instances list` /
+   `gcloud composer environments list` → `Listed 0 items.`; confirm the ADC is the
+   operator's (`~/.config/gcloud/application_default_credentials.json` is
+   `authorized_user`, not impersonating the SA).
+1. **Bootstrap once (live-found):**
+   - `gcloud services enable compute.googleapis.com composer.googleapis.com
+     --project=<project_id>` (the transitive-`compute` gotcha, §8).
+   - `gcloud auth configure-docker us-central1-docker.pkg.dev` — register the
+     Docker→Artifact-Registry credential helper, else the image push is
+     `Unauthenticated` (§8).
+2. **Precompile the manifest** (before the apply — Terraform's upload source must
+   exist): `make composer-dbt-manifest`.
+3. **Apply, carrying EVERY persisted toggle:** `make tf-apply PROJECT=<project_id>
+   CONFIRM=yes VARS='enable_composer=true,enable_spanner=true,enable_ci_wif=true,
+   github_repository=<owner>/<repo>,operator_principal=<operator>'` (omitting any of
+   the last three re-proposes DESTROYING the CI-WIF / operator resources). Expect
+   `0 to change, 0 to destroy`; env create 25–40+ min.
+4. **Build + push the image** (the AR repo now exists; the build is pinned to
+   `linux/amd64`, §8): `make build-serving-image PROJECT=<project_id> CONFIRM=yes`.
+5. **Trigger ONE real run** — unpause XOR trigger (NOT both: unpausing a `@daily`
+   DAG already creates one scheduled run; also triggering a manual run makes two
+   runs thrash `max_active_runs=1`). Prefer: `gcloud composer environments run
+   ontime --location us-central1 dags unpause -- ontime_cloud` and let the single
+   scheduled run execute (its `data_interval_end` lands all of tiny). Watch the
+   Airflow UI: the freshness gate, one task per model, the three KPO pods → all
+   success; `DagRun state=success`.
+6. **Verify parity + capture:** the `writeback` pod log `20 users, 20 written`
+   (re-run `0`); the Spanner `send_schedule` read-back → 20 rows
+   (`SEND_SCHEDULE_ROWS_TINY`), hash `== SEND_SCHEDULE_SHA256_TINY`. Record in
+   `docs/RESULTS.md`.
+7. **Teardown, same session:** `make tf-apply PROJECT=<project_id> CONFIRM=yes
+   VARS='enable_composer=false,enable_spanner=false,enable_ci_wif=true,
+   github_repository=<owner>/<repo>,operator_principal=<operator>' ALLOW_DESTROY=yes`;
+   then both meters `Listed 0 items.`, `bq ls` → `raw`, `ontime`.
+
+Dated lines (first live attempt, 2026-09-04):
+
+- Bootstrap: `compute`/`composer` APIs already enabled (from Phase 12, free);
+  `gcloud auth configure-docker us-central1-docker.pkg.dev` run once.
+- `enable_composer=true,enable_spanner=true` (+ the three persisted toggles)
+  applied **2026-09-04** (~20:08–20:47 UTC, `<project_id>`, operator ADC):
+  `Apply complete! Resources: 51 added, 0 changed, 0 destroyed` (env create
+  ~39 min). Image pushed (after the amd64 fix, §8); the `ontime_cloud` scheduled
+  run EXECUTED on the worker — `bq_load`/`spanner_load` KPO pods ✓,
+  `dbt.raw_events.source`/`.test` ✓ (freshness carve-out passes live), one task
+  per model + freshness gate + KPO pods rendered. **Not fully green:** the Cosmos
+  VIRTUALENV per-task `dbt-bigquery` install (~10 min, killed under memory pressure
+  on the SMALL env) blocked the remaining dbt tasks (§8). Two fixes landed
+  (`--platform linux/amd64`; `virtualenv_dir` venv reuse — Amendments 1–2); the
+  green run is the re-run.
+- Destroyed (`enable_composer=false,enable_spanner=false … ALLOW_DESTROY=yes`):
+  **2026-09-04** (~23:31 UTC, operator ADC): `Apply complete! Resources: 0 added,
+  0 changed, 51 destroyed`; `gcloud spanner instances list` /
+  `gcloud composer environments list` → `Listed 0 items.`, `bq ls` → `raw`,
+  `ontime`. **Nothing billable is up.** Session ≈ $2 (well under the ~$30 cap).

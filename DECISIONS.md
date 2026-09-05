@@ -158,6 +158,52 @@ annotated **Superseded by …** in place and never deleted.
 
 ## Appendix — by phase
 
+### fix/composer-cosmos-liverun (after Phase 13, 2026-09-04)
+
+*ROADMAP item 7b — the supervised live run of the 7a Cosmos + KPO runtime. Spec
+`specs/fix-composer-cosmos-liverun.md`. The first live session applied
+`enable_composer=true,enable_spanner=true` (carrying every persisted toggle —
+`enable_ci_wif`/`github_repository`/`operator_principal` — so the plan was
+`51 to add, 0 to change, 0 to destroy`), pushed the serving image, and triggered
+one scheduled `ontime_cloud` run. It did NOT reach a fully-green run; the green
+run + the `send_schedule` parity are deferred to a re-run. The stack was torn
+down the same session (`51 destroyed`, both meters `Listed 0 items.`), so nothing
+billable is up.*
+
+- **The live run proved the runtime EXECUTES on the worker (surpassing Phase 12's
+  Option A), and found two defects.** Proven live: the apply/teardown are clean
+  and cheap (~$2, ~3.5 h); the Cosmos + KPO DAG imports with NO errors on managed
+  Airflow; it renders EXACTLY one task per model + the `dbt source freshness` gate
+  + the three KPO pods (`tasks states-for-dag-run`); the KPO pods RUN on the
+  worker (`bq_load` ✓, `spanner_load` ✓); the source-freshness carve-out PASSES
+  live (`dbt.raw_events.source` ✓, `.test` ✓). The two defects are Amendments 1–2.
+- **Amendment 1 — the serving image must be built for `linux/amd64`.** A bare
+  `docker build` on the arm64 operator laptop shipped an arm64 image the amd64
+  Composer nodes could not pull (`ImagePullBackOff`). Fixed: `pipeline/cli.py`
+  pins `--platform linux/amd64` (`serving_build_command`), asserted by
+  `test_serving_image_build_targets_amd64`; verified live (the pods then pulled +
+  ran). Also a one-time `gcloud auth configure-docker` bootstrap (DEPLOYMENT).
+  A build-recipe correctness fix (not a data/write-path design change).
+- **Amendment 2 — Cosmos VIRTUALENV must REUSE a persistent venv (amends 7a
+  decision 2).** The default rebuilds a heavy `dbt-bigquery[pandas]` venv per task
+  (~10 min each, killed mid-install under memory pressure on the SMALL env), so
+  the ~13 dbt tasks could not green. Fixed: `ExecutionConfig(virtualenv_dir=…)`
+  (`composer_tasks.DBT_VENV_DIR`) so the venv is built once per worker and reused.
+  Execution MODE unchanged (still VIRTUALENV — dbt-bigquery stays out of the image
+  / `uv.lock`); the dbt project/macros/`profiles.yml` are untouched (a runner
+  tweak, no golden/pin/model/`.tf` semantic moved). Offline shape pinned by
+  `test_cosmos_group_renders_the_unchanged_project`; the LIVE effect (one install
+  per worker, a green run) is the re-run's proof. Rejected: an env-size bump
+  (masks the waste, more spend); `ExecutionMode.KUBERNETES` over a baked dbt image
+  (the robust fallback if the single per-worker install is still too fragile —
+  recorded, not built).
+- **The green run + records are deferred to a re-run, not faked.** README's
+  "not yet on a scheduled cloud run" line, ROADMAP item 7b "landed", the
+  `docs/RESULTS.md` live block, and closing the make-based-DAG BACKLOG row all
+  wait until a run is actually green (determinism/honesty: no proven claim before
+  the proof). This session committed the two fixes + this amendment + the §8
+  gotchas + the dated apply/teardown lines only.
+
 ### fix/composer-cosmos-runtime (after Phase 13, 2026-09-04)
 
 *ROADMAP item 7, split by density into 7a (this — the cloud runtime, built and

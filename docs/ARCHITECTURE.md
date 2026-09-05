@@ -730,6 +730,33 @@ simulation and the power table.
   by hand, then re-run `tf-apply` (the API enablement is idempotent — the second
   apply found it on and proceeded to the environment). `docs/DEPLOYMENT.md`
   carries it as a Composer bootstrap step.
+- **The serving image must be built for `linux/amd64`, not the build host**
+  (`fix/composer-cosmos-liverun`, live). The first `make build-serving-image` on
+  an Apple-Silicon (arm64) operator laptop ran a bare `docker build` and pushed an
+  `arm64` image; the Composer/GKE nodes are `amd64`, so the `KubernetesPodOperator`
+  pods failed to pull it — `ErrImagePull: … no match for platform in manifest` →
+  `ImagePullBackOff`, and the tasks hung "Awaiting for pod to start execution".
+  Fix (a build-recipe correctness fix, not a workaround): `pipeline/cli.py` pins
+  `docker build --platform linux/amd64` (`serving_build_command`,
+  `SERVING_PLATFORM`), so the image runs on the nodes regardless of the build
+  host. Also a one-time operator bootstrap: `gcloud auth configure-docker
+  us-central1-docker.pkg.dev` before the first push (else the push is
+  `Unauthenticated`). `docs/DEPLOYMENT.md` carries both.
+- **Cosmos `ExecutionMode.VIRTUALENV` must REUSE a persistent venv, or the
+  per-task install is too slow/fragile** (`fix/composer-cosmos-liverun`, live).
+  Left at the default, Cosmos builds a FRESH `dbt-bigquery[pandas]` virtualenv
+  (pandas/pyarrow/metricflow — a heavy tree) for EACH of the ~13 model/test/source
+  tasks; on the SMALL environment each build took ~9–12 min and was killed
+  mid-`pip install` under memory pressure (abrupt log cutoff, then task FAILED),
+  so no full-green run was reached. Fix (Amendment 2, still VIRTUALENV — dbt-bigquery
+  stays out of the Composer image / `uv.lock`): pass
+  `ExecutionConfig(virtualenv_dir=…)` (`composer_tasks.DBT_VENV_DIR`, a persistent
+  worker-local path) so the venv is built ONCE per worker and reused across every
+  task. Fallback if a single per-worker install is still too fragile on SMALL: an
+  environment-size bump or `ExecutionMode.KUBERNETES` over a baked dbt image
+  (recorded, not built). The freshness gate, the KPO pods (`bq_load`/`spanner_load`
+  ✓), and the one-task-per-model + source-freshness render were all proven live in
+  the same run; only the venv-install cost blocked completion.
 - **Two in-process `dbtRunner().invoke` builds against DIFFERENT DuckDB paths in
   one process are nondeterministic** (fix/holdout-eval, review). Every earlier
   in-process build (`test_scores`, `test_simulate`, `test_backfill`) targets ONE
