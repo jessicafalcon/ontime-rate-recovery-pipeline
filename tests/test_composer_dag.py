@@ -178,6 +178,9 @@ def test_dag_shape_loads_under_stubs(monkeypatch: Any) -> None:
     assert dag.kw["schedule"] == "@daily"
     assert dag.kw["catchup"] is False
     assert dag.kw["max_active_runs"] == 1
+    # serialize tasks so one builds the shared Cosmos venv, the rest reuse it
+    # (fix/composer-cosmos-liverun — concurrent first-builds race the venv dir).
+    assert dag.kw["max_active_tasks"] == 1
     assert dag.kw["default_args"]["retries"] == 0
 
     assert [op.task_id for op in _KPO.instances] == list(ct.KPO_STEPS)
@@ -232,6 +235,9 @@ def test_cosmos_group_renders_the_unchanged_project(monkeypatch: Any) -> None:
     assert record["profile"]["profile_name"] == ct.DBT_PROFILE_NAME
     assert record["profile"]["target_name"] == ct.DBT_TARGET_NAME
     assert record["execution"]["execution_mode"].name == ct.EXECUTION_MODE
+    # the venv is persisted + reused across tasks (fix/composer-cosmos-liverun):
+    # install dbt-bigquery once per worker, not a fresh ~10-min venv per task.
+    assert str(record["execution"]["virtualenv_dir"]) == ct.DBT_VENV_DIR
     assert record["render"]["load_method"].name == ct.LOAD_MODE
 
 

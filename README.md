@@ -8,8 +8,9 @@ This pipeline separates the three causes of a miss, hands the two the app
 caused back to engineering, and fixes the one it can: it learns when each user
 is actually reachable and recommends a send time inside their cohort's shared
 moment. It runs end to end on a laptop with no cloud account, and the same code
-runs on BigQuery and Spanner, ordered by an Airflow DAG run locally against
-those services (a scheduled Composer run is future work). The results
+runs on BigQuery and Spanner, ordered by an Airflow DAG — locally against those
+services, and as a scheduled run on Cloud Composer (proven live, then torn down).
+The results
 block and the chart below are generated from pinned test data and regenerate
 byte for byte; no figure in them is typed by hand.
 
@@ -197,7 +198,9 @@ did not. The operating manual is [CLAUDE.md](CLAUDE.md); the why-not-X log is
   one-week cut.
 
 The pipeline is complete on correctness, proven at real scale (200,000 users on
-BigQuery), not yet on a scheduled cloud run. What remains, in
-[docs/ROADMAP.md](docs/ROADMAP.md): a Composer-runnable DAG, so the pipeline
-runs on a schedule in the cloud. It is a [BACKLOG.md](BACKLOG.md) row with a
-trigger.
+BigQuery), and proven on a scheduled cloud run: the `ontime_cloud` DAG runs on
+Cloud Composer (dbt as Cosmos, one task per model; the landings and write-back as
+Kubernetes pods), and its cloud-written schedule is byte-identical to the frozen
+local truth — proven live in the 2026-09-04 session (the green run completed early
+2026-09-05 UTC), then torn down (`docs/RESULTS.md`). The
+[docs/ROADMAP.md](docs/ROADMAP.md) plan is complete.

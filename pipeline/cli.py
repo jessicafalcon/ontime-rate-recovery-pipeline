@@ -46,6 +46,22 @@ SERVING_IMAGE_REPO = "ontime"
 SERVING_IMAGE_NAME = "serving"
 SERVING_IMAGE_TAG = "latest"
 
+# The Composer/GKE worker architecture the KubernetesPodOperator pods run on. The
+# image MUST target it regardless of the build host — an Apple-Silicon operator
+# laptop otherwise ships an arm64 image the amd64 nodes cannot pull
+# (ImagePullBackOff), the live defect fix/composer-cosmos-liverun found
+# (ARCHITECTURE §8). A fixed declared target, not host-derived (Boundary contract).
+SERVING_PLATFORM = "linux/amd64"
+
+
+def serving_build_command(image: str, dockerfile: str) -> list[str]:
+    """The `docker build` argv for the serving image, pinned to SERVING_PLATFORM so
+    the pushed image always matches the Composer nodes — never the build host."""
+    return [
+        "docker", "build", "--platform", SERVING_PLATFORM,
+        "-f", dockerfile, "-t", image, ".",
+    ]  # fmt: skip
+
 
 def serving_image_uri(project: str) -> str:
     """The AR image path for a validated project — the ONE place the registry
@@ -95,7 +111,7 @@ def build_serving_image(project: str, confirm: str = "", origin: str = "") -> in
     image = serving_image_uri(project)
     dockerfile = landing.ROOT / "orchestration" / "images" / "serving" / "Dockerfile"
     build = subprocess.run(
-        ["docker", "build", "-f", str(dockerfile), "-t", image, "."],
+        serving_build_command(image, str(dockerfile)),
         cwd=str(landing.ROOT),
     )
     if build.returncode:

@@ -188,6 +188,50 @@ provisioned ~03:00→03:41 (~40 min, small env) — the session is well under $1
 far below the $25 cap. Exact billing lags a few hours in the console; the
 meter-stopped proof is the two empty environment lists above.
 
+## Cloud runtime — the scheduled run EXECUTES on Composer (`fix/composer-cosmos-liverun`, 2026-09-04)
+
+Phase 12 proved the make-based DAG only *parses* on Composer (Option A — the
+tasks fail on a toolchain-less worker). 7a built the Cosmos + `KubernetesPodOperator`
+runtime (`ontime_cloud`) that actually EXECUTES on the worker; 7b ran it live. One
+green scheduled run on real BigQuery + Spanner, then same-session teardown.
+
+**Session: 2026-09-04** — a first apply/attempt on 2026-09-04 UTC surfaced two
+runtime defects (below), fixed in-branch, and the **green re-run completed early
+2026-09-05 UTC** (`<project_id>`, operator `<operator>`; `tf-*` on operator ADC,
+the pods as the environment's Workload-Identity SA). Run ids / task timings /
+BigQuery job ids are non-deterministic and unasserted; the pinned evidence is the
+`send_schedule` row count (`tests/pins.py::SEND_SCHEDULE_ROWS_TINY` = 20) and hash
+(`SEND_SCHEDULE_SHA256_TINY`).
+
+| Step | Result |
+|---|---|
+| Apply (`enable_composer=true,enable_spanner=true` + persisted toggles) | `Apply complete! Resources: 51 added, 0 changed, 0 destroyed` (env create ~39 min) |
+| Image | `us-central1-docker.pkg.dev/<project_id>/ontime/serving:latest`, built `--platform linux/amd64` (Amendment 1) and pushed |
+| DAG import on managed Airflow | `dags list-import-errors` → `No data found` — the Cosmos + KPO DAG imports with NO error |
+| Scheduled run `ontime_cloud` (`scheduled__2026-09-04T00:00:00`) | **`DagRun … state=success`** — all 23 task instances succeeded |
+| DAG shape (live, `tasks states-for-dag-run`) | one task per model (`dbt.stg_events.run/.test` … `dbt.scores_send_time.run/.test`), the source-freshness gate (`dbt.raw_events.source`/`.test`, `dbt.raw_dim_user.source`/`.test`), and the three KPO pods (`bq_load`, `spanner_load`, `writeback`) — the live DAG↔task attachment + one-task-per-model proof |
+| KPO pods | ran the serving image on the worker: `bq_load` ✓, `spanner_load` ✓, `writeback` ✓ |
+| Source freshness (carve-out) | `dbt.raw_events.source` ✓ — passes live (the ~240-day-old fixture is inside `error_after: 3650 day`); its verdict feeds no model and no pin |
+| `writeback` pod | `writeback OK: <project_id>.ontime → spanner, 20 users, 20 written` |
+| **Spanner `send_schedule`** | **20 rows (= `SEND_SCHEDULE_ROWS_TINY`); hash `4dab2540…e491e` == `SEND_SCHEDULE_SHA256_TINY`** (rendered through the same golden renderer as the DuckDB stand-in — cross-store byte parity) |
+| Teardown (`enable_*=false … ALLOW_DESTROY=yes`) | `Apply complete! … 51 destroyed`; `gcloud spanner instances list` / `gcloud composer environments list` → `Listed 0 items.`; `bq ls` → `raw`, `ontime` |
+
+The cloud DAG's write is byte-identical to the frozen DuckDB truth — **the
+pipeline runs on a schedule in the cloud and gives the same answer**, produced by
+the runtime executing on the worker (past Option A).
+
+**Two live-found defects, fixed in this branch** (the value of a live run): the
+serving image had to be pinned to `linux/amd64` (an arm64 build-host shipped an
+image the amd64 nodes could not pull — Amendment 1), and Cosmos `VIRTUALENV` had
+to reuse a persistent per-worker venv with serial task execution
+(`virtualenv_dir` + `max_active_tasks=1`) — a fresh `dbt-bigquery[pandas]` venv
+per task was too slow/fragile on the SMALL environment, and concurrent first-builds
+raced the venv dir (Amendment 2; ARCHITECTURE §8).
+
+**Spend.** Composer + Spanner up ~20:08→~23:31 (first attempt, torn down) and
+~00:47→~02:30 (the green re-run) — the whole session ≈ $3, well under the ~$30 cap.
+The meter-stopped proof is the two empty environment lists above.
+
 ## Large profile — real-scale BigQuery cost (`fix/large-profile`, 2026-09-02)
 
 The one real-scale run: the `large` profile (200,000 users × 30 days, `shards`

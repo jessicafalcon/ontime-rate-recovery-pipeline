@@ -1040,7 +1040,26 @@ and `TRACES`. `make readme` reuses Phase 6's marker-confined writer
 pinned to) — not one number a reader sees is typed; `tests/test_readme.py` regenerates both artifacts
 byte-identically. No pin, fixture, model, or `.tf` moved.
 
-Open BACKLOG rows: **18** — `fix/composer-cosmos-runtime` (2026-09-04, ROADMAP
+Open BACKLOG rows: **17** — `fix/composer-cosmos-liverun` (2026-09-04, ROADMAP
+item 7b) RAN the Cloud-Composer runtime live and closed the make-based-DAG row.
+One green scheduled `ontime_cloud` run executed on the worker (Cosmos + KPO): all
+23 tasks success — one task per model + the source-freshness gate + the three KPO
+pods (`bq_load`/`spanner_load`/`writeback`) — and the Spanner `send_schedule`
+read-back is 20 rows hashing to `SEND_SCHEDULE_SHA256_TINY` (cross-store byte
+parity with the frozen DuckDB truth). Applied `enable_composer=true,enable_spanner=true`
+carrying every persisted toggle (`51 added, 0 changed, 0 destroyed`), then
+same-session toggle-flip teardown (`51 destroyed`, both meters `Listed 0 items.`);
+≈ $3, nothing billable left up. The live run found and fixed two 7a-runtime
+defects (the value of a live run): **Amendment 1** — the serving image must be
+built `--platform linux/amd64` (an arm64 build-host shipped an image the amd64
+GKE nodes could not pull → `ImagePullBackOff`); **Amendment 2** — Cosmos
+`ExecutionMode.VIRTUALENV` must reuse a persistent per-worker venv
+(`virtualenv_dir`) with `max_active_tasks=1` (a fresh `dbt-bigquery[pandas]` venv
+per task was too slow/fragile on the SMALL env, and concurrent first-builds raced
+the venv dir). Records-plus-two-runner-tweaks: no pin, fixture, golden, model, or
+`.tf` SEMANTIC moved (`docs/RESULTS.md` § cloud runtime, `docs/DEPLOYMENT.md`
+dated lines, ARCHITECTURE §8). **ROADMAP items 1–8 are all landed; the plan is
+complete.** Prior: `fix/composer-cosmos-runtime` (2026-09-04, ROADMAP
 item 7a) built the Cloud-Composer RUNTIME that actually EXECUTES on a worker,
 superseding Phase 12's parse-only Option A. A new DAG
 (`orchestration/dags/composer_dag.py`, `ontime_cloud`) runs dbt as Cosmos

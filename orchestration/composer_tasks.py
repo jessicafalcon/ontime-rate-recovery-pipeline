@@ -80,8 +80,17 @@ LOAD_MODE = "DBT_MANIFEST"
 # `dbt source freshness` gate upstream of every model (ROADMAP item 7's
 # "freshness first"); the models depend on it (Cosmos wires source → model).
 SOURCE_RENDERING_BEHAVIOR = "ALL"
-# The dbt adapter Cosmos installs per-run in the virtualenv (never in uv.lock).
+# The dbt adapter Cosmos installs in the virtualenv (never in uv.lock).
 DBT_ADAPTER_REQUIREMENT = "dbt-bigquery==1.9.1"
+
+# A PERSISTENT venv path so Cosmos installs dbt-bigquery ONCE per worker and
+# reuses it across every model/test/source task, instead of building a fresh
+# ~10-minute venv per task (fix/composer-cosmos-liverun: the live run showed the
+# per-task rebuild is too slow/fragile on the SMALL environment — ARCHITECTURE
+# §8). A worker-local writable path (not the GCSfuse `data/` mount, which is too
+# slow to run a venv from); reuse is per-worker, so a handful of installs, not
+# ~13. Cosmos locks the dir so concurrent tasks do not race the first build.
+DBT_VENV_DIR = "/home/airflow/dbt-venv"
 
 # The Airflow Variable holding the alert recipient (never a hardcoded address —
 # no PII in the tree; failure_email.py reads it). SMTP is a Composer airflow.cfg

@@ -70,9 +70,15 @@ data's own rule the served schedule recovers a large chunk of `timing_gap`. That
 is a strong *engineering* result and a *simulated* product result — the A/B in
 [AB_DESIGN.md](AB_DESIGN.md) is what would turn the second into a real one.
 
-The pipeline is complete on correctness, not on scale or on a scheduled cloud
-run. Three things would change this page, each ordered in
-[docs/ROADMAP.md](ROADMAP.md) with a [BACKLOG.md](../BACKLOG.md) trigger: a
-holdout evaluation on data the model never saw, which is not circular; a
-real-scale run with its cost measured; and a scheduled run on the managed
-scheduler rather than the local one.
+The three things that once qualified this page have all landed, on the
+[docs/ROADMAP.md](ROADMAP.md) plan (now complete): a temporal *holdout* on data
+the model never saw — non-circular, and the served schedule still wins
+([RESULTS.md](RESULTS.md)); a *real-scale* run (200,000 users on BigQuery) with
+its cost measured; and a *scheduled cloud run* on the managed scheduler — the
+`ontime_cloud` DAG on Cloud Composer (dbt as Cosmos, the landings and write-back
+as Kubernetes pods), whose cloud-written schedule is byte-identical to the frozen
+local truth, run live then torn down. So the honest read stands but its "not yet"
+list is gone: correctness is proven, the offline evidence is non-circular, the
+cost is real, and the pipeline has run on a schedule in the cloud. The one thing
+still *simulated* is the product lift — the A/B in [AB_DESIGN.md](AB_DESIGN.md)
+is what would make it real. See [PROCESS.md](PROCESS.md) for how it was built.

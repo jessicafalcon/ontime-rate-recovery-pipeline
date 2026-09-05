@@ -707,7 +707,7 @@ simulation and the power table.
   out of scope. The DAG is pointed at the cloud by config, not code:
   `orchestration/tasks.py::build_tasks` reads `OTR_DAG_TARGET`/`OTR_DAG_PROJECT`
   at parse time (unset → the local DuckDB default, byte-identical to Phase 8b).
-  **Superseded (`fix/composer-cosmos`, ROADMAP item 7):** a NEW DAG
+  **Superseded (`fix/composer-cosmos-runtime` + `fix/composer-cosmos-liverun`, ROADMAP item 7):** a NEW DAG
   (`orchestration/dags/composer_dag.py`, `ontime_cloud`) now executes on the
   worker — dbt runs as Cosmos (`DbtTaskGroup`, `ExecutionMode.VIRTUALENV`,
   `LoadMode.DBT_MANIFEST`, one task per model over the unchanged project), and
@@ -717,7 +717,10 @@ simulation and the power table.
   (Composer-only, never `uv.lock`); the scheduler needs no dbt at parse (the
   precompiled manifest). The make-based `pipeline_dag.py` stays for
   `make test-int-airflow` but is no longer uploaded (one pipeline-shaped DAG per
-  bucket). 7a built and proved this plan-clean; 7b proves the live scheduled run.
+  bucket). 7a built and proved this plan-clean; 7b (`fix/composer-cosmos-liverun`)
+  then proved the live scheduled run — one green `ontime_cloud` run on Composer
+  (2026-09-04 session, green early 2026-09-05 UTC), Spanner `send_schedule` ==
+  `SEND_SCHEDULE_SHA256_TINY`, torn down the same session.
 - **Enabling `composer.googleapis.com` transitively enables `compute` and can
   fail with a transient INTERNAL error** (Phase 12, live). The first
   `enable_composer=true` apply failed at `google_project_service.composer`:
@@ -730,6 +733,33 @@ simulation and the power table.
   by hand, then re-run `tf-apply` (the API enablement is idempotent — the second
   apply found it on and proceeded to the environment). `docs/DEPLOYMENT.md`
   carries it as a Composer bootstrap step.
+- **The serving image must be built for `linux/amd64`, not the build host**
+  (`fix/composer-cosmos-liverun`, live). The first `make build-serving-image` on
+  an Apple-Silicon (arm64) operator laptop ran a bare `docker build` and pushed an
+  `arm64` image; the Composer/GKE nodes are `amd64`, so the `KubernetesPodOperator`
+  pods failed to pull it — `ErrImagePull: … no match for platform in manifest` →
+  `ImagePullBackOff`, and the tasks hung "Awaiting for pod to start execution".
+  Fix (a build-recipe correctness fix, not a workaround): `pipeline/cli.py` pins
+  `docker build --platform linux/amd64` (`serving_build_command`,
+  `SERVING_PLATFORM`), so the image runs on the nodes regardless of the build
+  host. Also a one-time operator bootstrap: `gcloud auth configure-docker
+  us-central1-docker.pkg.dev` before the first push (else the push is
+  `Unauthenticated`). `docs/DEPLOYMENT.md` carries both.
+- **Cosmos `ExecutionMode.VIRTUALENV` must REUSE a persistent venv, or the
+  per-task install is too slow/fragile** (`fix/composer-cosmos-liverun`, live).
+  Left at the default, Cosmos builds a FRESH `dbt-bigquery[pandas]` virtualenv
+  (pandas/pyarrow/metricflow — a heavy tree) for EACH of the ~13 model/test/source
+  tasks; on the SMALL environment each build took ~9–12 min and was killed
+  mid-`pip install` under memory pressure (abrupt log cutoff, then task FAILED),
+  so no full-green run was reached. Fix (Amendment 2, still VIRTUALENV — dbt-bigquery
+  stays out of the Composer image / `uv.lock`): pass
+  `ExecutionConfig(virtualenv_dir=…)` (`composer_tasks.DBT_VENV_DIR`, a persistent
+  worker-local path) so the venv is built ONCE per worker and reused across every
+  task. Fallback if a single per-worker install is still too fragile on SMALL: an
+  environment-size bump or `ExecutionMode.KUBERNETES` over a baked dbt image
+  (recorded, not built). The freshness gate, the KPO pods (`bq_load`/`spanner_load`
+  ✓), and the one-task-per-model + source-freshness render were all proven live in
+  the same run; only the venv-install cost blocked completion.
 - **Two in-process `dbtRunner().invoke` builds against DIFFERENT DuckDB paths in
   one process are nondeterministic** (fix/holdout-eval, review). Every earlier
   in-process build (`test_scores`, `test_simulate`, `test_backfill`) targets ONE
