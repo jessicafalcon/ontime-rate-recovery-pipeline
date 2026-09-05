@@ -164,11 +164,13 @@ annotated **Superseded by …** in place and never deleted.
 `specs/fix-composer-cosmos-liverun.md`. The first live session applied
 `enable_composer=true,enable_spanner=true` (carrying every persisted toggle —
 `enable_ci_wif`/`github_repository`/`operator_principal` — so the plan was
-`51 to add, 0 to change, 0 to destroy`), pushed the serving image, and triggered
-one scheduled `ontime_cloud` run. It did NOT reach a fully-green run; the green
-run + the `send_schedule` parity are deferred to a re-run. The stack was torn
-down the same session (`51 destroyed`, both meters `Listed 0 items.`), so nothing
-billable is up.*
+`51 to add, 0 to change, 0 to destroy`), pushed the serving image, and ran one
+scheduled `ontime_cloud` run. The first attempt surfaced two 7a-runtime defects
+(Amendments 1–2); after fixing them the SAME-session re-run went fully GREEN — all
+23 tasks success, and the Spanner `send_schedule` read-back = 20 rows hashing to
+`SEND_SCHEDULE_SHA256_TINY` (cross-store byte parity). The stack was torn down the
+same session (`51 destroyed`, both meters `Listed 0 items.`), so nothing billable
+is up.*
 
 - **The live run proved the runtime EXECUTES on the worker (surpassing Phase 12's
   Option A), and found two defects.** Proven live: the apply/teardown are clean
@@ -188,21 +190,25 @@ billable is up.*
   decision 2).** The default rebuilds a heavy `dbt-bigquery[pandas]` venv per task
   (~10 min each, killed mid-install under memory pressure on the SMALL env), so
   the ~13 dbt tasks could not green. Fixed: `ExecutionConfig(virtualenv_dir=…)`
-  (`composer_tasks.DBT_VENV_DIR`) so the venv is built once per worker and reused.
+  (`composer_tasks.DBT_VENV_DIR`) so the venv is built once per worker and reused, AND `max_active_tasks=1` on the
+  DAG — two tasks starting concurrently both tried to create the shared venv and
+  RACED it (Cosmos's lock did not serialize them; live: `python3 -m venv` →
+  `Error [Errno 17] File exists`, the task failed in 1 s). Serial execution builds
+  the venv once (~6 min) and reuses it (~1.5 min/task).
   Execution MODE unchanged (still VIRTUALENV — dbt-bigquery stays out of the image
   / `uv.lock`); the dbt project/macros/`profiles.yml` are untouched (a runner
   tweak, no golden/pin/model/`.tf` semantic moved). Offline shape pinned by
-  `test_cosmos_group_renders_the_unchanged_project`; the LIVE effect (one install
-  per worker, a green run) is the re-run's proof. Rejected: an env-size bump
-  (masks the waste, more spend); `ExecutionMode.KUBERNETES` over a baked dbt image
-  (the robust fallback if the single per-worker install is still too fragile —
-  recorded, not built).
-- **The green run + records are deferred to a re-run, not faked.** README's
-  "not yet on a scheduled cloud run" line, ROADMAP item 7b "landed", the
-  `docs/RESULTS.md` live block, and closing the make-based-DAG BACKLOG row all
-  wait until a run is actually green (determinism/honesty: no proven claim before
-  the proof). This session committed the two fixes + this amendment + the §8
-  gotchas + the dated apply/teardown lines only.
+  `test_cosmos_group_renders_the_unchanged_project`; the LIVE effect was PROVEN by
+  the green re-run (venv built once, reused, all 23 tasks green). Rejected: an
+  env-size bump (masks the waste, more spend); `ExecutionMode.KUBERNETES` over a
+  baked dbt image (the robust fallback if reuse had still been too fragile —
+  recorded, not needed).
+- **No proven claim was written before the proof.** README's scheduled-cloud-run
+  line, ROADMAP item 7b "landed", the `docs/RESULTS.md` live block, and closing
+  the make-based-DAG BACKLOG row were written ONLY after the re-run went green
+  (determinism/honesty). The first-attempt session committed the two fixes + the
+  amendment + the gotchas + the dated lines; the green re-run then added the
+  "proven" records.
 
 ### fix/composer-cosmos-runtime (after Phase 13, 2026-09-04)
 

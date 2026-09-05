@@ -264,15 +264,21 @@ STOP-and-report path). Each is recorded here and in ARCHITECTURE §8.
   target environment* by INSTALLING THE VENV ONCE PER WORKER AND REUSING IT: the
   builder passes `ExecutionConfig(virtualenv_dir=…)` (a persistent worker-local
   path, `composer_tasks.DBT_VENV_DIR`), so Cosmos builds the venv once and reuses
-  it across every model/test/source task (~a handful of installs, not ~13). The
-  execution MODE is unchanged (still VIRTUALENV — dbt-bigquery stays out of the
-  Composer image / `uv.lock`); only the reuse is added. Rejected: bumping the
-  environment size (masks the per-task waste, more spend); `ExecutionMode.
-  KUBERNETES` over a baked dbt image (the robust fallback recorded below if the
-  single per-worker install still proves too fragile on SMALL — a larger change,
-  a new dbt image). The offline shape test pins `virtualenv_dir`
-  (`test_cosmos_group_renders_the_unchanged_project`); its LIVE effect (one
-  install per worker, a green run) is proven by the next supervised run.
+  it across every model/test/source task (~a handful of installs, not ~13). It
+  ALSO needs `max_active_tasks=1` on the DAG: two tasks starting concurrently both
+  try to create the shared venv and RACE it (Cosmos's lock does not serialize a
+  concurrent first-build — live: `python3 -m venv` → `Error [Errno 17] File
+  exists`, the task failed in 1 s), so serial execution makes exactly one task
+  build the venv and the rest reuse it. The execution MODE is unchanged (still
+  VIRTUALENV — dbt-bigquery stays out of the Composer image / `uv.lock`). Rejected:
+  bumping the environment size (masks the per-task waste, more spend);
+  `ExecutionMode.KUBERNETES` over a baked dbt image (the robust fallback if reuse
+  had still been too fragile — recorded, not needed). The offline shape test pins
+  `virtualenv_dir` + `max_active_tasks`
+  (`test_cosmos_group_renders_the_unchanged_project`,
+  `test_dag_shape_loads_under_stubs`); the LIVE
+  effect was PROVEN by the green re-run (venv built once ~6 min, reused ~1.5
+  min/task, all 23 tasks green, `send_schedule == SEND_SCHEDULE_SHA256_TINY`).
 
   Fallback, if the single per-worker install is still killed on SMALL: either an
   env-size bump or `ExecutionMode.KUBERNETES` over a dbt image (reusing the AR

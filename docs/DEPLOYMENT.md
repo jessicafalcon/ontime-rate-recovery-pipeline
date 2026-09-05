@@ -638,8 +638,18 @@ Dated lines (first live attempt, 2026-09-04):
   on the SMALL env) blocked the remaining dbt tasks (§8). Two fixes landed
   (`--platform linux/amd64`; `virtualenv_dir` venv reuse — Amendments 1–2); the
   green run is the re-run.
-- Destroyed (`enable_composer=false,enable_spanner=false … ALLOW_DESTROY=yes`):
-  **2026-09-04** (~23:31 UTC, operator ADC): `Apply complete! Resources: 0 added,
+- First attempt torn down **2026-09-04** (~23:31 UTC, operator ADC): `0 added, 0
+  changed, 51 destroyed`, both meters `Listed 0 items.` (the two fixes were then
+  committed before the re-run).
+- **Green re-run** — re-applied **2026-09-05** (~00:47 UTC, `51 added, 0 changed,
+  0 destroyed`), image re-pushed (amd64), the DAG re-uploaded with the venv-reuse
+  + `max_active_tasks=1` fixes; `dags unpause` created ONE scheduled run
+  (`scheduled__2026-09-04T00:00:00`) that ran serially and went
+  **`DagRun state=success`** (all 23 tasks — one per model + the freshness gate +
+  the three KPO pods; `writeback OK: … 20 users, 20 written`; Spanner
+  `send_schedule` = 20 rows, hash `== SEND_SCHEDULE_SHA256_TINY`). Torn down the
+  same session **2026-09-05** (~02:2x UTC): `Apply complete! Resources: 0 added,
   0 changed, 51 destroyed`; `gcloud spanner instances list` /
   `gcloud composer environments list` → `Listed 0 items.`, `bq ls` → `raw`,
-  `ontime`. **Nothing billable is up.** Session ≈ $2 (well under the ~$30 cap).
+  `ontime`. **Nothing billable is up.** Whole session ≈ $3 (well under the ~$30
+  cap). See `docs/RESULTS.md` § the cloud runtime for the run table.
